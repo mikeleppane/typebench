@@ -88,16 +88,17 @@ def classify_default(raw: RawRun) -> ResultClass:
 
     Convention shared by the stub and most checkers: 0 = clean, 1 = diagnostics
     found, anything else / signal / timeout / oom / env-error = failure.
-    Order matters: env-error and explicit OOM are checked before the generic
-    signal/exit-code fallbacks."""
+    Precedence (order matters, spec §5.1/§7): env-error, then explicit OOM,
+    then timeout, then the SIGKILL->OOM heuristic, then other signals -> crash,
+    then the exit-code table."""
     if raw.env_error:
         return ResultClass.FAILED_ENV
-    if raw.oom or raw.signal == _SIGKILL:
-        # Explicit cgroup OOM flag (Plan 4), or a bare SIGKILL treated as the
-        # OOM heuristic until cgroup OOM detection lands.
+    if raw.oom:
         return ResultClass.FAILED_OOM
     if raw.timed_out:
         return ResultClass.FAILED_TIMEOUT
+    if raw.signal == _SIGKILL:
+        return ResultClass.FAILED_OOM
     if raw.signal is not None:
         return ResultClass.FAILED_CRASH
     return _EXIT_CODE_CLASSES.get(raw.exit_code, ResultClass.FAILED_CRASH)

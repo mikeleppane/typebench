@@ -60,3 +60,9 @@ def test_classify_default_maps_classes() -> None:
         classify_default(RawRun(-1, None, False, False, "", "", env_error=True))
         == ResultClass.FAILED_ENV
     )
+
+
+def test_classify_default_timeout_precedes_sigkill_oom() -> None:
+    # Documented precedence: timeout (#3) is checked BEFORE the SIGKILL->OOM
+    # heuristic (#4). A run that is both timed_out and signal==9 is failed{timeout}.
+    assert classify_default(RawRun(0, 9, True, False, "", "")) == ResultClass.FAILED_TIMEOUT
