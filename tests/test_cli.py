@@ -39,5 +39,5 @@ def test_cli_run_rejects_unknown_tool(tmp_path: Path) -> None:
         app,
         ["run", "--tool", "nope", "--project", "demo", "--output", str(tmp_path / "r.json")],
     )
-    assert result.exit_code != 0
+    assert result.exit_code == 2
     assert "Unknown tool" in result.output
