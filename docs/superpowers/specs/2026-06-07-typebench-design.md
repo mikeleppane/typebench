@@ -249,6 +249,7 @@ Raw JSON is the open, neutral source of truth; README and Pages are rendered vie
 - **Integration:** a tiny fake project + a stub checker → exercise the full pipeline (preflight → prepare → measure → collect → render), including a deliberately-failing stub to prove the failure taxonomy and exit-code wrapper.
 - **Smoke (CI PR gate):** one real *small* project × all 4 checkers — not the full suite (keeps PR CI fast).
 - **Weekly-run guardrail:** a parse-sanity assertion (files > 0 on success, version-matched output format) that fails the scheduled run loudly when a floated checker changes its output format, rather than silently recording garbage.
+- **Code quality gate (LOCKED, all plans + CI):** `ruff` (strict rule set: E/W/F/I/N/UP/B/C4/SIM/PTH/RET/ARG/TID/TC/PL/RUF) for lint, `ruff format` for formatting, and **pyrefly `preset = "strict"`** for types — typebench **dogfoods pyrefly** on its own source. Enforced locally via `pre-commit` (local hooks → versions pinned by `uv.lock`) and in CI. `[tool.pyrefly]` lives at the repo root with `project-includes` so pyrefly does not silently no-op (it reports `0 errors` on files outside a project root). All functions, tests included, are fully type-annotated.
 
 ---
 

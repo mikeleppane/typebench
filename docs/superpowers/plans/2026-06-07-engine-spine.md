@@ -6,9 +6,26 @@
 
 **Architecture:** Adapter-driven engine (spec §3). Plan 1 implements the neutral core + a `StubAdapter` (a controllable fake checker) so the whole pipeline — probe → classify → time → collect → serialize — is testable with zero real-checker or cgroup dependencies. Real adapters, corpus, cgroup memory, and rendering arrive in later plans.
 
-**Tech Stack:** Python 3.12+, `uv` (env + packaging), `pydantic` v2 (models + schema + JSON), `typer` (CLI), `pytest` (tests), `hyperfine` (external binary, timing). cgroup/`systemd-run`, `scc`, and real checkers are NOT used in Plan 1.
+**Tech Stack:** Python 3.12+, `uv` (env + packaging), `pydantic` v2 (models + schema + JSON), `typer` (CLI), `pytest` (tests), `hyperfine` (external binary, timing). **Quality gate: `ruff` (lint + format, strict rule set) + `pyrefly` (strict preset) + `pre-commit`** — typebench dogfoods pyrefly on itself. cgroup/`systemd-run`, `scc`, and real checkers are NOT used in Plan 1.
 
 **Spec:** `docs/superpowers/specs/2026-06-07-typebench-design.md`
+
+---
+
+## Quality Gate (MANDATORY — runs before every commit)
+
+Every task's code must pass, and `pre-commit` (installed in Task 1) enforces it automatically on `git commit`:
+
+```bash
+uv run ruff format .          # format (must leave no changes)
+uv run ruff check .           # lint (strict rule set, zero findings)
+uv run pyrefly check          # strict-preset type check, zero errors
+uv run pytest                 # tests green
+```
+
+**Rules:** no `# noqa` / `# type: ignore` / `# pyrefly: ignore` without an inline reason and reviewer awareness. The gate is non-negotiable — a task is not "done" until all four are clean. If strict pyrefly flags real issues in example code from this plan, fix the code to satisfy strict mode (that is the point of the gate), keeping behavior identical.
+
+**Annotation convention (strict pyrefly):** every function — production code *and* tests — is fully annotated: parameters and return type. The snippets below show this on the smoke test (`def test_...() -> None:`); apply the same to every test in later tasks (`-> None`, and annotate fixtures, e.g. `tmp_path: Path`, `exit_code: int`, `expected: ResultClass`). This is mechanical and keeps the strict gate uniform across `src` and `tests`.
 
 ---
 
@@ -27,7 +44,8 @@
 
 | File | Responsibility |
 |------|----------------|
-| `pyproject.toml` | uv project, deps, pytest config |
+| `pyproject.toml` | uv project, deps, pytest + ruff (strict) + pyrefly (strict) config |
+| `.pre-commit-config.yaml` | local hooks: ruff check, ruff format, pyrefly strict (versions from uv.lock) |
 | `src/typebench/__init__.py` | package marker + version |
 | `src/typebench/models.py` | `ResultClass`, `ThreadMode` enums; `TimingStats`, `EnvFingerprint`, `RunResult` pydantic models (the results schema) |
 | `src/typebench/env.py` | `detect_env() -> EnvFingerprint` |
@@ -46,6 +64,7 @@
 
 **Files:**
 - Create: `pyproject.toml`
+- Create: `.pre-commit-config.yaml`
 - Create: `src/typebench/__init__.py`
 - Create: `tests/__init__.py`
 - Create: `tests/test_smoke.py`
@@ -57,12 +76,12 @@
 import typebench
 
 
-def test_package_has_version():
+def test_package_has_version() -> None:
     assert isinstance(typebench.__version__, str)
     assert typebench.__version__
 ```
 
-- [ ] **Step 2: Create `pyproject.toml`**
+- [ ] **Step 2: Create `pyproject.toml`** (deps + strict ruff + strict pyrefly + pytest)
 
 ```toml
 [project]
@@ -79,7 +98,12 @@ dependencies = [
 typebench = "typebench.cli:app"
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.8",
+    "pyrefly>=0.16",
+    "pre-commit>=3.7",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -91,9 +115,86 @@ packages = ["src/typebench"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+# ---------------------------------------------------------------------------
+# Ruff — strict, industry-standard rule set. ruff format owns line wrapping.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "N",        # pep8-naming
+    "UP",       # pyupgrade
+    "B",        # flake8-bugbear
+    "C4",       # flake8-comprehensions
+    "SIM",      # flake8-simplify
+    "PTH",      # flake8-use-pathlib
+    "RET",      # flake8-return
+    "ARG",      # flake8-unused-arguments
+    "TID",      # flake8-tidy-imports
+    "TC",       # flake8-type-checking
+    "PL",       # pylint
+    "RUF",      # ruff-specific
+]
+
+[tool.ruff.lint.pylint]
+max-args = 8  # run_single / CLI legitimately take several explicit params
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may use magic values and unused fixture args.
+"tests/**" = ["PLR2004", "ARG001", "ARG002"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+# ---------------------------------------------------------------------------
+# Pyrefly — STRICT preset. typebench dogfoods the checker it benchmarks.
+# project-includes at the root prevents pyrefly's "no project root -> 0 errors"
+# silent no-op (verified against the live config schema: Preset::Strict).
+# ---------------------------------------------------------------------------
+[tool.pyrefly]
+project-includes = ["src", "tests"]
+search-path = ["src"]
+python-version = "3.12"
+python-platform = "linux"
+preset = "strict"
 ```
 
-- [ ] **Step 3: Create package + test package markers**
+- [ ] **Step 3: Create the pre-commit config**
+
+`.pre-commit-config.yaml` — all hooks are `local`/`system` so they run the exact
+ruff and pyrefly pinned in `uv.lock` (one source of truth, no network, no rev drift):
+```yaml
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+      - id: pyrefly
+        name: pyrefly check (strict)
+        entry: uv run pyrefly check
+        language: system
+        types: [python]
+        pass_filenames: false
+```
+
+- [ ] **Step 4: Create package + test package markers**
 
 `src/typebench/__init__.py`:
 ```python
@@ -106,21 +207,32 @@ __version__ = "0.1.0"
 ```python
 ```
 
-- [ ] **Step 4: Install and run the test**
+- [ ] **Step 5: Install deps and the git hook**
 
 Run:
 ```bash
 cd /home/mikelep/personal/dev/typebench
 uv sync
+uv run pre-commit install
+```
+Expected: env synced; `pre-commit installed at .git/hooks/pre-commit`.
+
+- [ ] **Step 6: Run the full quality gate + test**
+
+Run:
+```bash
+uv run ruff format .
+uv run ruff check .
+uv run pyrefly check
 uv run pytest tests/test_smoke.py -v
 ```
-Expected: PASS (1 passed).
+Expected: ruff format reports "1 file reformatted" or "left unchanged"; ruff check passes (`All checks passed!`); pyrefly reports `0 errors`; pytest 1 passed.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit** (pre-commit re-runs the gate automatically)
 
 ```bash
-git add pyproject.toml uv.lock src/ tests/
-git commit -m "feat(scaffold): typebench package skeleton with uv + pytest"
+git add pyproject.toml uv.lock .pre-commit-config.yaml src/ tests/
+git commit -m "feat(scaffold): package skeleton with uv, strict ruff + pyrefly, pre-commit"
 ```
 
 ---
@@ -1374,6 +1486,7 @@ git commit -m "test(e2e): pipeline class round-trip + project README"
 
 ## Definition of Done (Plan 1)
 
+- **Quality gate green:** `uv run ruff format --check .` (no changes), `uv run ruff check .` (`All checks passed!`), `uv run pyrefly check` (`0 errors`), and `pre-commit` installed + passing on commit.
 - `uv run pytest -v` is green (skips allowed only for hyperfine-gated tests when hyperfine is absent).
 - `uv run typebench run --tool stub --project demo --output results.json` writes a schema-valid `RunResult`.
 - With hyperfine installed, that record contains real wall-time statistics; without it, `timing` is `null` and the result class is still correct.
