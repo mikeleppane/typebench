@@ -47,16 +47,16 @@ uv run pytest                 # tests green
 | `pyproject.toml` | uv project, deps, pytest + ruff (strict) + pyrefly (strict) config |
 | `.pre-commit-config.yaml` | local hooks: ruff check, ruff format, pyrefly strict (versions from uv.lock) |
 | `src/typebench/__init__.py` | package marker + version |
-| `src/typebench/models.py` | `ResultClass`, `ThreadMode` enums; `TimingStats`, `EnvFingerprint`, `RunResult` pydantic models (the results schema) |
+| `src/typebench/models.py` | `ResultClass`, `ThreadMode` enums; `TimingStats`, `EnvFingerprint`, `RunResult` pydantic models (results schema — incl. failure metadata + `thread_mode_enforced`) |
 | `src/typebench/env.py` | `detect_env() -> EnvFingerprint` |
-| `src/typebench/wrapper.py` | `RawRun`, `run_command()`, `classify_default()`, and the `python -m typebench.wrapper` CLI used as hyperfine's command (normalizes exit codes) |
-| `src/typebench/adapters/base.py` | `Adapter` protocol |
-| `src/typebench/adapters/stub.py` | `StubAdapter` wrapping the fake checker |
+| `src/typebench/wrapper.py` | `RawRun` (incl. `env_error`), `run_command()` (captures env errors + OOM heuristic), `classify_default()`, and the `python -m typebench.wrapper` CLI used as hyperfine's command (normalizes exit codes) |
+| `src/typebench/adapters/base.py` | `Adapter` protocol (final-ish §4 surface) + `ParallelismCap` |
+| `src/typebench/adapters/stub.py` | `StubAdapter` driving the in-package fake checker |
+| `src/typebench/_fake_checker.py` | controllable fake checker (exit code, sleep, signal, diagnostics, files); ships in the wheel so `typebench run --tool stub` works after install |
 | `src/typebench/timing.py` | `parse_hyperfine_json()` (pure) + `run_timing()` (invokes hyperfine) |
 | `src/typebench/collector.py` | `run_single()` pipeline → `RunResult` |
 | `src/typebench/cli.py` | `typer` app, `typebench run`, adapter registry |
-| `tests/fixtures/fake_checker.py` | controllable fake checker (exit code, sleep, diagnostics, files) |
-| `tests/test_*.py` | one test module per source module + an end-to-end test |
+| `tests/test_*.py` | one test module per source module + an end-to-end test covering every taxonomy class |
 
 ---
 
@@ -149,6 +149,10 @@ max-args = 8  # run_single / CLI legitimately take several explicit params
 [tool.ruff.lint.per-file-ignores]
 # Tests may use magic values and unused fixture args.
 "tests/**" = ["PLR2004", "ARG001", "ARG002"]
+# Adapter implementations conform to the Protocol signature, so they accept
+# args the stub does not use yet (project/thread_mode/stderr); real adapters
+# (Plan 2) use them. Renaming to _-prefixed would break keyword calls.
+"src/typebench/adapters/**" = ["ARG002"]
 
 [tool.ruff.format]
 docstring-code-format = true
@@ -310,6 +314,7 @@ def test_run_result_round_trips_through_json():
     restored = RunResult.model_validate_json(blob)
     assert restored == result
     assert restored.schema_version == 1
+    assert restored.thread_mode_enforced is False  # default; Plan 4 sets it true
     assert json.loads(blob)["result_class"] == "diagnostics"
 
 
@@ -341,6 +346,42 @@ def test_run_result_rejects_unknown_fields():
                 "bogus": True,
             }
         )
+
+
+def test_thread_mode_enforced_defaults_false():
+    # Plan 1 records the requested thread_mode but applies no CPU affinity, so
+    # the JSON must never claim a methodology that was not enforced (spec §5.3).
+    result = RunResult(
+        tool="stub",
+        tool_version="1.0",
+        project="demo",
+        thread_mode=ThreadMode.ONE_CORE,
+        result_class=ResultClass.CLEAN,
+        real_exit_code=0,
+        env=_env(),
+    )
+    assert result.thread_mode_enforced is False
+
+
+def test_failure_metadata_round_trips():
+    # Enough detail to audit failed{env} vs failed{crash} after the fact (spec §5.1).
+    result = RunResult(
+        tool="stub",
+        tool_version="1.0",
+        project="demo",
+        thread_mode=ThreadMode.ALL_CORES,
+        result_class=ResultClass.FAILED_ENV,
+        real_exit_code=-1,
+        signal=None,
+        timed_out=False,
+        oom=False,
+        error_detail="No such file or directory: 'typebench-nonexistent-checker'",
+        env=_env(),
+    )
+    restored = RunResult.model_validate_json(result.model_dump_json())
+    assert restored == result
+    assert restored.error_detail is not None
+    assert restored.timing is None
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -410,7 +451,11 @@ class EnvFingerprint(BaseModel):
 
 
 class RunResult(BaseModel):
-    """One (project x tool x thread-mode) measurement record."""
+    """One (project x tool x thread-mode) measurement record.
+
+    Plan 1 writes ONE record per file. The eventual results file (Plan 5)
+    wraps many records in an envelope ({schema_version, runs: [...]}); the
+    per-record schema_version below versions the record shape until then."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -419,8 +464,18 @@ class RunResult(BaseModel):
     tool_version: str
     project: str
     thread_mode: ThreadMode
+    # Honesty flag (spec §5.3): True only once CPU affinity / a hard cap is
+    # actually applied (Plan 4). Plan 1 never enforces, so it stays False — the
+    # record must not imply a methodology the engine did not run.
+    thread_mode_enforced: bool = False
     result_class: ResultClass
     real_exit_code: int
+    # Failure metadata — enough to audit failed{env} vs failed{crash}/{oom}
+    # after the fact (spec §5.1). None/False on success.
+    signal: int | None = None
+    timed_out: bool = False
+    oom: bool = False
+    error_detail: str | None = None
     diagnostics: int | None = None
     files: int | None = None
     timing: TimingStats | None = None
@@ -430,7 +485,7 @@ class RunResult(BaseModel):
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest tests/test_models.py -v`
-Expected: PASS (5 passed).
+Expected: PASS (7 passed).
 
 - [ ] **Step 5: Commit**
 
@@ -526,31 +581,45 @@ git commit -m "feat(env): minimal environment fingerprint"
 
 `tests/test_wrapper.py`:
 ```python
+import os
 import sys
+
+import pytest
 
 from typebench.models import ResultClass
 from typebench.wrapper import RawRun, classify_default, run_command
 
 
-def test_run_command_captures_clean_exit():
+def test_run_command_captures_clean_exit() -> None:
     raw = run_command([sys.executable, "-c", "print('hi')"], timeout=10)
     assert raw.exit_code == 0
     assert raw.timed_out is False
+    assert raw.env_error is False
     assert "hi" in raw.stdout
     assert raw.signal is None
 
 
-def test_run_command_captures_nonzero_exit():
+def test_run_command_captures_nonzero_exit() -> None:
     raw = run_command([sys.executable, "-c", "import sys; sys.exit(1)"], timeout=10)
     assert raw.exit_code == 1
 
 
-def test_run_command_times_out():
+def test_run_command_times_out() -> None:
     raw = run_command([sys.executable, "-c", "import time; time.sleep(5)"], timeout=1)
     assert raw.timed_out is True
 
 
-def test_run_command_records_signal():
+def test_run_command_reports_env_error_for_missing_binary() -> None:
+    # A missing executable is an environment failure, not a crash: run_command
+    # captures it (does NOT propagate) so the collector can record failed{env}.
+    raw = run_command(["typebench-nonexistent-checker-xyz"], timeout=10)
+    assert raw.env_error is True
+    assert raw.timed_out is False
+    assert raw.stderr  # carries the OSError text for the audit trail
+
+
+@pytest.mark.skipif(os.name != "posix", reason="signal semantics are POSIX-specific")
+def test_run_command_records_signal() -> None:
     # SIGSEGV (-11) -> Python returncode is negative.
     raw = run_command(
         [sys.executable, "-c", "import os, signal; os.kill(os.getpid(), signal.SIGSEGV)"],
@@ -559,13 +628,21 @@ def test_run_command_records_signal():
     assert raw.signal == 11
 
 
-def test_classify_default_maps_classes():
+def test_classify_default_maps_classes() -> None:
     assert classify_default(RawRun(0, None, False, False, "", "")) == ResultClass.CLEAN
     assert classify_default(RawRun(1, None, False, False, "", "")) == ResultClass.DIAGNOSTICS
     assert classify_default(RawRun(2, None, False, False, "", "")) == ResultClass.FAILED_CRASH
     assert classify_default(RawRun(0, None, True, False, "", "")) == ResultClass.FAILED_TIMEOUT
     assert classify_default(RawRun(11, 11, False, False, "", "")) == ResultClass.FAILED_CRASH
+    # Explicit OOM flag (cgroup-sourced, Plan 4) wins over everything.
     assert classify_default(RawRun(137, None, False, True, "", "")) == ResultClass.FAILED_OOM
+    # SIGKILL (9) with no explicit flag -> OOM heuristic until cgroup detection lands.
+    assert classify_default(RawRun(-9, 9, False, False, "", "")) == ResultClass.FAILED_OOM
+    # Environment error -> failed{env}.
+    assert (
+        classify_default(RawRun(-1, None, False, False, "", "", env_error=True))
+        == ResultClass.FAILED_ENV
+    )
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -583,10 +660,15 @@ as hyperfine's command so hyperfine does not abort on diagnostics."""
 
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass
 
 from typebench.models import ResultClass
+
+# OOM-killer signal. A bare SIGKILL with no cgroup OOM flag is treated as an
+# OOM heuristic until cgroup OOM detection lands (Plan 4 sets RawRun.oom).
+_SIGKILL = 9
 
 
 @dataclass(frozen=True)
@@ -597,17 +679,25 @@ class RawRun:
     oom: bool
     stdout: str
     stderr: str
+    env_error: bool = False
 
 
-def run_command(argv: list[str], timeout: float) -> RawRun:
-    """Run argv to completion, capturing the real outcome. Never raises on a
-    nonzero exit; only environment errors (e.g. binary missing) propagate."""
+def run_command(
+    argv: list[str], timeout: float, env: dict[str, str] | None = None
+) -> RawRun:
+    """Run argv to completion, capturing the real outcome. Never raises: a
+    nonzero exit, a timeout, a signal death, AND an environment error (missing
+    binary / not executable) are all captured as a RawRun so the caller can
+    record the right §7 class. `env` is merged over the inherited environment
+    (adapters inject e.g. TY_MAX_PARALLELISM)."""
+    run_env = {**os.environ, **env} if env else None
     try:
         proc = subprocess.run(
             argv,
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=run_env,
         )
     except subprocess.TimeoutExpired as exc:
         return RawRun(
@@ -617,6 +707,17 @@ def run_command(argv: list[str], timeout: float) -> RawRun:
             oom=False,
             stdout=exc.stdout or "" if isinstance(exc.stdout, str) else "",
             stderr=exc.stderr or "" if isinstance(exc.stderr, str) else "",
+        )
+    except OSError as exc:
+        # Missing binary, not executable, etc. -> environment failure (§7).
+        return RawRun(
+            exit_code=-1,
+            signal=None,
+            timed_out=False,
+            oom=False,
+            stdout="",
+            stderr=str(exc),
+            env_error=True,
         )
     returncode = proc.returncode
     signal = -returncode if returncode < 0 else None
@@ -634,11 +735,17 @@ def classify_default(raw: RawRun) -> ResultClass:
     """Generic classifier. Real per-tool exit maps arrive in Plan 2 (§7).
 
     Convention shared by the stub and most checkers: 0 = clean, 1 = diagnostics
-    found, anything else / signal / timeout / oom = failure."""
+    found, anything else / signal / timeout / oom / env-error = failure.
+    Order matters: env-error and explicit OOM are checked before the generic
+    signal/exit-code fallbacks."""
+    if raw.env_error:
+        return ResultClass.FAILED_ENV
     if raw.oom:
         return ResultClass.FAILED_OOM
     if raw.timed_out:
         return ResultClass.FAILED_TIMEOUT
+    if raw.signal == _SIGKILL:
+        return ResultClass.FAILED_OOM
     if raw.signal is not None:
         return ResultClass.FAILED_CRASH
     if raw.exit_code == 0:
@@ -651,7 +758,7 @@ def classify_default(raw: RawRun) -> ResultClass:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest tests/test_wrapper.py -v`
-Expected: PASS (6 passed).
+Expected: PASS (6 passed on Linux/macOS; 5 passed + 1 skipped where the SIGSEGV test is skipped on non-POSIX).
 
 - [ ] **Step 5: Commit**
 
@@ -669,6 +776,8 @@ git commit -m "feat(wrapper): command runner and default result classifier"
 - Test: `tests/test_wrapper_cli.py`
 
 The timing pass runs each invocation many times under hyperfine. hyperfine aborts on any nonzero exit, so we hand it `python -m typebench.wrapper -- <argv>`, which runs the real command and **exits 0 for measured-success** (clean or diagnostics) and nonzero only for real failures.
+
+> **Methodology note — wrapper overhead (record in published methodology).** hyperfine times the *wrapped* command, so every measured run includes a Python interpreter start (~30–50 ms) plus one nested `subprocess.run` spawn. The offset is (a) **constant across all four tools**, so it nearly cancels in the inter-checker ratios the trend charts use (spec §5.7/§11), and (b) absorbed by the per-run calibration baseline (§5.7). It is *not* negligible for the smallest-bucket × fastest-tool cells, where it can approach the ~10% noise floor (§5.6) — so it is documented, not hidden. The wrapper is kept (rather than hyperfine's `--ignore-failure` on the bare command) because `--ignore-failure` would silently *time a crash* that occurs mid-timing-loop, whereas the wrapper + `check=True` aborts loudly. Plan 4/6 may subtract a measured wrapper-only baseline if the smallest cells prove sensitive.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -760,23 +869,25 @@ git commit -m "feat(wrapper): CLI entrypoint that normalizes exit codes for hype
 - Create: `src/typebench/adapters/__init__.py`
 - Create: `src/typebench/adapters/base.py`
 - Create: `src/typebench/adapters/stub.py`
-- Create: `tests/fixtures/__init__.py`
-- Create: `tests/fixtures/fake_checker.py`
+- Create: `src/typebench/_fake_checker.py`
 - Test: `tests/test_stub_adapter.py`
+
+> The fake checker lives **in the package** (`src/typebench/_fake_checker.py`), not under `tests/`, so it ships in the wheel — the `stub` adapter is in the CLI registry, so `typebench run --tool stub` must work from an installed package, not only a source checkout. It is invoked as `python -m typebench._fake_checker`, which also removes the brittle `parents[3]` path walk.
 
 - [ ] **Step 1: Write the failing test**
 
 `tests/test_stub_adapter.py`:
 ```python
+from typebench.adapters.base import Adapter
 from typebench.adapters.stub import StubAdapter
 from typebench.models import ResultClass, ThreadMode
 from typebench.wrapper import run_command
 
 
-def test_stub_command_runs_and_reports_diagnostics():
+def test_stub_command_runs_and_reports_diagnostics() -> None:
     adapter = StubAdapter(exit_code=1, diagnostics=4, files=9)
-    argv = adapter.command(project="demo", thread_mode=ThreadMode.ALL_CORES)
-    raw = run_command(argv, timeout=10)
+    argv, env = adapter.command(project="demo", thread_mode=ThreadMode.ALL_CORES)
+    raw = run_command(argv, timeout=10, env=env)
     assert raw.exit_code == 1
     diagnostics, files = adapter.parse(raw.stdout, raw.stderr, raw.exit_code)
     assert diagnostics == 4
@@ -784,19 +895,35 @@ def test_stub_command_runs_and_reports_diagnostics():
     assert adapter.classify(raw) == ResultClass.DIAGNOSTICS
 
 
-def test_stub_command_clean():
+def test_stub_command_clean() -> None:
     adapter = StubAdapter(exit_code=0, diagnostics=0, files=5)
-    raw = run_command(adapter.command("demo", ThreadMode.ALL_CORES), timeout=10)
+    argv, env = adapter.command("demo", ThreadMode.ALL_CORES)
+    raw = run_command(argv, timeout=10, env=env)
     assert adapter.classify(raw) == ResultClass.CLEAN
     assert adapter.parse(raw.stdout, raw.stderr, raw.exit_code) == (0, 5)
 
 
-def test_stub_version_is_stable():
+def test_stub_missing_binary_is_env_failure() -> None:
+    adapter = StubAdapter(missing_binary=True)
+    argv, env = adapter.command("demo", ThreadMode.ALL_CORES)
+    raw = run_command(argv, timeout=10, env=env)
+    assert raw.env_error is True
+    assert adapter.classify(raw) == ResultClass.FAILED_ENV
+
+
+def test_stub_satisfies_adapter_protocol() -> None:
+    # runtime_checkable: the stub is a structural Adapter (catches drift early).
+    assert isinstance(StubAdapter(), Adapter)
+
+
+def test_stub_version_is_stable() -> None:
     assert StubAdapter().version() == "stub-1.0"
 
 
-def test_stub_clear_cache_is_noop():
-    StubAdapter().clear_cache("demo")  # must not raise
+def test_stub_clear_cache_and_prepare_are_noops() -> None:
+    adapter = StubAdapter()
+    adapter.clear_cache("demo")  # must not raise
+    assert adapter.prepare_command("demo") is None  # stateless: nothing to clear
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -812,14 +939,31 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'typebench.adapters'`.
 
 `src/typebench/adapters/base.py`:
 ```python
-"""Adapter protocol — the only checker-specific surface (spec §4)."""
+"""Adapter protocol — the only checker-specific surface (spec §4).
+
+The protocol is pinned to its *final-ish* shape now so real adapters (Plan 2)
+add behavior, not breaking signatures: `command` already returns (argv, env)
+for vars like TY_MAX_PARALLELISM, and `install` / `parallelism_cap` /
+`prepare_command` exist as the stable surface. The spine only calls
+command/parse/classify/clear_cache/prepare_command/version; install and
+parallelism_cap are no-ops on the stub and are wired in Plans 2/4."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 from typebench.models import ResultClass, ThreadMode
 from typebench.wrapper import RawRun, classify_default
+
+
+@dataclass(frozen=True)
+class ParallelismCap:
+    """How a tool is constrained in the 1-core track (spec §5.3). `hard_cap` is
+    the honesty flag: True = a real worker cap, False = best-effort only."""
+
+    mechanism: str
+    hard_cap: bool
 
 
 @runtime_checkable
@@ -830,10 +974,21 @@ class Adapter(Protocol):
         """Resolved checker version string."""
         ...
 
-    def command(self, project: str, thread_mode: ThreadMode) -> list[str]:
-        """argv that runs the checker on `project` under `thread_mode`.
+    def install(self) -> str:
+        """Resolve + verify the expected distribution; return the resolved
+        version (spec §4). Plan 2 implements real verification; stub no-ops."""
+        ...
 
-        Plan 2 adds the normalized-config argument (§6)."""
+    def command(
+        self, project: str, thread_mode: ThreadMode
+    ) -> tuple[list[str], dict[str, str]]:
+        """(argv, extra_env) that runs the checker on `project` under
+        `thread_mode`. `extra_env` carries vars like TY_MAX_PARALLELISM (§5.3),
+        empty when none. Plan 2 adds the normalized-config argument (§6)."""
+        ...
+
+    def parallelism_cap(self, thread_mode: ThreadMode) -> ParallelismCap:
+        """Declare how this tool is constrained in the 1-core track (§5.3)."""
         ...
 
     def parse(
@@ -850,39 +1005,52 @@ class Adapter(Protocol):
         """Remove any checker cache so every run is cold (§5.2)."""
         ...
 
+    def prepare_command(self, project: str) -> str | None:
+        """A hyperfine-safe shell command that clears the checker cache before
+        EVERY timed run (§5.2, §5.4), or None when the tool is stateless. Wired
+        into `hyperfine --prepare` by the collector so warmups/runs stay cold."""
+        ...
+
 
 def default_classify(raw: RawRun) -> ResultClass:
     """Shared fallback so adapters can delegate to the generic map."""
     return classify_default(raw)
 ```
 
-`tests/fixtures/__init__.py`:
-```python
-```
-
-`tests/fixtures/fake_checker.py`:
+`src/typebench/_fake_checker.py`:
 ```python
 """A controllable fake type checker. Prints a JSON summary and exits with a
-chosen code, so the engine can be tested without any real checker."""
+chosen code — optionally after a sleep, or by killing itself with a signal —
+so the engine can be tested without any real checker. Ships in the package so
+the stub adapter works from an installed wheel, not only a source checkout."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="fake_checker")
+    parser = argparse.ArgumentParser(prog="typebench._fake_checker")
     parser.add_argument("--exit-code", type=int, default=0)
     parser.add_argument("--sleep", type=float, default=0.0)
     parser.add_argument("--diagnostics", type=int, default=0)
     parser.add_argument("--files", type=int, default=0)
+    parser.add_argument(
+        "--signal",
+        type=int,
+        default=None,
+        help="If set, kill self with this signal (9 = OOM-like, 11 = crash).",
+    )
     ns = parser.parse_args()
 
     if ns.sleep:
         time.sleep(ns.sleep)
+    if ns.signal is not None:
+        os.kill(os.getpid(), ns.signal)
     print(json.dumps({"diagnostics": ns.diagnostics, "files": ns.files}))
     return ns.exit_code
 
@@ -893,22 +1061,18 @@ if __name__ == "__main__":
 
 `src/typebench/adapters/stub.py`:
 ```python
-"""StubAdapter — drives tests/fixtures/fake_checker.py. Lets the full pipeline
-be exercised deterministically (chosen exit code, diagnostics, files, duration)."""
+"""StubAdapter — drives typebench._fake_checker. Exercises the full pipeline
+deterministically: chosen exit code, diagnostics, files, duration, a signal
+death, or a missing-binary environment failure."""
 
 from __future__ import annotations
 
 import json
 import sys
-from pathlib import Path
 
-from typebench.adapters.base import default_classify
+from typebench.adapters.base import ParallelismCap, default_classify
 from typebench.models import ResultClass, ThreadMode
 from typebench.wrapper import RawRun
-
-_FAKE_CHECKER = (
-    Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "fake_checker.py"
-)
 
 
 class StubAdapter:
@@ -920,19 +1084,33 @@ class StubAdapter:
         diagnostics: int = 0,
         files: int = 0,
         sleep: float = 0.0,
+        signal: int | None = None,
+        missing_binary: bool = False,
     ) -> None:
         self._exit_code = exit_code
         self._diagnostics = diagnostics
         self._files = files
         self._sleep = sleep
+        self._signal = signal
+        self._missing_binary = missing_binary
 
     def version(self) -> str:
         return "stub-1.0"
 
-    def command(self, project: str, thread_mode: ThreadMode) -> list[str]:
-        return [
+    def install(self) -> str:
+        # No distribution to verify; real checks land in Plan 2.
+        return self.version()
+
+    def command(
+        self, project: str, thread_mode: ThreadMode
+    ) -> tuple[list[str], dict[str, str]]:
+        if self._missing_binary:
+            # Nonexistent executable -> run_command raises OSError -> failed{env}.
+            return (["typebench-nonexistent-checker-xyz"], {})
+        argv = [
             sys.executable,
-            str(_FAKE_CHECKER),
+            "-m",
+            "typebench._fake_checker",
             "--exit-code",
             str(self._exit_code),
             "--diagnostics",
@@ -942,6 +1120,13 @@ class StubAdapter:
             "--sleep",
             str(self._sleep),
         ]
+        if self._signal is not None:
+            argv += ["--signal", str(self._signal)]
+        return (argv, {})
+
+    def parallelism_cap(self, thread_mode: ThreadMode) -> ParallelismCap:
+        # Single process: CPU affinity is the only lever and is a true cap.
+        return ParallelismCap(mechanism="cpu-affinity", hard_cap=True)
 
     def parse(
         self, stdout: str, stderr: str, exit_code: int
@@ -957,20 +1142,21 @@ class StubAdapter:
 
     def clear_cache(self, project: str) -> None:
         return None
-```
 
-> Note: `parents[3]` resolves `src/typebench/adapters/stub.py` → repo root. If the executing engineer moves the file, recompute this. The fake checker path is only used by the stub.
+    def prepare_command(self, project: str) -> str | None:
+        return None  # stateless: no checker cache to clear between runs
+```
 
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest tests/test_stub_adapter.py -v`
-Expected: PASS (4 passed).
+Expected: PASS (6 passed).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/typebench/adapters tests/fixtures tests/test_stub_adapter.py
-git commit -m "feat(adapters): adapter protocol, stub adapter, fake checker fixture"
+git add src/typebench/adapters src/typebench/_fake_checker.py tests/test_stub_adapter.py
+git commit -m "feat(adapters): final-ish adapter protocol, stub adapter, in-package fake checker"
 ```
 
 ---
@@ -988,7 +1174,6 @@ Split into a **pure parser** (always tested) and a **runner** (integration; skip
 `tests/test_timing.py`:
 ```python
 import shutil
-import sys
 
 import pytest
 
@@ -1025,10 +1210,12 @@ def test_parse_hyperfine_json_rejects_empty_results():
 
 
 @pytest.mark.skipif(shutil.which("hyperfine") is None, reason="hyperfine not installed")
-def test_run_timing_against_stub():
+def test_run_timing_against_stub() -> None:
     adapter = StubAdapter(exit_code=0, sleep=0.02)
-    argv = adapter.command("demo", ThreadMode.ALL_CORES)
-    stats = run_timing(argv, prepare_cmd=None, warmup=1, runs=3, timeout=30)
+    argv, env = adapter.command("demo", ThreadMode.ALL_CORES)
+    stats = run_timing(
+        argv, prepare_cmd=None, extra_env=env, warmup=1, runs=3, timeout=30
+    )
     assert stats.runs == 3
     assert stats.min_s > 0
     assert stats.max_s >= stats.min_s
@@ -1049,6 +1236,7 @@ not abort the run, and `--prepare` clears the checker cache before each run."""
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -1094,12 +1282,16 @@ def run_timing(
     warmup: int,
     runs: int,
     timeout: float,
+    extra_env: dict[str, str] | None = None,
 ) -> TimingStats:
     """Run the timing pass and return wall-time statistics.
 
     `argv` is the *real* checker invocation; it is wrapped so hyperfine sees a
     success exit for diagnostics. `prepare_cmd` (e.g. cache clear) runs before
-    every timed run; None means nothing to prepare (stub has no cache)."""
+    every timed run, keeping each run cold (§5.2); None means nothing to prepare
+    (stub has no cache). `extra_env` is set on the hyperfine process and inherited
+    by the wrapped command (e.g. TY_MAX_PARALLELISM)."""
+    run_env = {**os.environ, **extra_env} if extra_env else None
     with tempfile.TemporaryDirectory() as tmp:
         json_path = Path(tmp) / "hyperfine.json"
         cmd = [
@@ -1114,7 +1306,7 @@ def run_timing(
         if prepare_cmd:
             cmd += ["--prepare", prepare_cmd]
         cmd.append(_wrapped_command_string(argv, timeout))
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        subprocess.run(cmd, check=True, capture_output=True, text=True, env=run_env)
         return parse_hyperfine_json(json.loads(json_path.read_text()))
 ```
 
@@ -1140,7 +1332,9 @@ git commit -m "feat(timing): hyperfine timing pass with pure JSON parser"
 - Create: `src/typebench/collector.py`
 - Test: `tests/test_collector.py`
 
-Two-phase per (project × tool × mode): **probe** once (run, classify, parse), then if measured-success **time** with hyperfine. Failures skip timing and are recorded with the real exit code.
+Two-phase per (project × tool × mode): **probe** once (run, classify, parse), then if measured-success **time** with hyperfine. Failures skip timing and are recorded with the real exit code **plus failure metadata** (signal / timed_out / oom / `error_detail`) so `failed{env}` vs `failed{crash}` is auditable later (§5.1).
+
+> **Notes.** (1) Cache clearing before *every* timed run is wired here via the adapter's `prepare_command(project)` → `hyperfine --prepare` (§5.2); the stub returns None (stateless), real tools return a clear command in Plan 2/3. (2) The probe is an extra cold run on top of hyperfine's warmups+runs — fold it into the §10 cost budget (Plan 6). (3) `thread_mode_enforced` is recorded as **False**: Plan 1 applies no CPU affinity/cap, so the record must not imply the 1-core methodology was actually run (§5.3); Plan 4 sets it True once affinity is applied.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1155,7 +1349,7 @@ from typebench.collector import run_single
 from typebench.models import ResultClass, ThreadMode
 
 
-def test_run_single_failure_skips_timing():
+def test_run_single_failure_skips_timing() -> None:
     adapter = StubAdapter(exit_code=2)  # -> FAILED_CRASH
     result = run_single(
         adapter, project="demo", thread_mode=ThreadMode.ALL_CORES,
@@ -1166,6 +1360,19 @@ def test_run_single_failure_skips_timing():
     assert result.timing is None
     assert result.tool == "stub"
     assert result.env.core_count >= 1
+    assert result.thread_mode_enforced is False  # no affinity applied (§5.3)
+
+
+def test_run_single_env_failure_is_recorded() -> None:
+    # Missing binary -> failed{env}, captured (not raised), with an audit trail.
+    adapter = StubAdapter(missing_binary=True)
+    result = run_single(
+        adapter, project="demo", thread_mode=ThreadMode.ALL_CORES,
+        warmup=1, runs=2, timeout=10,
+    )
+    assert result.result_class == ResultClass.FAILED_ENV
+    assert result.timing is None
+    assert result.error_detail  # carries the OSError text
 
 
 def test_run_single_diagnostics_records_counts():
@@ -1222,33 +1429,46 @@ def run_single(
     timeout: float,
 ) -> RunResult:
     adapter.clear_cache(project)
-    argv = adapter.command(project, thread_mode)
+    argv, extra_env = adapter.command(project, thread_mode)
 
     # Phase 1: probe — one real run to classify and parse counts.
-    raw = run_command(argv, timeout=timeout)
+    raw = run_command(argv, timeout=timeout, env=extra_env)
     result_class = adapter.classify(raw)
     diagnostics = files = None
     if result_class.is_measured_success:
         diagnostics, files = adapter.parse(raw.stdout, raw.stderr, raw.exit_code)
 
     # Phase 2: time — only for measured-success, only if hyperfine present.
+    # prepare_command clears the checker cache before EVERY timed run (§5.2);
+    # None for stateless tools like the stub.
     timing = None
     if result_class.is_measured_success and shutil.which("hyperfine"):
         timing = run_timing(
             argv,
-            prepare_cmd=None,  # real cache-clear command injected in Plan 2/3
+            prepare_cmd=adapter.prepare_command(project),
             warmup=warmup,
             runs=runs,
             timeout=timeout,
+            extra_env=extra_env,
         )
+
+    error_detail = None
+    if not result_class.is_measured_success:
+        error_detail = raw.stderr.strip()[-500:] or None
 
     return RunResult(
         tool=adapter.name,
         tool_version=adapter.version(),
         project=project,
         thread_mode=thread_mode,
+        # Plan 1 applies no CPU affinity/cap -> never claim an unenforced mode (§5.3).
+        thread_mode_enforced=False,
         result_class=result_class,
         real_exit_code=raw.exit_code,
+        signal=raw.signal,
+        timed_out=raw.timed_out,
+        oom=raw.oom,
+        error_detail=error_detail,
         diagnostics=diagnostics,
         files=files,
         timing=timing,
@@ -1259,7 +1479,7 @@ def run_single(
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `uv run pytest tests/test_collector.py -v`
-Expected: PASS (2 passed, 1 passed-or-skipped depending on hyperfine).
+Expected: PASS (3 passed, 1 passed-or-skipped depending on hyperfine).
 
 - [ ] **Step 5: Commit**
 
@@ -1278,12 +1498,12 @@ git commit -m "feat(collector): probe-then-time pipeline producing a RunResult"
 
 For the spine, the registry holds only `stub`. The CLI writes one `RunResult` as JSON.
 
+> **Forward-compat note.** Plan 1 writes a single `RunResult` to `--output`. The eventual results file (Plan 5 renderer / §11) holds *many* records and will wrap them in an envelope — `{schema_version, runs: [RunResult, ...]}`. The per-record `schema_version` versions the record shape until then; consumers should not assume the top-level object is a bare record forever. The CLI always exits 0 once a record is written — a `failed{...}` outcome is data in the record, not a process error.
+
 - [ ] **Step 1: Write the failing test**
 
 `tests/test_cli.py`:
 ```python
-import json
-
 from typer.testing import CliRunner
 
 from typebench.cli import app
@@ -1405,8 +1625,8 @@ git commit -m "feat(cli): typebench run command writing a results record"
 
 `tests/test_e2e.py`:
 ```python
-import json
-import shutil
+import os
+from pathlib import Path
 
 import pytest
 
@@ -1414,37 +1634,74 @@ from typebench.adapters.stub import StubAdapter
 from typebench.collector import run_single
 from typebench.models import ResultClass, RunResult, ThreadMode
 
+requires_posix = pytest.mark.skipif(
+    os.name != "posix", reason="signal semantics are POSIX-specific"
+)
+
+
+def _round_trip(result: RunResult, tmp_path: Path) -> RunResult:
+    path = tmp_path / "r.json"
+    path.write_text(result.model_dump_json())
+    restored = RunResult.model_validate_json(path.read_text())
+    assert restored == result
+    return restored
+
 
 @pytest.mark.parametrize(
-    ("exit_code", "expected"),
+    ("adapter", "expected"),
     [
-        (0, ResultClass.CLEAN),
-        (1, ResultClass.DIAGNOSTICS),
-        (2, ResultClass.FAILED_CRASH),
+        (StubAdapter(exit_code=0), ResultClass.CLEAN),
+        (StubAdapter(exit_code=1, diagnostics=2, files=5), ResultClass.DIAGNOSTICS),
+        (StubAdapter(exit_code=2), ResultClass.FAILED_CRASH),
+        (StubAdapter(missing_binary=True), ResultClass.FAILED_ENV),
     ],
 )
-def test_pipeline_classes_round_trip_to_json(exit_code, expected, tmp_path):
-    adapter = StubAdapter(exit_code=exit_code, diagnostics=2, files=5)
+def test_pipeline_classes_round_trip_to_json(
+    adapter: StubAdapter, expected: ResultClass, tmp_path: Path
+) -> None:
     result = run_single(
         adapter, project="demo", thread_mode=ThreadMode.ONE_CORE,
         warmup=1, runs=2, timeout=10,
     )
     assert result.result_class == expected
-
-    path = tmp_path / "r.json"
-    path.write_text(result.model_dump_json())
-    restored = RunResult.model_validate_json(path.read_text())
-    assert restored == result
+    assert result.thread_mode_enforced is False  # recorded mode was not enforced (§5.3)
+    restored = _round_trip(result, tmp_path)
     # Failures must be visible, never silently dropped (spec §12).
     if not expected.is_measured_success:
         assert restored.timing is None
-        assert json.loads(path.read_text())["result_class"].startswith("failed")
+        assert restored.result_class.value.startswith("failed")
+
+
+def test_pipeline_records_timeout(tmp_path: Path) -> None:
+    # Probe sleeps past the timeout -> failed{timeout}, no timing recorded.
+    adapter = StubAdapter(exit_code=0, sleep=5.0)
+    result = run_single(
+        adapter, project="demo", thread_mode=ThreadMode.ALL_CORES,
+        warmup=1, runs=2, timeout=1,
+    )
+    assert result.result_class == ResultClass.FAILED_TIMEOUT
+    assert result.timing is None
+    _round_trip(result, tmp_path)
+
+
+@requires_posix
+def test_pipeline_records_oom_heuristic(tmp_path: Path) -> None:
+    # SIGKILL (9) is the OOM-killer's signal; mapped to failed{oom} until cgroup
+    # OOM detection lands in Plan 4.
+    adapter = StubAdapter(signal=9)
+    result = run_single(
+        adapter, project="demo", thread_mode=ThreadMode.ALL_CORES,
+        warmup=1, runs=2, timeout=10,
+    )
+    assert result.result_class == ResultClass.FAILED_OOM
+    assert result.timing is None
+    _round_trip(result, tmp_path)
 ```
 
 - [ ] **Step 2: Run the test**
 
 Run: `uv run pytest tests/test_e2e.py -v`
-Expected: PASS (3 passed).
+Expected: PASS (6 passed on Linux/macOS; 5 passed + 1 skipped where the OOM/SIGKILL test is skipped on non-POSIX). Covers clean / diagnostics / failed{crash} / failed{env} / failed{timeout} / failed{oom}.
 
 - [ ] **Step 3: Write a minimal `README.md`**
 
@@ -1490,11 +1747,14 @@ git commit -m "test(e2e): pipeline class round-trip + project README"
 - `uv run pytest -v` is green (skips allowed only for hyperfine-gated tests when hyperfine is absent).
 - `uv run typebench run --tool stub --project demo --output results.json` writes a schema-valid `RunResult`.
 - With hyperfine installed, that record contains real wall-time statistics; without it, `timing` is `null` and the result class is still correct.
-- Every failure class is recorded with its real exit code and never silently dropped (spec §7, §12).
+- **All six taxonomy classes are producible and end-to-end tested** via the fake checker: `clean`, `diagnostics`, `failed{crash}` (exit 2 / signal), `failed{env}` (missing binary), `failed{timeout}` (sleep > timeout), `failed{oom}` (SIGKILL heuristic). Each is recorded with its real exit code + failure metadata (signal/timed_out/oom/`error_detail`) and never silently dropped (spec §7, §12).
+- `thread_mode` is recorded alongside `thread_mode_enforced: false` — Plan 1 never claims an unenforced 1-core methodology (spec §5.3).
 - No real checker, cgroup, corpus, or renderer code exists yet — those are Plans 2–6.
 
 ## Self-Review notes (done during authoring)
 
-- **Spec coverage (Plan 1 scope):** §7 taxonomy → `ResultClass` + `classify_default`; §5.1 exit-code wrapper → `wrapper.py` + CLI; §5.4 timing → `timing.py`; §8 metrics (time/diagnostics/files/class/env) → `RunResult`; §5.2 cold (cache-clear hook) → `clear_cache` + `--prepare` seam (real clears in Plan 2/3). Out-of-scope-by-design here: §5.3 thread tracks, §5.5 memory, §5.6 stats, §5.7 calibration, §6 config, §9 lock manifest, §10–11 CI/render — assigned to Plans 2–6.
+- **Spec coverage (Plan 1 scope):** §7 taxonomy → `ResultClass` + `classify_default` (all six classes producible, incl. `failed{env}` via captured `OSError` and `failed{oom}` via SIGKILL heuristic); §5.1 exit-code wrapper → `wrapper.py` + CLI + failure metadata on `RunResult`; §5.4 timing → `timing.py`; §8 metrics (time/diagnostics/files/class/env) → `RunResult`; §5.2 cold → `clear_cache` + `prepare_command` → `hyperfine --prepare` seam wired in the collector (stub stateless → None; real clears in Plan 2/3); §5.3 thread semantics → `ThreadMode` enum + honest `thread_mode_enforced=false` (enforcement deferred to Plan 4); §4 adapter surface → final-ish `Adapter` protocol so Plan 2 adds behavior, not signature breaks. Out-of-scope-by-design here: §5.3 *affinity enforcement*, §5.5 memory, §5.6 stats, §5.7 calibration, §6 config, §9 lock manifest, §10–11 CI/render — assigned to Plans 2–6.
+- **Deferred-with-a-seam (called out so they aren't forgotten):** real per-tool `classify_exit` and machine-readable `parse` + **parse-sanity guardrail** (`files > 0` on success, §4/§13) → Plan 2; JSON-Schema artifact export from the pydantic models (§13 schema validation) → Plan 2/5; results **envelope** (`{schema_version, runs: [...]}`) for the multi-record file → Plan 5; the **probe is an extra cold run** to budget in §10 → Plan 6; **wrapper interpreter overhead** documented in Task 5, to be calibration-absorbed or baseline-subtracted (§5.7) → Plan 4/6.
 - **Placeholders:** none — every step has full code/commands.
-- **Type consistency:** `RawRun`, `ResultClass`, `ThreadMode`, `TimingStats`, `EnvFingerprint`, `RunResult`, `run_command`, `classify_default`, `run_timing`, `parse_hyperfine_json`, `run_single`, `StubAdapter` names are identical across all tasks.
+- **Cross-platform:** signal-dependent tests (`SIGSEGV`, `SIGKILL`) are `skipif(os.name != "posix")`; the rest (incl. `detect_env`) run on Linux/macOS/Windows. hyperfine-dependent tests skip when the binary is absent.
+- **Type consistency:** `RawRun`, `ResultClass`, `ThreadMode`, `TimingStats`, `EnvFingerprint`, `RunResult`, `ParallelismCap`, `run_command`, `classify_default`, `run_timing`, `parse_hyperfine_json`, `run_single`, `StubAdapter` names are identical across all tasks. `Adapter.command` returns `(argv, env)` and `run_command`/`run_timing` accept `env`/`extra_env` consistently at every call site.
