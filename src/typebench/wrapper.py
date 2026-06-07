@@ -5,8 +5,10 @@ as hyperfine's command so hyperfine does not abort on diagnostics."""
 
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
+import sys
 from dataclasses import dataclass
 
 from typebench.models import ResultClass
@@ -102,3 +104,31 @@ def classify_default(raw: RawRun) -> ResultClass:
     if raw.signal is not None:
         return ResultClass.FAILED_CRASH
     return _EXIT_CODE_CLASSES.get(raw.exit_code, ResultClass.FAILED_CRASH)
+
+
+def main(raw_args: list[str] | None = None) -> int:
+    """CLI entrypoint used as hyperfine's command. Usage:
+
+        python -m typebench.wrapper --timeout SECONDS -- <argv...>
+
+    Exits 0 for measured-success (clean/diagnostics), 1 for any failure class.
+    The real command's stdout/stderr are forwarded so output stays visible."""
+    parser = argparse.ArgumentParser(prog="typebench.wrapper")
+    parser.add_argument("--timeout", type=float, required=True)
+    parser.add_argument("argv", nargs=argparse.REMAINDER)
+    ns = parser.parse_args(raw_args)
+
+    argv = ns.argv
+    if argv and argv[0] == "--":
+        argv = argv[1:]
+    if not argv:
+        parser.error("no command given after --")
+
+    raw = run_command(argv, timeout=ns.timeout)
+    sys.stdout.write(raw.stdout)
+    sys.stderr.write(raw.stderr)
+    return 0 if classify_default(raw).is_measured_success else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
