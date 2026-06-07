@@ -80,7 +80,7 @@ Each checker's specifics live in exactly one file. Adding a 5th checker = drop i
   This is the **only** checker-specific code.
 - **`corpus`** — `suite.toml`: each project = `name`, repo URL, **pinned SHA**, `size_bucket`, dependency install strategy, optional per-project config overrides.
 - **`bump` job** — separate scheduled job that rewrites SHAs to latest default-branch HEAD monthly and commits as one logged event.
-- **`envman`** — clones project @ SHA, builds an isolated `uv` venv, installs project deps (so third-party imports resolve), counts Python LOC (`scc` or `tokei`).
+- **`envman`** — clones project @ SHA, builds an isolated `uv` venv, installs project deps (so third-party imports resolve), counts Python LOC with `scc`.
 - **`runner`** — orchestrates the two measurement passes per (project × tool × thread-mode).
 - **`collector`** — normalizes raw measurements → one results record + environment fingerprint.
 - **`renderer`** — results JSON → README tables + GH Pages data files.
