@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 from typing import TYPE_CHECKING
 
 from typebench.env import detect_env
-from typebench.models import RunResult, ThreadMode
+from typebench.models import ResultClass, RunResult, ThreadMode
 from typebench.timing import run_timing
 from typebench.wrapper import run_command
 
@@ -36,19 +37,32 @@ def run_single(
     # prepare_command clears the checker cache before EVERY timed run (§5.2);
     # None for stateless tools like the stub.
     timing = None
+    timing_error: str | None = None
     if result_class.is_measured_success and shutil.which("hyperfine"):
-        timing = run_timing(
-            argv,
-            prepare_cmd=adapter.prepare_command(project),
-            warmup=warmup,
-            runs=runs,
-            timeout=timeout,
-            extra_env=extra_env,
-        )
+        try:
+            timing = run_timing(
+                argv,
+                prepare_cmd=adapter.prepare_command(project),
+                warmup=warmup,
+                runs=runs,
+                timeout=timeout,
+                extra_env=extra_env,
+            )
+        except subprocess.CalledProcessError as exc:
+            # The probe was measured-success but a TIMED run failed under
+            # hyperfine (flaky crash/oom/timeout). Spec §5.1/§12: record a
+            # failure, never crash or drop the record. Precise reclassification
+            # of the timing-phase failure is deferred (Plan 2/4); FAILED_CRASH
+            # is the honest floor.
+            result_class = ResultClass.FAILED_CRASH
+            timing = None
+            diagnostics = files = None
+            stderr = exc.stderr if isinstance(exc.stderr, str) else ""
+            timing_error = stderr.strip()[-500:] or "timing run failed under hyperfine"
 
     error_detail = None
     if not result_class.is_measured_success:
-        error_detail = raw.stderr.strip()[-500:] or None
+        error_detail = timing_error or (raw.stderr.strip()[-500:] or None)
 
     return RunResult(
         tool=adapter.name,

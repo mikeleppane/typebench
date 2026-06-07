@@ -10,6 +10,7 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 
 
 def main() -> int:
@@ -24,7 +25,17 @@ def main() -> int:
         default=None,
         help="If set, kill self with this signal (9 = OOM-like, 11 = crash).",
     )
+    parser.add_argument("--fail-after-runs", type=int, default=None)
+    parser.add_argument("--state-file", type=str, default=None)
     ns = parser.parse_args()
+
+    if ns.fail_after_runs is not None and ns.state_file is not None:
+        state = Path(ns.state_file)
+        count = int(state.read_text()) if state.exists() else 0
+        count += 1
+        state.write_text(str(count))
+        if count > ns.fail_after_runs:
+            return 2  # crash on later invocations: probe succeeds, timed runs fail
 
     if ns.sleep:
         time.sleep(ns.sleep)

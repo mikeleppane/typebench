@@ -26,6 +26,8 @@ class StubAdapter:
         sleep: float = 0.0,
         signal: int | None = None,
         missing_binary: bool = False,
+        fail_after_runs: int | None = None,
+        state_file: str | None = None,
     ) -> None:
         self._exit_code = exit_code
         self._diagnostics = diagnostics
@@ -33,6 +35,8 @@ class StubAdapter:
         self._sleep = sleep
         self._signal = signal
         self._missing_binary = missing_binary
+        self._fail_after_runs = fail_after_runs
+        self._state_file = state_file
 
     def version(self) -> str:
         return "stub-1.0"
@@ -58,6 +62,13 @@ class StubAdapter:
             "--sleep",
             str(self._sleep),
         ]
+        if self._fail_after_runs is not None and self._state_file is not None:
+            argv += [
+                "--fail-after-runs",
+                str(self._fail_after_runs),
+                "--state-file",
+                self._state_file,
+            ]
         if self._signal is not None:
             argv += ["--signal", str(self._signal)]
         return (argv, {})

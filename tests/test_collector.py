@@ -1,4 +1,5 @@
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -71,3 +72,23 @@ def test_run_single_success_includes_timing() -> None:
     assert result.timing is not None
     assert result.timing.runs == 3
     assert result.timing.min_s > 0
+
+
+@pytest.mark.skipif(shutil.which("hyperfine") is None, reason="hyperfine not installed")
+def test_run_single_records_timing_phase_failure(tmp_path: Path) -> None:
+    # Probe succeeds (clean) but a timed run fails under hyperfine -> the record
+    # must be a recorded failure, NOT an uncaught crash with no result (§5.1/§12).
+    state = tmp_path / "count"
+    adapter = StubAdapter(state_file=str(state), fail_after_runs=1)
+    result = run_single(
+        adapter,
+        project="demo",
+        thread_mode=ThreadMode.ALL_CORES,
+        warmup=1,
+        runs=2,
+        timeout=10,
+    )
+    assert result.result_class == ResultClass.FAILED_CRASH
+    assert result.timing is None
+    assert result.error_detail  # carries hyperfine's stderr (audit trail)
+    assert result.diagnostics is None
