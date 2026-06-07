@@ -71,6 +71,8 @@ class StubAdapter:
             payload = json.loads(stdout.strip().splitlines()[-1])
         except (ValueError, IndexError):
             return (None, None)
+        if not isinstance(payload, dict):
+            return (None, None)
         return (payload.get("diagnostics"), payload.get("files"))
 
     def classify(self, raw: RawRun) -> ResultClass:
