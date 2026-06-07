@@ -61,7 +61,12 @@ select = [
 max-args = 8
 
 [tool.ruff.lint.per-file-ignores]
+# Tests may use magic values and unused fixture args.
 "tests/**" = ["PLR2004", "ARG001", "ARG002"]
+# Adapter implementations conform to the Protocol signature, so they accept
+# args the stub does not use yet (project/thread_mode/stderr); real adapters
+# (Plan 2) use them. Renaming to _-prefixed would break keyword calls.
+"src/typebench/adapters/**" = ["ARG002"]
 
 [tool.ruff.format]
 docstring-code-format = true
