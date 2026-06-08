@@ -8,7 +8,7 @@ import json
 import sys
 from typing import TYPE_CHECKING
 
-from typebench.adapters.base import ParallelismCap, default_classify
+from typebench.adapters.base import ParallelismCap, coerce_count, default_classify
 
 if TYPE_CHECKING:
     from typebench.models import ResultClass, ThreadMode
@@ -84,7 +84,7 @@ class StubAdapter:
             return (None, None)
         if not isinstance(payload, dict):
             return (None, None)
-        return (payload.get("diagnostics"), payload.get("files"))
+        return (coerce_count(payload.get("diagnostics")), coerce_count(payload.get("files")))
 
     def classify(self, raw: RawRun) -> ResultClass:
         return default_classify(raw)

@@ -73,3 +73,12 @@ class Adapter(Protocol):
 def default_classify(raw: RawRun) -> ResultClass:
     """Shared fallback so adapters can delegate to the generic map."""
     return classify_default(raw)
+
+
+def coerce_count(value: object) -> int | None:
+    """Coerce a parsed-JSON field to a count, or None. Rejects bools (JSON
+    true/false are ints in Python) and non-ints so a malformed summary line
+    cannot inject a garbage count. Real adapters (Plan 2) reuse this in parse()."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
