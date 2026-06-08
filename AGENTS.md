@@ -6,9 +6,10 @@ and, later, cgroup v2 (peak memory + CPU-time). Results are versioned JSON; the
 README and GH Pages are rendered views. Design spec:
 `docs/superpowers/specs/2026-06-07-typebench-design.md`.
 
-**Status:** Plan 3 (corpus + envman + preflight) — real projects pinned to release
-SHAs, per-project uv venvs so third-party imports resolve, preflight gate. cgroup
-memory, threads, and calibration remain Plan 4; renderer Plan 5; CI/bump Plan 6.
+**Status:** Plan 4 (memory · threads · calibration) — `taskset -c 0` 1-core affinity
+floor, cgroup v2 peak memory + CPU-time + OOM under a transient `systemd-run --scope`,
+and a fixed calibration baseline. Builds on Plan 3 (corpus + envman + preflight). `RunResult`
+is **v2**. Renderer Plan 5; CI/bump Plan 6.
 
 ## Golden rule: this is a measurement tool
 
@@ -121,9 +122,15 @@ code unless the task is that plan. The adapter Protocol is pinned to its final-i
 shape; methods not yet exercised (`install`, `parallelism_cap`) are deliberately
 deferred — don't delete them, don't build behavior behind them early.
 
-Plan 3 adds corpus/envman/preflight. Do NOT add cgroup memory, CPU affinity, the
-results envelope, the renderer, or bump automation — those are Plans 4-6. Do NOT
-change `RunResult` or `taxonomy.py` values; the lock-manifest enrichment is Plan 5.
+Plan 3 adds corpus/envman/preflight. Plan 4 adds the `taskset -c 0` 1-core affinity
+floor, the cgroup resource pass (`measure.py`), and the calibration baseline
+(`calibration.py`) — `RunResult` is now **v2** (MemoryStats/CalibrationStats +
+cpu_time_s/parallel_efficiency/hard_cap/cap_mechanism). The measured path
+(`wrapper.py`, `taxonomy.py`, `measure.py`, `calibration.py`) stays pydantic-free;
+affinity is a uniform collector-level `taskset` prefix, never per-adapter. Do NOT add
+the results envelope, the renderer, or bump automation — those are Plans 5-6. Do NOT
+change `taxonomy.py` values or further enrich `RunResult`; the lock-manifest
+enrichment is Plan 5.
 
 ## Commits
 
