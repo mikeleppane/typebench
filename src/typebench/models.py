@@ -11,8 +11,10 @@ from pydantic import BaseModel, ConfigDict
 from typebench.taxonomy import FailurePhase, ResultClass, ThreadMode
 
 __all__ = [
+    "CalibrationStats",
     "EnvFingerprint",
     "FailurePhase",
+    "MemoryStats",
     "PreflightReport",
     "PreparedProject",
     "ResultClass",
@@ -37,6 +39,44 @@ class TimingStats(BaseModel):
     times_s: list[float]
 
 
+class MemoryStats(BaseModel):
+    """Peak cgroup-memory statistics from the resource pass (spec §5.5).
+
+    "Peak cgroup memory," NOT RSS: cgroup v2 `memory.peak` is the max usage charged
+    to the scope and ALL descendants (page cache, kernel structs, every child) — the
+    right cross-tool number (it catches pyright's Node process and worker threads
+    `/usr/bin/time -v` would miss). It includes a ~constant ~10-15 MB Python-harness
+    baseline that is identical for every tool, so cross-tool comparison stays fair.
+    `peak_bytes_*` are min/median/max over `runs` repeats. `memory_stat` is the
+    `memory.stat` snapshot of the median-peak run (a data point, never a ranking)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    runs: int
+    peak_bytes_min: int
+    peak_bytes_median: int
+    peak_bytes_max: int
+    memory_stat: dict[str, int] | None = None
+
+
+class CalibrationStats(BaseModel):
+    """Per-run calibration baseline (spec §5.7). A fixed CPU-bound Python workload
+    timed alongside the real run so weekly trends can be normalized against the
+    VM-to-VM hardware lottery. RAW seconds only (min/median/max over `runs`):
+    normalization to a reference is a render-time transform (Plan 5), so no factor
+    is baked here — storing raw keeps the choice of reference open and honest.
+    `workload_id` + `iterations` lock the workload identity for the manifest."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workload_id: str
+    iterations: int
+    runs: int
+    raw_min_s: float
+    raw_median_s: float
+    raw_max_s: float
+
+
 class EnvFingerprint(BaseModel):
     """Minimal environment stamp (spec §9 — expanded in later plans)."""
 
@@ -59,15 +99,22 @@ class RunResult(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: int = 1
+    schema_version: int = 2
     tool: str
     tool_version: str
     project: str
     thread_mode: ThreadMode
-    # Honesty flag (spec §5.3): True only once CPU affinity / a hard cap is
-    # actually applied (Plan 4). Plan 1 never enforces, so it stays False — the
-    # record must not imply a methodology the engine did not run.
+    # Honesty flag (spec §5.3), ONE_CORE-specific: True only when the 1-core
+    # taskset affinity floor was actually applied. ALL_CORES is unconstrained by
+    # design and leaves this False (it claims no pinning, so False is honest).
+    # The record must never imply a methodology the engine did not run.
     thread_mode_enforced: bool = False
+    # Per-tool worker-cap honesty (spec §5.3), from Adapter.parallelism_cap():
+    # hard_cap True = a real worker cap (pyrefly --threads 1, single-process mypy),
+    # False = best-effort (ty's soft TY_MAX_PARALLELISM, pyright --threads hint).
+    # Recorded only for the constrained ONE_CORE track; None for ALL_CORES.
+    hard_cap: bool | None = None
+    cap_mechanism: str | None = None
     result_class: ResultClass
     # Which pass produced a failure: PROBE (real_exit_code is the failing
     # command's) or TIMING (real_exit_code is the *successful* probe's — the
@@ -83,6 +130,11 @@ class RunResult(BaseModel):
     diagnostics: int | None = None
     files: int | None = None
     timing: TimingStats | None = None
+    # Resource pass (spec §5.5), None when measurement is unavailable (mac/CI):
+    memory: MemoryStats | None = None
+    cpu_time_s: float | None = None  # user+sys from cgroup cpu.stat
+    parallel_efficiency: float | None = None  # cpu_time_s / wall median (~1 single-thread)
+    calibration: CalibrationStats | None = None
     env: EnvFingerprint
 
 
