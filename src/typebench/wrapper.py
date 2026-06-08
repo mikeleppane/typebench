@@ -164,14 +164,25 @@ def main(raw_args: list[str] | None = None) -> int:
     raw = run_command(argv, timeout=ns.timeout)
     sys.stdout.write(raw.stdout)
     sys.stderr.write(raw.stderr)
-    # PLAN 2 TRAP: this gate uses the GENERIC classifier. Real adapters own
-    # classification (Adapter.classify), and a tool whose "diagnostics" exit code
-    # is not 1 (e.g. ty) would be misjudged HERE -> the wrapper reports failure on
-    # an otherwise-successful timed run -> hyperfine aborts -> the collector
-    # records failed{crash}. The probe (which DOES use Adapter.classify) and the
-    # timing phase then disagree. Plan 2 MUST pass the tool's measured-success
-    # exit codes into this wrapper so both phases agree. Stub uses {0,1} -> no
-    # divergence yet, which is why this is safe for the spine only.
+    # PLAN 2 TRAP — partially defused, residual blind spot documented.
+    # SUCCESS PATH: all four tools (mypy/pyright/ty/pyrefly) use measured-success
+    # codes ⊆ {0,1}, so this generic gate agrees with each adapter's probe
+    # `classify` and no tool-specific code threading is needed.
+    #
+    # RESIDUAL BLIND SPOT (pyrefly): exit 1 is overloaded (diagnostics OR fatal
+    # config/env). The probe phase uses the real Adapter.classify, disambiguates
+    # it, and gates whether timing runs — so a *deterministically* broken run is
+    # caught at probe and never timed. But a FLAKY fatal pyrefly exit-1 that
+    # occurs only during a timed run is read by classify_default as DIAGNOSTICS →
+    # measured-success → hyperfine silently times a broken run. Threading {0,1}
+    # success codes would NOT fix this (exit 1 is in the success set yet still
+    # ambiguous). The only real fix is adapter-aware timing classification, which
+    # the wrapper CANNOT do without importing pydantic (violates
+    # test_wrapper_import_does_not_pull_pydantic). Accepted residual risk for 2B.
+    #
+    # mypy (NO blind spot): overloaded exit 2 is OUTSIDE {0,1}, so a flaky
+    # timed-run exit 2 → wrapper returns nonzero → hyperfine aborts → collector
+    # records a failure (mislabeled crash-vs-env, but never silently timed).
     return 0 if classify_default(raw).is_measured_success else 1
 
 

@@ -12,18 +12,24 @@ from typing import Annotated
 
 import typer
 
+from typebench.adapters.mypy import MypyAdapter
+from typebench.adapters.pyrefly import PyreflyAdapter
 from typebench.adapters.pyright import PyrightAdapter
 from typebench.adapters.stub import StubAdapter
+from typebench.adapters.ty import TyAdapter
 from typebench.collector import run_single
 from typebench.models import ThreadMode
 from typebench.normalized_config import NormalizedConfig
 
 app = typer.Typer(help="Neutral Python type-checker performance benchmark.")
 
-# Adapter registry. Real checkers (mypy/pyright/pyrefly/ty) are added in Plan 2.
+# Adapter registry. All four real checkers + the controllable stub.
 _ADAPTERS = {
-    "stub": StubAdapter,
+    "mypy": MypyAdapter,
     "pyright": PyrightAdapter,
+    "pyrefly": PyreflyAdapter,
+    "stub": StubAdapter,
+    "ty": TyAdapter,
 }
 
 
