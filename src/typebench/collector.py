@@ -8,15 +8,21 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from typebench import measure
 from typebench.env import detect_env
-from typebench.models import FailurePhase, ResultClass, RunResult, ThreadMode
+from typebench.models import FailurePhase, MemoryStats, ResultClass, RunResult, ThreadMode
 from typebench.timing import run_timing
 from typebench.wrapper import run_command
 
 if TYPE_CHECKING:
     from typebench.adapters.base import Adapter
+    from typebench.models import CalibrationStats
     from typebench.normalized_config import NormalizedConfig
 
+
+# Module seams (overridable in tests + by capability):
+_resource_capable = measure.capable
+_scoped_probe = measure.scoped_probe
 
 _AFFINITY_PREFIX = ["taskset", "-c", "0"]  # uniform single-core floor (spec §5.3)
 
@@ -35,7 +41,7 @@ def _apply_affinity(argv: list[str], thread_mode: ThreadMode) -> tuple[list[str]
     return (argv, False)
 
 
-def run_single(
+def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threaded from the CLI; the probe→time→assemble phases intentionally share ONE workdir scope (§6: workdir must outlive every timed run), so they stay in one function by design
     adapter: Adapter,
     project: str,
     config: NormalizedConfig,
@@ -43,7 +49,12 @@ def run_single(
     warmup: int,
     runs: int,
     timeout: float,
+    mem_runs: int = 3,
+    measure_enabled: bool = True,
+    calibration: CalibrationStats | None = None,
 ) -> RunResult:
+    if mem_runs < 1:
+        raise ValueError(f"mem_runs must be >= 1, got {mem_runs}")
     adapter.clear_cache(project)
     # Run-scoped workdir for any adapter-generated tool config; it must outlive
     # both the probe and every timed run, so it wraps the whole body (§6). The
@@ -83,8 +94,34 @@ def run_single(
         hard_cap = cap.hard_cap if record_cap else None
         cap_mechanism = cap.mechanism if record_cap else None
 
-        # Phase 1: probe — one real run to classify and parse counts.
-        raw = run_command(argv, timeout=timeout, env=extra_env)
+        # Phase 1: probe. When measurement is available, the probe runs UNDER a
+        # transient cgroup scope (M COLD repeats) so it yields peak memory +
+        # cpu-time + real OOM in one pass (§5.5); the authoritative repeat drives
+        # classify+parse and a generic failure on any repeat is surfaced
+        # (Decision I). A TOTAL harness failure (MeasureError / OSError / timeout /
+        # bad JSON) falls back to a plain run_command so the record is NEVER dropped
+        # (Decision J). The prepare callback clears the checker cache before each
+        # cold repeat (§5.2).
+        resource: measure.ResourceResult | None = None
+        if measure_enabled and _resource_capable():
+            try:
+                resource = _scoped_probe(
+                    argv,
+                    extra_env=extra_env,
+                    timeout=timeout,
+                    repeats=mem_runs,
+                    prepare=lambda: adapter.clear_cache(project),
+                )
+            except (measure.MeasureError, OSError, ValueError, subprocess.SubprocessError):
+                resource = None
+        if resource is not None:
+            raw = resource.raw
+            memory_summary = resource.memory
+            cpu_time_s = resource.cpu_time_s
+        else:
+            raw = run_command(argv, timeout=timeout, env=extra_env)
+            memory_summary = None
+            cpu_time_s = None
         result_class = adapter.classify(raw)
         failure_phase = None if result_class.is_measured_success else FailurePhase.PROBE
         diagnostics = files = None
@@ -130,6 +167,23 @@ def run_single(
                 diagnostics = files = None
                 timing_error = f"timing harness error: {exc}".strip()[-500:]
 
+        memory = (
+            MemoryStats(
+                runs=memory_summary.runs,
+                peak_bytes_min=memory_summary.peak_bytes_min,
+                peak_bytes_median=memory_summary.peak_bytes_median,
+                peak_bytes_max=memory_summary.peak_bytes_max,
+                memory_stat=memory_summary.memory_stat,
+            )
+            if memory_summary is not None
+            else None
+        )
+        parallel_efficiency = (
+            cpu_time_s / timing.median_s
+            if cpu_time_s is not None and timing is not None and timing.median_s > 0
+            else None
+        )
+
         error_detail = None
         if not result_class.is_measured_success:
             error_detail = timing_error or (raw.stderr.strip()[-500:] or None)
@@ -152,5 +206,9 @@ def run_single(
             diagnostics=diagnostics,
             files=files,
             timing=timing,
+            memory=memory,
+            cpu_time_s=cpu_time_s,
+            parallel_efficiency=parallel_efficiency,
+            calibration=calibration,
             env=detect_env(),
         )

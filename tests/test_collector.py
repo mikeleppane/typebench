@@ -4,10 +4,11 @@ from pathlib import Path
 
 import pytest
 
-from typebench import collector
+from typebench import collector, measure
 from typebench.adapters.stub import StubAdapter
 from typebench.collector import run_single
-from typebench.models import FailurePhase, ResultClass, ThreadMode
+from typebench.measure import MemorySummary, ResourceResult
+from typebench.models import FailurePhase, ResultClass, ThreadMode, TimingStats
 from typebench.normalized_config import NormalizedConfig
 from typebench.wrapper import RawRun
 
@@ -275,3 +276,145 @@ def test_all_cores_no_taskset_no_enforcement(monkeypatch: pytest.MonkeyPatch) ->
     assert result.thread_mode_enforced is False
     assert result.hard_cap is None  # cap recorded only for the constrained track
     assert result.cap_mechanism is None
+
+
+def test_resource_pass_populates_memory_cpu_efficiency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Force capability ON but inject a fake scoped_probe (no real systemd needed).
+    # raising=True: the _resource_capable/_scoped_probe seams exist by now (Step 3),
+    # so a typo'd seam name fails loudly instead of silently creating a no-op.
+    monkeypatch.setattr(collector, "_resource_capable", lambda: True)
+
+    def fake_scoped_probe(
+        argv: list[str],
+        extra_env: dict[str, str],
+        timeout: float,
+        repeats: int,
+        runner: object = None,
+        prepare: object = None,
+    ) -> ResourceResult:
+        return ResourceResult(
+            raw=RawRun(
+                exit_code=0,
+                signal=None,
+                timed_out=False,
+                oom=False,
+                stdout='{"diagnostics": 0, "files": 5}',
+                stderr="",
+            ),
+            memory=MemorySummary(
+                runs=3,
+                peak_bytes_min=10,
+                peak_bytes_median=12,
+                peak_bytes_max=15,
+                memory_stat={"anon": 12},
+            ),
+            cpu_time_s=2.0,
+            oom=False,
+        )
+
+    monkeypatch.setattr(collector, "_scoped_probe", fake_scoped_probe)
+
+    # parallel_efficiency = cpu_time / wall is computed ONLY when timing ran, and
+    # the collector gates timing on `shutil.which("hyperfine")`. Patch which so the
+    # stubbed run_timing is actually invoked on hosts WITHOUT hyperfine (else this
+    # test silently passes only where hyperfine happens to be installed).
+    monkeypatch.setattr(collector.shutil, "which", lambda _name: "/usr/bin/hyperfine")
+    monkeypatch.setattr(
+        collector,
+        "run_timing",
+        lambda *_a, **_k: TimingStats(
+            runs=2, min_s=1.0, median_s=4.0, mean_s=4.0, stddev_s=0.0, max_s=5.0, times_s=[4.0, 4.0]
+        ),
+    )
+
+    adapter = StubAdapter(exit_code=0, diagnostics=0, files=5)
+    result = run_single(
+        adapter,
+        project="demo",
+        config=NormalizedConfig(),
+        thread_mode=ThreadMode.ALL_CORES,
+        warmup=1,
+        runs=2,
+        timeout=10,
+        mem_runs=3,
+    )
+    assert result.result_class == ResultClass.CLEAN
+    assert result.files == 5
+    assert result.memory is not None and result.memory.peak_bytes_median == 12
+    assert result.cpu_time_s == 2.0
+    assert result.parallel_efficiency == 0.5  # cpu 2.0 / wall median 4.0
+
+
+def test_resource_pass_oom_reclassifies(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(collector, "_resource_capable", lambda: True)
+
+    def fake_scoped_probe(
+        argv: list[str],
+        extra_env: dict[str, str],
+        timeout: float,
+        repeats: int,
+        runner: object = None,
+        prepare: object = None,
+    ) -> ResourceResult:
+        return ResourceResult(
+            raw=RawRun(
+                exit_code=-1, signal=9, timed_out=False, oom=True, stdout="", stderr="killed"
+            ),
+            memory=None,
+            cpu_time_s=None,
+            oom=True,
+        )
+
+    monkeypatch.setattr(collector, "_scoped_probe", fake_scoped_probe)
+    adapter = StubAdapter(exit_code=0)
+    result = run_single(
+        adapter,
+        project="demo",
+        config=NormalizedConfig(),
+        thread_mode=ThreadMode.ALL_CORES,
+        warmup=1,
+        runs=2,
+        timeout=10,
+    )
+    assert result.result_class == ResultClass.FAILED_OOM
+    assert result.oom is True
+    assert result.timing is None  # OOM -> not a measured success -> no timing
+
+
+def test_resource_pass_falls_back_to_plain_probe_on_measure_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A TOTAL resource-pass failure (MeasureError) must NOT drop the record: the
+    # collector falls back to a plain run_command probe (Decision J).
+    monkeypatch.setattr(collector, "_resource_capable", lambda: True)
+
+    def boom_scoped_probe(
+        argv: list[str],
+        extra_env: dict[str, str],
+        timeout: float,
+        repeats: int,
+        runner: object = None,
+        prepare: object = None,
+    ) -> ResourceResult:
+        raise measure.MeasureError("no usable payload")
+
+    monkeypatch.setattr(collector, "_scoped_probe", boom_scoped_probe)
+    monkeypatch.setattr(collector.shutil, "which", lambda _name: None)  # skip timing
+
+    adapter = StubAdapter(exit_code=0, diagnostics=0, files=5)
+    result = run_single(
+        adapter,
+        project="demo",
+        config=NormalizedConfig(),
+        thread_mode=ThreadMode.ALL_CORES,
+        warmup=1,
+        runs=2,
+        timeout=10,
+    )
+    # Record still produced via the plain probe; just no memory.
+    assert result.result_class == ResultClass.CLEAN
+    assert result.files == 5
+    assert result.memory is None
+    assert result.cpu_time_s is None

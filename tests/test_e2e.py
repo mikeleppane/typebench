@@ -37,13 +37,16 @@ def test_pipeline_classes_round_trip_to_json(
         adapter,
         project="demo",
         config=NormalizedConfig(),
-        thread_mode=ThreadMode.ONE_CORE,
+        thread_mode=ThreadMode.ALL_CORES,
         warmup=1,
         runs=2,
         timeout=10,
     )
     assert result.result_class == expected
-    assert result.thread_mode_enforced is False  # recorded mode was not enforced (§5.3)
+    # ALL_CORES is unconstrained by design, so the 1-core affinity floor is never
+    # applied -> thread_mode_enforced stays False on every host (§5.3, Decision D).
+    # ONE_CORE enforcement (taskset-dependent) is covered in test_collector.py.
+    assert result.thread_mode_enforced is False
     restored = _round_trip(result, tmp_path)
     # Failures must be visible, never silently dropped (spec §12).
     if not expected.is_measured_success:
@@ -70,8 +73,11 @@ def test_pipeline_records_timeout(tmp_path: Path) -> None:
 
 @requires_posix
 def test_pipeline_records_oom_heuristic(tmp_path: Path) -> None:
-    # SIGKILL (9) is the OOM-killer's signal; mapped to failed{oom} until cgroup
-    # OOM detection lands in Plan 4.
+    # SIGKILL (9) is the OOM-killer's signal; mapped to failed{oom} via the
+    # heuristic. Plan 4 added authoritative cgroup OOM detection (measure.py,
+    # memory.events.oom_kill), but this self-SIGKILL stub is NOT a cgroup OOM, so
+    # it still exercises the signal-9 fallback heuristic that the non-cgroup path
+    # (and any scoped run with oom_kill=0) relies on.
     adapter = StubAdapter(signal=9)
     result = run_single(
         adapter,
