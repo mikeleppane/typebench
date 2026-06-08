@@ -33,7 +33,26 @@ def run_single(
     # RunResult is built INSIDE the `with` so the dir survives every timed run.
     with tempfile.TemporaryDirectory(prefix="typebench-") as tmp:
         workdir = Path(tmp)
-        argv, extra_env = adapter.command(project, config, thread_mode, workdir)
+        try:
+            argv, extra_env = adapter.command(project, config, thread_mode, workdir)
+        except (OSError, ValueError) as exc:
+            # Building the command can touch disk / do path math (e.g. writing a
+            # generated tool config, relpath across drives). A failure here is a
+            # setup/env problem, NOT a checker result — record failed{env} so the
+            # record is never dropped (spec §12; "never drop a record"). No process
+            # ran, so real_exit_code is the -1 sentinel.
+            return RunResult(
+                tool=adapter.name,
+                tool_version=adapter.version(),
+                project=project,
+                thread_mode=thread_mode,
+                thread_mode_enforced=False,
+                result_class=ResultClass.FAILED_ENV,
+                failure_phase=FailurePhase.PROBE,
+                real_exit_code=-1,
+                error_detail=f"command construction failed: {exc}".strip()[-500:],
+                env=detect_env(),
+            )
 
         # Phase 1: probe — one real run to classify and parse counts.
         raw = run_command(argv, timeout=timeout, env=extra_env)

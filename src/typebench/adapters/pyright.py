@@ -100,8 +100,13 @@ class PyrightAdapter:
         }
         if config.venv_python is not None:
             # pyright wants venvPath = dir CONTAINING the venv, venv = its name.
-            # config.venv_python is <venv>/bin/python -> parents[1] is <venv>.
-            venv_dir = Path(config.venv_python).resolve().parents[1]
+            # config.venv_python is <venv>/bin/python -> parent.parent is <venv>.
+            # Derive LEXICALLY (parent.parent), never `.resolve()`: a real venv's
+            # bin/python is a SYMLINK to the base interpreter, so resolving it walks
+            # OUT of the venv (/tmp/v/bin/python -> /usr/bin/python3.12 -> venvPath=/,
+            # venv=usr) -> deps unresolved -> spurious reportMissingImports inflate
+            # diagnostics (non-neutral). The CLI passes an absolute path already.
+            venv_dir = Path(config.venv_python).parent.parent
             pyright_config["venvPath"] = str(venv_dir.parent)
             pyright_config["venv"] = venv_dir.name
         (workdir / "pyrightconfig.json").write_text(json.dumps(pyright_config, indent=2))
@@ -143,12 +148,14 @@ class PyrightAdapter:
 
     def classify(self, raw: RawRun) -> ResultClass:
         result = classify_with_map(raw, _EXIT_MAP)
-        # Parse-sanity (research doc): exit 0 + 0 files analyzed = a mis-scoped
-        # include, NOT a clean project. Promote to failed{env} so a false-clean
-        # never enters the data set. files is None (parse failed) -> leave as-is.
+        # Parse-sanity (research doc): a CLEAN verdict is only honest if we can
+        # confirm a positive file count. Promote to failed{env} when files is 0
+        # (mis-scoped include) OR None (exit 0 but --outputjson was unparseable /
+        # dropped summary.filesAnalyzed). Recording an unverifiable clean would let
+        # a false-clean enter the data set -> record-honesty violation (§7/§12).
         if result is ResultClass.CLEAN:
             _diags, files = self.parse(raw.stdout, raw.stderr, raw.exit_code)
-            if files == 0:
+            if not files:  # 0 or None
                 return ResultClass.FAILED_ENV
         return result
 

@@ -152,3 +152,31 @@ def test_run_single_timing_harness_error_is_failed_env(monkeypatch: pytest.Monke
     assert result.failure_phase == FailurePhase.TIMING
     assert result.error_detail
     assert result.timing is None
+
+
+def test_run_single_command_construction_failure_is_recorded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # command() can touch disk / do path math (write a generated tool config,
+    # relpath across drives). A raise there must become a recorded failed{env},
+    # never propagate out of run_single and DROP the record (spec §12).
+    adapter = StubAdapter(exit_code=0)
+
+    def _boom(*_a: object, **_k: object) -> object:
+        raise OSError("cannot write generated config")
+
+    monkeypatch.setattr(adapter, "command", _boom)
+    result = run_single(
+        adapter,
+        project="demo",
+        config=NormalizedConfig(),
+        thread_mode=ThreadMode.ALL_CORES,
+        warmup=1,
+        runs=2,
+        timeout=10,
+    )
+    assert result.result_class == ResultClass.FAILED_ENV
+    assert result.failure_phase == FailurePhase.PROBE
+    assert result.real_exit_code == -1  # no process ran
+    assert result.error_detail
+    assert result.timing is None

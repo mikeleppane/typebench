@@ -43,18 +43,33 @@ def test_parse_rejects_bool_counts() -> None:
 
 def test_classify_exit_map() -> None:
     a = PyrightAdapter()
-    assert a.classify(RawRun(0, None, False, False, "", "")) == ResultClass.CLEAN
+    # exit 0 is only CLEAN when a positive file count confirms it (parse-sanity).
+    clean = json.dumps({"summary": {"errorCount": 0, "filesAnalyzed": 5}})
+    assert a.classify(RawRun(0, None, False, False, clean, "")) == ResultClass.CLEAN
     assert a.classify(RawRun(1, None, False, False, "", "")) == ResultClass.DIAGNOSTICS
     assert a.classify(RawRun(2, None, False, False, "", "")) == ResultClass.FAILED_CRASH
     assert a.classify(RawRun(3, None, False, False, "", "")) == ResultClass.FAILED_ENV
     assert a.classify(RawRun(4, None, False, False, "", "")) == ResultClass.FAILED_ENV
-    assert a.classify(RawRun(0, None, True, False, "", "")) == ResultClass.FAILED_TIMEOUT
+    assert a.classify(RawRun(0, None, True, False, clean, "")) == ResultClass.FAILED_TIMEOUT
 
 
 def test_classify_zero_files_on_exit0_is_env_failure() -> None:
     blob = json.dumps({"summary": {"errorCount": 0, "filesAnalyzed": 0}})
     raw = RawRun(0, None, False, False, blob, "")
     assert PyrightAdapter().classify(raw) == ResultClass.FAILED_ENV
+
+
+def test_classify_unparseable_output_on_exit0_is_env_failure() -> None:
+    # exit 0 but --outputjson is unparseable (or dropped summary.filesAnalyzed):
+    # parse() -> (None, None). A CLEAN we cannot confirm is a false-clean; promote
+    # to failed{env} (record-honesty, §7/§12). Regression for the files-is-None gap.
+    assert PyrightAdapter().classify(RawRun(0, None, False, False, "not json", "")) == (
+        ResultClass.FAILED_ENV
+    )
+    no_summary = json.dumps({"generalDiagnostics": []})
+    assert PyrightAdapter().classify(RawRun(0, None, False, False, no_summary, "")) == (
+        ResultClass.FAILED_ENV
+    )
 
 
 def test_command_writes_pyrightconfig_and_targets_project(tmp_path: Path) -> None:
@@ -87,6 +102,28 @@ def test_command_derives_venv_path_layout(tmp_path: Path) -> None:
     written = json.loads((tmp_path / "pyrightconfig.json").read_text())
     assert written["venvPath"] == "/proj"
     assert written["venv"] == ".venv"
+
+
+def test_command_venv_layout_does_not_follow_bin_python_symlink(tmp_path: Path) -> None:
+    # Regression: a REAL venv's bin/python is a symlink to the base interpreter.
+    # The adapter must derive venvPath/venv LEXICALLY (parent.parent), never via
+    # .resolve(), or it walks out of the venv (-> venvPath=/, venv=usr) and pyright
+    # resolves no deps -> spurious reportMissingImports inflate diagnostics.
+    venv = tmp_path / "myenv"
+    (venv / "bin").mkdir(parents=True)
+    base_interp = tmp_path / "system" / "python3.12"
+    base_interp.parent.mkdir(parents=True)
+    base_interp.write_text("")
+    venv_python = venv / "bin" / "python"
+    venv_python.symlink_to(base_interp)  # bin/python -> ../../system/python3.12
+
+    workdir = tmp_path / "wd"
+    workdir.mkdir()
+    cfg = NormalizedConfig(src_roots=("/abs/src",), venv_python=str(venv_python))
+    PyrightAdapter().command("demo", cfg, ThreadMode.ONE_CORE, workdir)
+    written = json.loads((workdir / "pyrightconfig.json").read_text())
+    assert written["venvPath"] == str(tmp_path)
+    assert written["venv"] == "myenv"  # the venv dir, NOT "system"/"usr"
 
 
 def test_version_is_no_raise_when_binary_absent(monkeypatch: pytest.MonkeyPatch) -> None:

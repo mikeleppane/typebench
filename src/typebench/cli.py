@@ -83,7 +83,11 @@ def run(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI optio
         src_roots=tuple(str(Path(s).resolve()) for s in src_roots),
         python_version=python_version,
         python_platform=python_platform,
-        venv_python=str(Path(venv).resolve()) if venv is not None else None,
+        # abspath, NOT resolve(): a venv's bin/python is a symlink to the base
+        # interpreter; resolving it would walk out of the venv and break pyright's
+        # venvPath/venv derivation. abspath makes it absolute without following the
+        # symlink. (src_roots are dirs, so .resolve() above is fine for them.)
+        venv_python=os.path.abspath(venv) if venv is not None else None,  # noqa: PTH100 - need non-symlink-following abspath; Path.resolve() follows symlinks
     )
     adapter = factory()
     result = run_single(
