@@ -1,12 +1,15 @@
 import json
 import subprocess as _sp
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from typebench import measure
-from typebench.measure import CgroupSample, read_cgroup_stats
+from typebench.measure import CgroupSample, ResourceResult, read_cgroup_stats, scoped_probe
+
+Runner = Callable[..., _sp.CompletedProcess[str]]
 
 
 def _write_cgroup(tmp: Path, *, peak: int, oom_kill: int = 0) -> Path:
@@ -114,3 +117,135 @@ def test_measure_import_does_not_pull_pydantic() -> None:
     )
     out = _sp.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "", f"pydantic leaked into measure import: {out.stdout!r}"
+
+
+def _fake_runner_factory(payloads: list[dict[str, object]]) -> Runner:
+    """Return a runner that writes the next payload to the embedded --out path."""
+    calls = {"i": 0}
+
+    def runner(cmd: list[str], **kwargs: object) -> _sp.CompletedProcess[str]:
+        out_path = cmd[cmd.index("--out") + 1]
+        Path(out_path).write_text(json.dumps(payloads[calls["i"]]))
+        calls["i"] += 1
+        return _sp.CompletedProcess(cmd, 0, "", "")
+
+    return runner
+
+
+def _payload(
+    peak: int, usage: int = 1000, user: int = 600, system: int = 400, oom: int = 0
+) -> dict[str, object]:
+    return {
+        "exit_code": 1,
+        "signal": None,
+        "timed_out": False,
+        "oom": False,
+        "env_error": False,
+        "stdout": "found 3 errors",
+        "stderr": "",
+        "cgroup": {
+            "peak_bytes": peak,
+            "cpu_usage_usec": usage,
+            "cpu_user_usec": user,
+            "cpu_system_usec": system,
+            "oom_kill": oom,
+            "mem_stat": {"anon": peak},
+        },
+    }
+
+
+def test_scoped_probe_aggregates_min_median_max() -> None:
+    runner = _fake_runner_factory([_payload(100), _payload(140), _payload(120)])
+    res = scoped_probe(["mypy", "."], extra_env={}, timeout=60, repeats=3, runner=runner)
+    assert isinstance(res, ResourceResult)
+    assert res.raw.exit_code == 1
+    assert res.raw.stdout == "found 3 errors"
+    assert res.memory is not None
+    assert res.memory.peak_bytes_min == 100
+    assert res.memory.peak_bytes_median == 120
+    assert res.memory.peak_bytes_max == 140
+    assert res.cpu_time_s == 0.001
+    assert res.oom is False
+
+
+def test_scoped_probe_first_run_is_the_probe() -> None:
+    runner = _fake_runner_factory(
+        [{**_payload(100), "stdout": "RUN1"}, {**_payload(100), "stdout": "RUN2"}]
+    )
+    res = scoped_probe(["t"], extra_env={}, timeout=60, repeats=2, runner=runner)
+    assert res.raw.stdout == "RUN1"
+
+
+def test_scoped_probe_oom_killed_repeat_folds_into_raw_oom() -> None:
+    runner = _fake_runner_factory([_payload(100), _payload(100, oom=1)])
+    res = scoped_probe(["t"], extra_env={}, timeout=60, repeats=2, runner=runner)
+    assert res.oom is True
+    assert res.raw.oom is True
+
+
+def test_scoped_probe_first_generic_failure_becomes_authoritative() -> None:
+    timed_out = {**_payload(100), "timed_out": True, "exit_code": -1}
+    runner = _fake_runner_factory([{**_payload(100), "stdout": "OK1"}, timed_out])
+    res = scoped_probe(["t"], extra_env={}, timeout=60, repeats=2, runner=runner)
+    assert res.raw.timed_out is True
+
+
+def test_scoped_probe_memory_none_when_cgroup_missing() -> None:
+    runner = _fake_runner_factory([{**_payload(100), "cgroup": None}])
+    res = scoped_probe(["t"], extra_env={}, timeout=60, repeats=1, runner=runner)
+    assert res.memory is None
+    assert res.cpu_time_s is None
+    assert res.raw.exit_code == 1
+
+
+def test_scoped_probe_prepare_runs_before_every_repeat() -> None:
+    runner = _fake_runner_factory([_payload(100), _payload(100), _payload(100)])
+    calls = {"n": 0}
+
+    def prepare() -> None:
+        calls["n"] += 1
+
+    scoped_probe(["t"], extra_env={}, timeout=60, repeats=3, runner=runner, prepare=prepare)
+    assert calls["n"] == 3
+
+
+def test_scoped_probe_skips_repeat_that_raises_but_uses_survivors() -> None:
+    good = [_payload(100), _payload(140)]
+    state = {"i": 0}
+
+    def runner(cmd: list[str], **kwargs: object) -> _sp.CompletedProcess[str]:
+        i = state["i"]
+        state["i"] += 1
+        if i == 1:
+            raise OSError("transient scope race")
+        out_path = cmd[cmd.index("--out") + 1]
+        Path(out_path).write_text(json.dumps(good.pop(0)))
+        return _sp.CompletedProcess(cmd, 0, "", "")
+
+    res = scoped_probe(["t"], extra_env={}, timeout=60, repeats=3, runner=runner)
+    assert res.memory is not None
+    assert res.memory.runs == 2
+
+
+def test_scoped_probe_raises_measure_error_when_no_payload() -> None:
+    def runner(cmd: list[str], **kwargs: object) -> _sp.CompletedProcess[str]:
+        return _sp.CompletedProcess(cmd, 1, "", "scope failed")
+
+    with pytest.raises(measure.MeasureError):
+        scoped_probe(["t"], extra_env={}, timeout=60, repeats=3, runner=runner)
+
+
+def test_scoped_probe_rejects_zero_repeats() -> None:
+    with pytest.raises(ValueError, match="repeats must be >= 1"):
+        scoped_probe(["t"], extra_env={}, timeout=60, repeats=0)
+
+
+@pytest.mark.skipif(not measure.capable(), reason="no cgroup v2 / systemd-run user scope")
+def test_scoped_probe_real_scope_measures_nonzero_peak() -> None:
+    argv = [sys.executable, "-c", "x = bytearray(40_000_000); print(len(x))"]
+    res = measure.scoped_probe(argv, extra_env={}, timeout=60, repeats=3)
+    assert res.raw.exit_code == 0
+    assert res.memory is not None
+    assert res.memory.peak_bytes_max >= 30_000_000
+    assert res.cpu_time_s is not None and res.cpu_time_s > 0
+    assert res.oom is False

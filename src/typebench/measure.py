@@ -8,14 +8,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
+import statistics
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from typebench.wrapper import run_command
+from typebench.wrapper import RawRun, run_command, universal_failure_prefix
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -127,6 +130,167 @@ def _sample_to_dict(sample: CgroupSample) -> dict[str, object]:
         "oom_kill": sample.oom_kill,
         "mem_stat": sample.mem_stat,
     }
+
+
+class MeasureError(RuntimeError):
+    """Raised when the scoped resource pass produced no usable payload."""
+
+
+@dataclass(frozen=True)
+class MemorySummary:
+    """Aggregated peak memory plus the median-peak run's memory.stat snapshot."""
+
+    runs: int
+    peak_bytes_min: int
+    peak_bytes_median: int
+    peak_bytes_max: int
+    memory_stat: dict[str, int]
+
+
+@dataclass(frozen=True)
+class ResourceResult:
+    """Outcome of the resource pass across repeated scoped runs."""
+
+    raw: RawRun
+    memory: MemorySummary | None
+    cpu_time_s: float | None
+    oom: bool
+
+
+def _raw_from_payload(payload: dict[str, object], *, oom_killed: bool) -> RawRun:
+    return RawRun(
+        exit_code=_coerce_int(payload["exit_code"]),
+        signal=payload["signal"] if isinstance(payload["signal"], int) else None,
+        timed_out=bool(payload["timed_out"]),
+        oom=bool(payload["oom"]) or oom_killed,
+        stdout=str(payload["stdout"]),
+        stderr=str(payload["stderr"]),
+        env_error=bool(payload["env_error"]),
+    )
+
+
+def _coerce_int(value: object) -> int:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return int(value)
+    raise ValueError(f"expected integer payload value, got {type(value).__name__}")
+
+
+def _median_int(values: list[int]) -> int:
+    return int(statistics.median(values))
+
+
+def _memory_stat_from_payload(cgroup_payload: dict[object, object]) -> dict[str, int]:
+    raw_mem_stat = cgroup_payload.get("mem_stat")
+    if not isinstance(raw_mem_stat, dict):
+        return {}
+    return {str(key): _coerce_int(value) for key, value in raw_mem_stat.items()}
+
+
+def scoped_probe(
+    argv: list[str],
+    extra_env: dict[str, str],
+    timeout: float,
+    repeats: int,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    prepare: Callable[[], None] | None = None,
+) -> ResourceResult:
+    """Run argv in repeated transient scopes and aggregate resource accounting.
+
+    Per-repeat scope failures are skipped. If every repeat fails before producing
+    a payload, the caller gets MeasureError and can fall back to a plain probe.
+    """
+    if repeats < 1:
+        raise ValueError(f"repeats must be >= 1, got {repeats}")
+
+    run_env = {**os.environ, **extra_env}
+    setenv_args = [
+        arg for key, value in extra_env.items() for arg in ("--setenv", f"{key}={value}")
+    ]
+
+    raws: list[RawRun] = []
+    peaks: list[int] = []
+    cpu_usages: list[int] = []
+    mem_stats: list[dict[str, int]] = []
+    oom = False
+
+    for _ in range(repeats):
+        try:
+            if prepare is not None:
+                prepare()
+            with tempfile.TemporaryDirectory() as tmp:
+                out_path = Path(tmp) / "payload.json"
+                cmd = [
+                    "systemd-run",
+                    "--user",
+                    "--scope",
+                    "--quiet",
+                    "-p",
+                    "MemoryAccounting=yes",
+                    "-p",
+                    "CPUAccounting=yes",
+                    *setenv_args,
+                    "--",
+                    sys.executable,
+                    "-m",
+                    "typebench.measure",
+                    "--out",
+                    str(out_path),
+                    "--timeout",
+                    str(timeout),
+                    "--",
+                    *argv,
+                ]
+                proc = runner(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    env=run_env,
+                    timeout=timeout + 120,
+                )
+                if proc.returncode != 0:
+                    continue
+                payload: dict[str, object] = json.loads(out_path.read_text())
+        except (OSError, ValueError, subprocess.SubprocessError):
+            continue
+
+        try:
+            cgroup = payload.get("cgroup")
+            oom_killed = isinstance(cgroup, dict) and _coerce_int(cgroup["oom_kill"]) > 0
+            raw = _raw_from_payload(payload, oom_killed=oom_killed)
+        except (KeyError, ValueError):
+            continue
+        raws.append(raw)
+        if isinstance(cgroup, dict):
+            peaks.append(_coerce_int(cgroup["peak_bytes"]))
+            cpu_usages.append(_coerce_int(cgroup["cpu_usage_usec"]))
+            mem_stats.append(_memory_stat_from_payload(cgroup))
+            oom = oom or oom_killed
+
+    if not raws:
+        raise MeasureError("scoped resource pass produced no usable payload")
+
+    authoritative = raws[0]
+    for raw in raws:
+        if universal_failure_prefix(raw) is not None:
+            authoritative = raw
+            break
+
+    if not peaks:
+        return ResourceResult(raw=authoritative, memory=None, cpu_time_s=None, oom=oom)
+
+    median_peak = _median_int(peaks)
+    representative_index = min(range(len(peaks)), key=lambda index: abs(peaks[index] - median_peak))
+    memory = MemorySummary(
+        runs=len(peaks),
+        peak_bytes_min=min(peaks),
+        peak_bytes_median=median_peak,
+        peak_bytes_max=max(peaks),
+        memory_stat=mem_stats[representative_index],
+    )
+    cpu_time_s = _median_int(cpu_usages) / 1_000_000
+    return ResourceResult(raw=authoritative, memory=memory, cpu_time_s=cpu_time_s, oom=oom)
 
 
 def main(raw_args: list[str] | None = None) -> int:
