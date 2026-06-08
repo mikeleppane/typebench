@@ -12,13 +12,13 @@
 
 To keep the universal failure-prefix a single source of truth even for the overloaded-exit tools, Task 1 extracts `universal_failure_prefix()` in `wrapper.py`; mypy/pyrefly call it, then run their own exit-code logic.
 
-**Key finding (defuses the "PLAN 2 TRAP"):** all four checkers use **`{0,1}` for measured-success** (0 clean, 1 diagnostics). The timing wrapper's generic `{0,1}` gate (`wrapper.main`) therefore agrees with every adapter's probe-phase `classify` — no tool-specific success codes need threading into the wrapper. Task 5 updates the `PLAN 2 TRAP` comment to record this (the trap stays latent for a *future* tool whose diagnostics code ≠ 1).
+**Key finding (PLAN 2 TRAP — partially defused, one residual blind spot):** all four checkers use **`{0,1}` for measured-success** (0 clean, 1 diagnostics), so on the *success* path the timing wrapper's generic `{0,1}` gate (`wrapper.main`) agrees with every adapter's probe-phase `classify`. **BUT pyrefly's exit 1 is overloaded** (diagnostics OR fatal config/env). Only the adapter's `classify` disambiguates it; `wrapper.main` cannot (the wrapper is pydantic-free by contract — see `test_wrapper_import_does_not_pull_pydantic` — so it cannot import an adapter). The probe phase (which DOES use `Adapter.classify`) gates whether timing runs at all, which covers the common case: a deterministically-broken pyrefly run is caught at probe and never timed. The residual blind spot is a *flaky* fatal pyrefly exit-1 that occurs only **during a timed run** — `classify_default` reads it as `DIAGNOSTICS` → measured-success → hyperfine silently times a broken run. This is a genuine timing-phase blind spot, not "defused." Task 5 documents it honestly in the `PLAN 2 TRAP` comment and the DoD records it as accepted residual risk (the proper fix — adapter-aware timing classification without importing pydantic — is deferred; threading `{0,1}` success codes into the wrapper would NOT fix it, because exit 1 is in the success set yet still ambiguous). mypy's overloaded exit 2 has no such blind spot: it is outside `{0,1}`, so a flaky timed-run exit 2 makes the wrapper return nonzero → hyperfine aborts → collector records a failure (mislabeled crash-vs-env, but never silently timed).
 
-**Tech Stack:** Python 3.12+, pydantic, typer, pytest, hyperfine. New **hard dev deps** (so live + e2e tests run in the gate, not skip): `mypy`, `ty`, `pyrefly` (all PyPI). `hyperfine` stays a `skipif` system binary. Strict gate unchanged (ruff + pyrefly-strict + pytest).
+**Tech Stack:** Python 3.12+, pydantic, typer, pytest, hyperfine. **New hard dev deps:** `mypy`, `ty` (PyPI). **`pyrefly` is ALREADY a dev dep** (`pyrefly>=0.16` in `pyproject.toml`, powering the strict gate) — Task 4 confirms it, does not add it. To make "hard dev dep ⇒ tests actually run" enforceable rather than aspirational, Task 6 adds a **non-skipping** `test_hard_deps_present` that FAILS (not skips) if `mypy`/`ty`/`pyrefly`/`pyright` are absent. The per-tool `skipif(which(tool) is None)` live tests stay as defense-in-depth, but the presence test is what guarantees the live path is exercised in the gate. **`hyperfine` stays a `skipif` system binary** — so the cross-tool e2e (which needs the full timed path) runs only where hyperfine is installed; the per-adapter live tests (which call `run_command` directly) run without it. Strict gate unchanged (ruff + pyrefly-strict + pytest).
 
 **Inputs:** spec `docs/superpowers/specs/2026-06-07-typebench-design.md` (§6 LOCKED) · research `docs/superpowers/research/2026-06-08-checker-cli-facts.md` (authoritative per-tool flags/exits/parse) · reference adapter `src/typebench/adapters/pyright.py` (Plan 2A).
 
-> **Version skew warning (from the research doc):** ty is preview (`0.0.x`, churns) and mypy 2.x added flags absent in 1.x. The adapters below use only flags valid across mypy 1.x/2.x and ty 0.0.44. Re-verify on any bump. Pin nothing tighter than the gate needs; the §9 lock manifest (a later plan) owns reproducible pinning.
+> **Version skew warning (from the research doc + local re-verify):** ty is preview (`0.0.x`, churns) and mypy 2.x added flags absent in 1.x. The research doc verified ty 0.0.44 / mypy 2.1.0 / pyright 1.1.410; **pyrefly was verified against `main` but the gate resolves `pyrefly>=0.16` (locally observed: pyrefly 1.0.0)** — so the pyrefly JSON shape (`errors[].severity`), `--summary=full` "N module(s)" stderr line, `--output-format json`, and `preset="default"` MUST be re-confirmed against the *installed* version, not `main` (use `pyrefly dump-config --config <gen>` to validate the config loads). The adapters below use only flags valid across mypy 1.x/2.x and ty 0.0.44. Re-verify on any bump. Pin nothing tighter than the gate needs; the §9 lock manifest (a later plan) owns reproducible pinning.
 
 ---
 
@@ -33,13 +33,15 @@ Before every commit (pre-commit enforces): `uv run ruff format .` (clean) · `uv
 |------|----------------|
 | `src/typebench/wrapper.py` | extract `universal_failure_prefix(raw) -> ResultClass \| None`; `classify_with_map` delegates to it (no behavior change). Update the `PLAN 2 TRAP` comment. |
 | `src/typebench/adapters/mypy.py` | `MypyAdapter` — text-summary parse, regex `--exclude`, `--config-file=`, `--cache-dir=/dev/null`, exit-2 disambiguation (`INTERNAL ERROR`→crash), single-process cap. |
-| `src/typebench/adapters/ty.py` | `TyAdapter` — `concise` stdout parse + `-v` stderr files, generated `ty.toml`, `TY_MAX_PARALLELISM` soft cap, exit map (101→crash), files-None tolerated. |
-| `src/typebench/adapters/pyrefly.py` | `PyreflyAdapter` — generated `pyrefly.toml` (`preset="default"`), JSON `errors[]` + `--summary=full` stderr files, exit-1 disambiguation, `--threads 1` hard cap. |
+| `src/typebench/adapters/ty.py` | `TyAdapter` — `concise` stdout parse + `-v` stderr files, generated `ty.toml` with a `[src]` `exclude` table + **`--force-exclude`** (gitignore-style excludes do NOT apply to command-line paths without it — verified against ty docs/local), `TY_MAX_PARALLELISM` soft cap, exit map (101→crash), files-None tolerated. No `tomllib` import (the test reads the file back, the adapter only writes it). |
+| `src/typebench/adapters/pyrefly.py` | `PyreflyAdapter` — generated `pyrefly.toml` (`preset="default"`), JSON `errors[]` + `--summary=full` stderr files (regex tolerates **singular** "1 module"), exit-1 disambiguation, `--threads 1` hard cap. |
 | `src/typebench/cli.py` | register `mypy`, `ty`, `pyrefly` in `_ADAPTERS`. |
-| `pyproject.toml` | add `mypy`, `ty`, `pyrefly` to the `dev` group. |
-| `tests/test_mypy_adapter.py`, `tests/test_ty_adapter.py`, `tests/test_pyrefly_adapter.py` | per-tool unit + live tests (live `skipif` tool absent — but the tools are hard dev deps so they RUN). |
-| `tests/test_wrapper.py` | add a `universal_failure_prefix` test; existing classify tests stay green. |
-| `tests/test_all_tools_e2e.py` | cross-tool e2e: every registered real tool flags the error fixture (`DIAGNOSTICS`, `diagnostics>0`) and passes the clean fixture (`CLEAN`). Neutrality guardrail — one parametrized test, all tools held to the identical contract. |
+| `pyproject.toml` | add `mypy`, `ty` to the `dev` group (**`pyrefly` is already there**). |
+| `tests/test_mypy_adapter.py`, `tests/test_ty_adapter.py`, `tests/test_pyrefly_adapter.py` | per-tool unit + live tests, including **live exclusion-enforcement** and **live hostile-config-suppression** tests (behavioral, not just structural-argv checks). |
+| `tests/test_wrapper.py` | add a `universal_failure_prefix` test; existing classify tests stay green. **Merge** the new imports into the existing header (do not paste a second `from typebench.wrapper import RawRun ...` block — that re-imports `RawRun` and double-imports `ResultClass`, both ruff F811). |
+| `tests/test_hard_deps.py` | **non-skipping** presence test — FAILS if `mypy`/`ty`/`pyrefly`/`pyright` are not on PATH, so "hard dev dep ⇒ live path runs" is enforced rather than silently skipped. |
+| `tests/test_all_tools_e2e.py` | cross-tool e2e: every registered real tool flags the error fixture (`DIAGNOSTICS`, `diagnostics>0`) and passes the clean fixture (`CLEAN`). Neutrality guardrail — one parametrized test, all tools held to the identical contract. Skips only when `hyperfine` is absent. |
+| `fixtures/exclude_project/` | new fixture: `pkg/ok.py` (clean) + `pkg/tests/broken.py` (a blatant type error). The locked excludes must drop `**/tests/**`, so a correct adapter reports `CLEAN`; a broken exclusion reports `DIAGNOSTICS`. Drives the live exclusion test for every tool. Add to `ruff` `extend-exclude` is unnecessary (already `extend-exclude = ["fixtures"]`). |
 
 ---
 
@@ -49,10 +51,10 @@ Before every commit (pre-commit enforces): `uv run ruff format .` (clean) · `uv
 
 mypy (exit 2) and pyrefly (exit 1) can't use `classify_with_map` directly — their exit code is overloaded, so they need the universal prefix (env/oom/timeout/signal) and then *custom* exit logic. Extract the prefix so there is still **one** definition.
 
-- [ ] **Step 1: Add the failing test** in `tests/test_wrapper.py`:
+- [ ] **Step 1: Add the failing test** in `tests/test_wrapper.py`. **MERGE the import below into the file's existing import header** — `test_wrapper.py` already does `from typebench.wrapper import RawRun, classify_default, run_command` and `from typebench.models import ResultClass`. Add only `universal_failure_prefix` to the existing wrapper import line and reuse the existing `ResultClass` import (do NOT add a second `from typebench.taxonomy import ResultClass` — re-binding `ResultClass`/`RawRun` is ruff F811). The two functions below go into the file body:
 ```python
-from typebench.wrapper import RawRun, universal_failure_prefix
-from typebench.taxonomy import ResultClass
+# (header already imports RawRun, ResultClass; add universal_failure_prefix to the wrapper import)
+from typebench.wrapper import universal_failure_prefix
 
 
 def test_universal_failure_prefix_returns_none_when_no_universal_condition() -> None:
@@ -257,10 +259,14 @@ def test_live_error_project(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(not _HAS_MYPY, reason="mypy not installed")
 def test_install_records_compiled_flag() -> None:
-    # Reproducibility: mypy is mypyc-compiled by default; install() should record
-    # the version string (which carries "(compiled: yes)") for the §9 manifest.
+    # Reproducibility (§9): the default PyPI mypy wheel is mypyc-compiled and its
+    # --version ends with "(compiled: yes)". The lock manifest depends on this, so
+    # a NON-compiled mypy in the gate is a real reproducibility regression the test
+    # must catch — assert the marker, not merely "not unknown". (If a future build
+    # ships non-compiled by design, downgrade this to a warning then, deliberately.)
     info = MypyAdapter().install()
     assert info and info != "unknown"
+    assert "(compiled: yes)" in info, f"expected mypyc-compiled mypy for §9 reproducibility, got: {info!r}"
 ```
 
 - [ ] **Step 2: Run, expect FAIL** (`ModuleNotFoundError`): `uv run pytest tests/test_mypy_adapter.py -v`
@@ -477,8 +483,12 @@ def test_command_writes_ty_toml_and_builds_argv(tmp_path: Path) -> None:
     written = tomllib.loads(cfg_path.read_text())
     assert written["environment"]["python-version"] == "3.11"
     assert written["environment"]["python-platform"] == "linux"
+    # §6 excludes rendered into [src].exclude (gitignore-style, project-anchored).
+    assert written["src"]["exclude"]
+    assert any("tests" in e for e in written["src"]["exclude"])
     assert argv[0] == "ty" and argv[1] == "check"
     assert "/abs/src" in argv
+    assert "--force-exclude" in argv  # excludes MUST apply to command-line paths
     assert "--python" in argv and "/v/bin/python" in argv
     assert "--output-format" in argv and "concise" in argv
     assert "-v" in argv  # needed for the Indexed-files count
@@ -545,9 +555,9 @@ None). See docs/superpowers/research/2026-06-08-checker-cli-facts.md (ty)."""
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
-import tomllib
 from typing import TYPE_CHECKING
 
 from typebench.adapters.base import ParallelismCap, coerce_count
@@ -592,27 +602,33 @@ class TyAdapter:
         thread_mode: ThreadMode,
         workdir: Path,
     ) -> tuple[list[str], dict[str, str]]:
-        ty_config = {
-            "environment": {
-                "python-version": config.python_version,
-                "python-platform": config.python_platform,
-            }
-        }
-        # tomllib has no writer; hand-render the tiny, fixed-shape config. Keys are
-        # known-safe literals (no user strings in keys); values are quoted.
+        # Hand-render the tiny ty.toml (tomllib is read-only — no writer; the test
+        # reads it back, the adapter only writes it). [environment] carries
+        # version/platform; [src].exclude carries the §6 excludes in ty's
+        # gitignore-style syntax (anchored to the project root). json.dumps quotes
+        # the string values safely; keys are fixed literals (no user strings).
+        exclude_items = ", ".join(json.dumps(g) for g in config.exclude_globs)
         lines = [
             "[environment]",
             f'python-version = "{config.python_version}"',
             f'python-platform = "{config.python_platform}"',
+            "",
+            "[src]",
+            f"exclude = [{exclude_items}]",
         ]
         config_path = workdir / "ty.toml"
         config_path.write_text("\n".join(lines) + "\n")
-        _ = ty_config  # documents the intended shape; the lines above are the source
 
         argv = [
             "ty", "check",
             *config.src_roots,
             "--config-file", str(config_path),  # suppress project [tool.ty] discovery
+            # CRITICAL (ty docs, locally verified): gitignore-style excludes do NOT
+            # apply to paths passed on the command line unless --force-exclude is set.
+            # Without it a nested tests/ dir under an absolute src_root is still
+            # checked -> breaks the §6 excludes contract and inflates ty's
+            # diagnostics/file-count vs the others (neutrality leak).
+            "--force-exclude",
             "--python-version", config.python_version,
             "--python-platform", config.python_platform,
             "--output-format", "concise",
@@ -621,7 +637,7 @@ class TyAdapter:
             "--color", "never",
         ]
         for glob in config.exclude_globs:
-            argv += ["--exclude", glob]
+            argv += ["--exclude", glob]  # belt-and-suspenders alongside [src].exclude
         if config.venv_python is not None:
             argv += ["--python", config.venv_python]  # resolve third-party from venv
 
@@ -644,7 +660,7 @@ class TyAdapter:
         found = _FOUND_RE.search(stdout)
         if found is not None:
             return (coerce_count(int(found.group(1))), files)
-        return (None, files if files is not None else None)
+        return (None, files)
 
     def classify(self, raw: RawRun) -> ResultClass:
         result = classify_with_map(raw, _EXIT_MAP)
@@ -663,7 +679,7 @@ class TyAdapter:
     def prepare_command(self, project: str) -> str | None:
         return None
 ```
-> Note: the `ty_config` dict + `_ = ty_config` is awkward — if the reviewer prefers, drop the dict entirely and keep only the `lines` rendering (the test reads the file back with `tomllib`, so only the written TOML matters). The implementer may simplify to just the `lines`/`write_text` and delete the unused dict to avoid the `_ =` discard. Keep the `tomllib` import only if used (the test imports it, not the adapter — so the adapter likely should NOT import `tomllib`; remove it if unused to avoid F401).
+> ruff: the adapter imports `json`/`re`/`subprocess` (all stdlib, all used) and does **not** import `tomllib` (only the *test* reads the file back). `ParallelismCap`/`coerce_count`/`classify_with_map` are all used. Verify clean with `uv run ruff check` — the canonical block above is gate-clean as written (no F401, no `_ =` discard).
 
 - [ ] **Step 4: Run, expect PASS** (live tests run): `uv run pytest tests/test_ty_adapter.py -v`.
 - [ ] **Step 5: Commit:** `git add -A && git commit -m "feat(adapters): TyAdapter (concise+stderr parse, ty.toml, soft TY_MAX_PARALLELISM cap)"`
@@ -678,7 +694,7 @@ Reference facts: research doc → pyrefly section. Generated `pyrefly.toml` with
 
 > **NEUTRALITY NOTE:** pyrefly is the user's own project. It gets the *exact same* treatment as the others — generated neutral config, stock `preset="default"` (not the favorable `basic`, not the harsh `strict`), identical parse-sanity and failure taxonomy. No special-casing in either direction. This adapter is reviewed to the same bar; the cross-tool e2e (Task 5) holds it to the identical contract.
 
-- [ ] **Step 0: Add the dev dependency** — `"pyrefly"` to `[dependency-groups] dev`; `uv sync`; confirm `shutil.which("pyrefly")`.
+- [ ] **Step 0: Confirm the dev dependency** — `pyrefly` is **already** in `[dependency-groups] dev` (`pyrefly>=0.16`, it powers the strict gate). Do NOT re-add it. Just `uv sync` and confirm `shutil.which("pyrefly")` resolves and `pyrefly --version` (record it — locally 1.0.0; the JSON/summary facts must match this version, not `main`).
 
 - [ ] **Step 1: Write the failing test** — `tests/test_pyrefly_adapter.py`:
 ```python
@@ -719,6 +735,13 @@ def test_parse_counts_only_error_severity() -> None:
 
 def test_parse_clean_zero_errors() -> None:
     assert PyreflyAdapter().parse(json.dumps({"errors": []}), "INFO 5 modules\n", 0) == (0, 5)
+
+
+def test_parse_counts_singular_module() -> None:
+    # pyrefly prints "1 module" (singular) for a one-module project; the regex
+    # must tolerate it or single-module fixtures parse files=None (then false-clean
+    # detection silently weakens). Locally observed on pyrefly 1.0.0.
+    assert PyreflyAdapter().parse(json.dumps({"errors": []}), "INFO 1 module\n", 0) == (0, 1)
 
 
 def test_parse_files_none_without_summary() -> None:
@@ -806,8 +829,11 @@ def test_live_clean_project(tmp_path: Path) -> None:
     argv, env = PyreflyAdapter().command("clean", cfg, ThreadMode.ONE_CORE, tmp_path)
     raw = run_command(argv, timeout=120, env=env)
     assert PyreflyAdapter().classify(raw) == ResultClass.CLEAN
-    diags, _files = PyreflyAdapter().parse(raw.stdout, raw.stderr, raw.exit_code)
+    diags, files = PyreflyAdapter().parse(raw.stdout, raw.stderr, raw.exit_code)
     assert diags == 0
+    # The --summary=full "N module(s)" line must parse on the real tool, else the
+    # false-clean guard silently degrades to "tolerate None". Assert it works live.
+    assert files is not None and files > 0
 
 
 @pytest.mark.skipif(not _HAS_PYREFLY, reason="pyrefly not installed")
@@ -816,8 +842,9 @@ def test_live_error_project(tmp_path: Path) -> None:
     argv, env = PyreflyAdapter().command("err", cfg, ThreadMode.ONE_CORE, tmp_path)
     raw = run_command(argv, timeout=120, env=env)
     assert PyreflyAdapter().classify(raw) == ResultClass.DIAGNOSTICS
-    diags, _ = PyreflyAdapter().parse(raw.stdout, raw.stderr, raw.exit_code)
+    diags, files = PyreflyAdapter().parse(raw.stdout, raw.stderr, raw.exit_code)
     assert diags is not None and diags > 0
+    assert files is not None and files > 0
 ```
 
 - [ ] **Step 2: Run, expect FAIL:** `uv run pytest tests/test_pyrefly_adapter.py -v`
@@ -847,7 +874,7 @@ if TYPE_CHECKING:
     from typebench.normalized_config import NormalizedConfig
     from typebench.wrapper import RawRun
 
-_MODULES_RE = re.compile(r"(\d+) modules")
+_MODULES_RE = re.compile(r"(\d+) modules?")  # singular "1 module" is real output
 
 
 def _toml_str_list(values: tuple[str, ...]) -> str:
@@ -1034,28 +1061,158 @@ _ADAPTERS = {
 }
 ```
 
-- [ ] **Step 4: Update the `PLAN 2 TRAP` comment** in `src/typebench/wrapper.py` `main()` to record the empirical finding (all four tools' measured-success codes ⊆ `{0,1}`, so the generic gate agrees with every adapter's probe `classify`; the trap stays latent only for a hypothetical future tool whose diagnostics exit code ≠ 1). Keep the gate code as-is — do NOT thread tool-specific codes; document why it is unnecessary.
+- [ ] **Step 4: Update the `PLAN 2 TRAP` comment** in `src/typebench/wrapper.py` `main()` to record the HONEST finding — do not claim the trap is fully "defused":
+  - **Success path:** all four tools' measured-success codes ⊆ `{0,1}`, so the generic gate agrees with each adapter's probe `classify`. No success-code threading is needed for the clean/diagnostics case.
+  - **Residual blind spot (pyrefly):** exit 1 is overloaded (diagnostics OR fatal env). The probe uses the real `Adapter.classify`, disambiguates it, and gates whether timing runs — so a *deterministically*-broken run is caught at probe and never timed. But a **flaky fatal pyrefly exit-1 that occurs only during a timed run** is read by `classify_default` as `DIAGNOSTICS` → measured-success → hyperfine silently times a broken run. Threading `{0,1}` success codes would NOT fix this (exit 1 is in the success set yet still ambiguous). The only real fix is adapter-aware timing classification, which the wrapper **cannot** do without importing pydantic — it must stay pydantic-free (`test_wrapper_import_does_not_pull_pydantic`). Record this as **accepted residual risk for 2B**; revisit when the timing path is reworked.
+  - **mypy (no blind spot):** overloaded exit 2 is OUTSIDE `{0,1}`, so a flaky timed-run exit 2 → wrapper returns nonzero → hyperfine aborts → collector records a failure (mislabeled crash-vs-env, but never silently timed).
+  Keep the gate code as-is (do not thread tool-specific codes — they wouldn't close the pyrefly gap anyway).
 
 - [ ] **Step 5: Run, expect PASS** (all four tools registered; e2e runs with hyperfine present): `uv run pytest tests/test_all_tools_e2e.py -v`, then the FULL suite `uv run pytest -q`.
 - [ ] **Step 6: Commit:** `git add -A && git commit -m "feat(cli): register mypy/ty/pyrefly; cross-tool e2e neutrality guardrail"`
 
 ---
 
+## Task 6: Neutrality enforcement — hard-dep presence, live exclusions, hostile-config suppression
+
+**Files:** Create `fixtures/exclude_project/...`, `tests/test_hard_deps.py`, `tests/test_neutrality_live.py`.
+
+The argv/structural tests prove the adapters *build* the right flags; this task proves the flags *behave* — that excludes actually drop files and that the project's own config is actually ignored. Without these, two neutrality-critical contracts (locked §6 excludes, config suppression) are asserted only structurally. These run without hyperfine (they call `run_command` directly, like the per-adapter live tests).
+
+- [ ] **Step 1: Create the exclusion fixture** — a clean top-level module plus a type error buried under `tests/` that the §6 excludes MUST drop:
+  - `fixtures/exclude_project/__init__.py` — empty.
+  - `fixtures/exclude_project/ok.py` — `x: int = 1`
+  - `fixtures/exclude_project/tests/__init__.py` — empty.
+  - `fixtures/exclude_project/tests/broken.py` — `y: str = 123  # excluded -> must NOT be reported`
+  (`fixtures/` is already in ruff `extend-exclude`, so the deliberate error is not linted.)
+
+- [ ] **Step 2: Write `tests/test_hard_deps.py`** — the non-skipping presence guard so "hard dev dep ⇒ live path runs" is enforced, not silently skipped:
+```python
+import shutil
+
+import pytest
+
+# pyrefly is already a dev dep; mypy + ty are added in 2B; pyright came in 2A.
+_HARD_DEPS = ["mypy", "ty", "pyrefly", "pyright"]
+
+
+@pytest.mark.parametrize("binary", _HARD_DEPS)
+def test_hard_dependency_is_installed(binary: str) -> None:
+    # These are declared dev deps, so the gate MUST have them on PATH. This test
+    # FAILS (does not skip) when one is missing — turning the per-tool live tests'
+    # silent `skipif` skips into one loud, intentional failure. hyperfine is the
+    # ONLY tool allowed to be absent (it stays a skipif system binary).
+    assert shutil.which(binary) is not None, (
+        f"{binary} is a hard dev dep but is not on PATH; run `uv sync` and retry"
+    )
+```
+
+- [ ] **Step 3: Write `tests/test_neutrality_live.py`** — behavioral exclusion + config-suppression, parametrized over all four adapters:
+```python
+import shutil
+from pathlib import Path
+
+import pytest
+
+from typebench.adapters.base import Adapter
+from typebench.adapters.mypy import MypyAdapter
+from typebench.adapters.pyrefly import PyreflyAdapter
+from typebench.adapters.pyright import PyrightAdapter
+from typebench.adapters.ty import TyAdapter
+from typebench.models import ResultClass, ThreadMode
+from typebench.normalized_config import NormalizedConfig
+from typebench.wrapper import run_command
+
+_FIXTURES = Path(__file__).parent.parent / "fixtures"
+
+# (name, adapter, discovered-config filename, body that WOULD hide all diagnostics
+# if the tool honored the project's own config instead of our generated one).
+_CASES: list[tuple[str, Adapter, str, str]] = [
+    ("mypy", MypyAdapter(), "mypy.ini", "[mypy]\nignore_errors = True\n"),
+    ("ty", TyAdapter(), "ty.toml", '[src]\nexclude = ["**/*.py"]\n'),
+    ("pyrefly", PyreflyAdapter(), "pyrefly.toml", 'project-excludes = ["**/*.py"]\n'),
+    ("pyright", PyrightAdapter(), "pyrightconfig.json", '{"typeCheckingMode": "off"}\n'),
+]
+_IDS = [c[0] for c in _CASES]
+
+
+def _classify(adapter: Adapter, src_root: Path, workdir: Path) -> ResultClass:
+    cfg = NormalizedConfig(src_roots=(str(src_root),))
+    argv, env = adapter.command("neutral", cfg, ThreadMode.ONE_CORE, workdir)
+    raw = run_command(argv, timeout=120, env=env)
+    return adapter.classify(raw)
+
+
+@pytest.mark.parametrize(("name", "adapter", "_fn", "_body"), _CASES, ids=_IDS)
+def test_excludes_drop_nested_tests_dir(
+    name: str, adapter: Adapter, _fn: str, _body: str, tmp_path: Path
+) -> None:
+    if shutil.which(name) is None:
+        pytest.skip(f"{name} not installed")
+    # exclude_project = clean ok.py + a type error under tests/. The §6 excludes
+    # MUST drop **/tests/** so the error never surfaces -> CLEAN. A broken exclusion
+    # (e.g. ty without --force-exclude) checks tests/broken.py -> DIAGNOSTICS, which
+    # fails here. This is the live regression guard for the exclude contract.
+    result = _classify(adapter, _FIXTURES / "exclude_project", tmp_path)
+    assert result == ResultClass.CLEAN, f"{name} did not exclude tests/ (got {result})"
+
+
+@pytest.mark.parametrize(("name", "adapter", "filename", "body"), _CASES, ids=_IDS)
+def test_hostile_project_config_is_suppressed(
+    name: str,
+    adapter: Adapter,
+    filename: str,
+    body: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if shutil.which(name) is None:
+        pytest.skip(f"{name} not installed")
+    # A project with a REAL type error plus a hostile config that would silence it
+    # if discovered. cwd is set to the project so each tool's normal config
+    # discovery (cwd / walk-up) WOULD find the hostile file — making the test
+    # non-trivial. Our adapter suppresses the project config (mypy --config-file=,
+    # ty/pyrefly/pyright explicit generated config), so the error MUST still be
+    # reported -> DIAGNOSTICS. If the tool honored the hostile config we'd get
+    # CLEAN -> neutrality breach -> failure here.
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "__init__.py").write_text("")
+    (proj / "broken.py").write_text("bad: str = 123\n")
+    (proj / filename).write_text(body)
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    monkeypatch.chdir(proj)  # so discovery WOULD find the hostile config absent suppression
+    result = _classify(adapter, proj, workdir)
+    assert result == ResultClass.DIAGNOSTICS, (
+        f"{name} appears to have honored {filename} (got {result}); project config not suppressed"
+    )
+```
+> The hostile-config test deliberately `chdir`s into the project so each tool's discovery would otherwise pick up the file (mypy reads config from cwd, not the target dir, so without the chdir its case would pass trivially). If a future tool discovers config by a mechanism cwd doesn't cover, strengthen its case rather than trusting a green pass. Adapters use absolute `src_roots`, so the chdir does not perturb path math.
+
+- [ ] **Step 4: Run, expect PASS** (all four installed via hard deps): `uv run pytest tests/test_hard_deps.py tests/test_neutrality_live.py -v`, then the FULL suite. If `test_excludes_drop_nested_tests_dir[ty]` fails, `--force-exclude` / `[src].exclude` is the culprit. If a `test_hostile_project_config_is_suppressed[*]` fails, that tool's config suppression is leaking.
+- [ ] **Step 5: Commit:** `git add -A && git commit -m "test(neutrality): live exclusion + hostile-config suppression + hard-dep presence guards"`
+
+---
+
 ## Definition of Done (Plan 2B)
-- Quality gate green (ruff + pyrefly-strict + pytest). mypy, ty, pyrefly are hard dev deps, so all live + cross-tool e2e tests **run** (not skipped) and verify the real path.
+- Quality gate green (ruff + pyrefly-strict + pytest). The new code blocks are gate-clean as written (no F401/F811/`_ =` discards). `mypy`+`ty` are added as dev deps; `pyrefly` already is one. `test_hard_deps.py` **fails** (not skips) if any of mypy/ty/pyrefly/pyright is missing, so the per-tool live `skipif` tests genuinely run in the gate. `hyperfine` is the only allowed-absent binary: the per-adapter live tests run without it, but the **cross-tool e2e requires it** and skips where it is absent (CI that wants the neutrality guardrail must install hyperfine).
 - `typebench run --tool {mypy,ty,pyrefly} --src-root <dir> --output r.json` each produce a schema-valid `RunResult` with real `diagnostics`, `files` (where the tool exposes it), and (with hyperfine) `timing`.
-- Each adapter suppresses the project's own config (`mypy --config-file=`; `ty --config-file <gen>`; `pyrefly --config <gen>`), analyzes all bodies, resolves third-party via the venv while reporting first-party only, and uses stock-neutral severity (`mypy` default, `ty` default, `pyrefly preset="default"`).
+- Each adapter **provably** suppresses the project's own config — asserted behaviorally by `test_hostile_project_config_is_suppressed` (a hostile config that would silence real errors is ignored → DIAGNOSTICS still reported), not just structurally. Each uses stock-neutral severity (`mypy` default, `ty` default, `pyrefly preset="default"`) and analyzes all bodies.
+- The §6 excludes are **provably enforced** — `test_excludes_drop_nested_tests_dir` checks that a type error buried under `tests/` is dropped by every tool (CLEAN). ty specifically requires `--force-exclude` + a `[src].exclude` table, because gitignore excludes do not apply to command-line paths otherwise.
+- Third-party resolution is wired (`mypy --python-executable`/`--follow-imports=silent`, `ty --python`, `pyrefly python-interpreter-path`; all report first-party only) and **structurally** unit-tested, but on stdlib-only fixtures it is only stdlib-exercised here — full first-party-only-with-real-deps verification is **deferred to Plan 3**.
 - Overloaded exits are disambiguated: mypy 2 (`INTERNAL ERROR`→crash else env), pyrefly 1 (parseable errors→diagnostics else env). ty 101→crash, 2→env.
-- Thread caps honest: pyrefly `--threads 1` hard, ty `TY_MAX_PARALLELISM=1` soft, mypy single-process. `thread_mode_enforced` stays `False` (affinity is Plan 4).
-- Parse-sanity per tool: exit-0 with a CONFIRMED 0 file/module count → `failed{env}` for all; `files is None` is promoted to env only for the reliable-count tools (mypy, pyright), tolerated for the stderr-scraped tools (ty, pyrefly).
+- Thread caps honest: pyrefly `--threads 1` hard, ty `TY_MAX_PARALLELISM=1` soft, mypy single-process. `thread_mode_enforced` stays `False` for all (full 1-core honesty needs affinity, Plan 4) even though pyrefly's cap is already hard.
+- Parse-sanity per tool: exit-0 with a CONFIRMED 0 file/module count → `failed{env}` for all; `files is None` is promoted to env only for the reliable-count tools (mypy, pyright), tolerated for the stderr-scraped tools (ty, pyrefly). The pyrefly module regex tolerates singular "1 module"; live pyrefly tests assert `files > 0`.
 - `universal_failure_prefix` is the single source of the §7 prefix; `classify_with_map` delegates to it; all Plan 1/2A tests stay green.
-- The cross-tool e2e holds every real tool to the identical contract (error fixture → DIAGNOSTICS+counts+timing; clean fixture → CLEAN) — the neutrality guardrail.
+- The cross-tool e2e holds every real tool to the identical contract (error fixture → DIAGNOSTICS+counts+timing; clean fixture → CLEAN) — the neutrality guardrail (hyperfine-gated).
+- **PLAN 2 TRAP residual (documented, accepted for 2B):** the timing wrapper's generic `{0,1}` gate cannot disambiguate pyrefly's overloaded exit 1, so a flaky fatal pyrefly exit-1 that occurs only during a timed run would be silently timed. The probe gates the deterministic case; the flaky-during-timing case is an accepted blind spot (the wrapper must stay pydantic-free, so adapter-aware timing classification is deferred).
 - No corpus/envman/cgroup/renderer (Plans 3–6). Multi-core track wiring exists (omit cap) but affinity/calibration is Plan 4.
 
 ## Self-Review notes
-- **Neutrality:** all four adapters use the same NormalizedConfig, the same failure taxonomy, the same parse-sanity discipline, and stock-neutral severity. pyrefly gets `preset="default"` (not the favorable `basic`), reviewed to the same bar, held to the identical cross-tool e2e contract. No winner framing anywhere.
+- **Neutrality:** all four adapters use the same NormalizedConfig, the same failure taxonomy, the same parse-sanity discipline, and stock-neutral severity. pyrefly gets `preset="default"` (not the favorable `basic`), reviewed to the same bar, held to the identical cross-tool e2e contract. Neutrality is now enforced *behaviorally*, not just structurally: Task 6 proves excludes drop files and project config is suppressed for every tool (live). No winner framing anywhere.
+- **Open question (verify before exec):** is `infer-return-types = "checked"` (pyrefly config) the *stock default*? If it is a non-default choice it is a pyrefly-only knob with no cross-tool equivalent — a small neutrality asymmetry. Confirm via `pyrefly dump-config`; drop the line if it diverges from the default.
 - **§6 coverage (per tool):** target file set (src_roots) · excludes · python version+platform · resolve-deps-report-first-party (mypy `--follow-imports=silent`+`--python-executable`; ty `--python`; pyrefly `python-interpreter-path`; all report first-party only) · analyze all bodies (mypy `--check-untyped-defs`, ty/pyrefly default-on) · stock severities · suppress project config · no plugins. Third-party *resolution* is wired + unit-tested but only stdlib-exercised here (fully exercised in Plan 3).
-- **Wrapper/timing interaction:** verified all four measured-success code sets ⊆ {0,1}, so the generic wrapper gate agrees with each probe `classify` — no per-tool success codes threaded (Task 5 documents this). The PLAN 2 TRAP is defused, not worked-around.
-- **Known fragilities (flagged, not hidden):** ty has no JSON → `concise` text + `-v` stderr files (may be None, tolerated); pyrefly files come from a stderr summary line. Both are version-fragile (ty 0.0.x churns) — the research doc says re-verify on bump. mypy `--num-workers` deliberately unused (experimental, perturbs diagnostics).
-- **Carry-over to Plan 3:** verify each tool's file/module count excludes dependency files (neutral throughput denominator) once the corpus has real third-party deps; today's fixtures are stdlib-only.
-- **Placeholders:** none — every step has full code/commands. The two simplification notes (ty `ty_config` dict; unused imports) are explicitly called out for the implementer to resolve at the gate.
+- **Wrapper/timing interaction (honest):** on the success path all four measured-success code sets ⊆ {0,1}, so the generic wrapper gate agrees with each probe `classify`. The PLAN 2 TRAP is **partially** defused — pyrefly's overloaded exit 1 leaves a residual blind spot: a flaky fatal exit-1 *during a timed run* is read as DIAGNOSTICS and silently timed. The probe gates the deterministic case; the flaky-during-timing case is accepted residual risk for 2B (the wrapper must stay pydantic-free, so adapter-aware timing classification is deferred). Threading {0,1} success codes would not close it. Task 5's comment + the DoD record this honestly.
+- **Known fragilities (flagged, not hidden):** ty has no JSON → `concise` text + `-v` stderr files (may be None, tolerated); pyrefly files come from a `--summary=full` stderr line (singular "1 module" handled). Both are version-fragile (ty 0.0.x churns; pyrefly resolved at `>=0.16`, locally 1.0.0 — re-verify JSON/summary against the *installed* version, not `main`). mypy `--num-workers` deliberately unused (experimental, perturbs diagnostics).
+- **Carry-over to Plan 3:** (1) verify each tool's file/module count excludes dependency files (neutral throughput denominator) once the corpus has real third-party deps — today's fixtures are stdlib-only. (2) verify **exclude-glob dialect parity**: mypy gets a regex (handled), but ty/pyright/pyrefly all receive the same glob strings despite potentially different dialects (ty is gitignore-style); confirm the excluded set is identical across tools on a corpus that actually contains excluded dirs, else the throughput denominator diverges.
+- **Placeholders:** none — every step has full, gate-clean code/commands. The earlier ty `tomllib`/`ty_config` smell is fixed in-place (the adapter no longer imports `tomllib` or carries a discarded dict); the Task 1 test note flags the import-merge so the block does not double-import.
