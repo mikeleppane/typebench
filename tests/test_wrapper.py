@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from typebench.models import ResultClass
-from typebench.wrapper import RawRun, classify_default, run_command
+from typebench.wrapper import RawRun, classify_default, run_command, universal_failure_prefix
 
 
 def test_run_command_captures_clean_exit() -> None:
@@ -102,3 +102,23 @@ def test_wrapper_import_does_not_pull_pydantic() -> None:
     )
     proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
     assert proc.returncode == 0, proc.stderr
+
+
+def test_universal_failure_prefix_returns_none_when_no_universal_condition() -> None:
+    # exit code alone is NOT a universal condition -> None (caller decides).
+    assert universal_failure_prefix(RawRun(0, None, False, False, "", "")) is None
+    assert universal_failure_prefix(RawRun(1, None, False, False, "", "")) is None
+    assert universal_failure_prefix(RawRun(2, None, False, False, "", "")) is None
+
+
+def test_universal_failure_prefix_detects_each_condition() -> None:
+    assert (
+        universal_failure_prefix(RawRun(0, None, False, False, "", "", env_error=True))
+        == ResultClass.FAILED_ENV
+    )
+    assert universal_failure_prefix(RawRun(0, None, False, True, "", "")) == ResultClass.FAILED_OOM
+    assert (
+        universal_failure_prefix(RawRun(0, None, True, False, "", "")) == ResultClass.FAILED_TIMEOUT
+    )
+    assert universal_failure_prefix(RawRun(0, 9, False, False, "", "")) == ResultClass.FAILED_OOM
+    assert universal_failure_prefix(RawRun(0, 11, False, False, "", "")) == ResultClass.FAILED_CRASH

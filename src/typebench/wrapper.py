@@ -107,14 +107,13 @@ _EXIT_CODE_CLASSES: dict[int, ResultClass] = {
 }
 
 
-def classify_with_map(raw: RawRun, exit_map: dict[int, ResultClass]) -> ResultClass:
-    """Universal §7 prefix (env/oom/timeout/signal) then the tool's exit-code
-    map; unknown codes fall to FAILED_CRASH. Tools with overloaded codes
-    (mypy 2, pyrefly 1) override classify() with extra stdout/stderr logic.
-
-    Precedence (order matters, spec §5.1/§7): env-error, then explicit OOM,
-    then timeout, then the SIGKILL->OOM heuristic, then other signals -> crash,
-    then the exit-code table."""
+def universal_failure_prefix(raw: RawRun) -> ResultClass | None:
+    """The env/oom/timeout/signal classification shared by EVERY tool, in §7
+    precedence order. Returns the failure class when a universal condition
+    applies, else None — the caller then applies its own exit-code logic. This
+    is the single source of the prefix for both `classify_with_map` (tools with a
+    clean exit map) and the overloaded-exit adapters (mypy 2, pyrefly 1) that
+    need custom per-code logic afterwards."""
     if raw.env_error:
         return ResultClass.FAILED_ENV
     if raw.oom:
@@ -125,6 +124,16 @@ def classify_with_map(raw: RawRun, exit_map: dict[int, ResultClass]) -> ResultCl
         return ResultClass.FAILED_OOM
     if raw.signal is not None:
         return ResultClass.FAILED_CRASH
+    return None
+
+
+def classify_with_map(raw: RawRun, exit_map: dict[int, ResultClass]) -> ResultClass:
+    """Universal §7 prefix then the tool's exit-code map; unknown codes fall to
+    FAILED_CRASH. Tools with overloaded codes (mypy 2, pyrefly 1) instead call
+    `universal_failure_prefix` directly and run their own exit-code logic."""
+    prefix = universal_failure_prefix(raw)
+    if prefix is not None:
+        return prefix
     return exit_map.get(raw.exit_code, ResultClass.FAILED_CRASH)
 
 
