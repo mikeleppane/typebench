@@ -63,9 +63,16 @@ class PyreflyAdapter:
         excludes: tuple[str, ...] = tuple(
             f"{root}/{glob}" for root in config.src_roots for glob in config.exclude_globs
         )
+        # search-path = src_roots: the generated config lives in the run-scoped
+        # workdir (/tmp/...), so pyrefly would otherwise infer its import root from
+        # THAT temp dir and fail to resolve first-party imports in a src-layout
+        # project -> spurious `missing-import` diagnostics + skewed timing (a
+        # neutrality leak the other tools don't have). Pinning search-path to the
+        # source tree makes first-party imports resolve from where the code lives.
         lines = [
             'preset = "default"',
             f"project-includes = {_toml_str_list(config.src_roots)}",
+            f"search-path = {_toml_str_list(config.src_roots)}",
             f"project-excludes = {_toml_str_list(excludes)}",
             f'python-version = "{config.python_version}"',
             f'python-platform = "{config.python_platform}"',

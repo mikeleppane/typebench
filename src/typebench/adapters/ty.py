@@ -80,6 +80,12 @@ class TyAdapter:
             # checked -> breaks the §6 excludes contract and inflates ty's
             # diagnostics/file-count vs the others (neutrality leak).
             "--force-exclude",
+            # The normalized file set must come ONLY from src_roots + exclude_globs.
+            # By default ty honors the project's .gitignore (inside a git repo), so a
+            # project that git-ignores some first-party Python would have those files
+            # SKIPPED by ty while the other tools still analyze them -> different file
+            # set -> a false-clean / undercount (neutrality leak). Disable it.
+            "--no-respect-ignore-files",
             "--python-version",
             config.python_version,
             "--python-platform",

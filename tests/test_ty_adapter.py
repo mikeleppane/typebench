@@ -1,4 +1,5 @@
 import shutil
+import subprocess
 import tomllib
 from pathlib import Path
 
@@ -149,4 +150,34 @@ def test_live_error_project(tmp_path: Path) -> None:
     raw = run_command(argv, timeout=120, env=env)
     assert TyAdapter().classify(raw) == ResultClass.DIAGNOSTICS
     diags, _ = TyAdapter().parse(raw.stdout, raw.stderr, raw.exit_code)
+    assert diags is not None and diags > 0
+
+
+def test_command_disables_ignore_file_filtering() -> None:
+    # Regression: ty respects a project's .gitignore by default, so first-party
+    # files a real (git) project ignores would be SKIPPED by ty while the other
+    # tools analyze them -> non-neutral file set / false-clean. The normalized
+    # file set must derive only from src_roots + exclude_globs.
+    cfg = NormalizedConfig(src_roots=("/abs/src",))
+    argv, _env = TyAdapter().command("demo", cfg, ThreadMode.ONE_CORE, Path("/tmp"))
+    assert "--no-respect-ignore-files" in argv
+
+
+@pytest.mark.skipif(not _HAS_TY, reason="ty not installed")
+def test_live_gitignored_first_party_file_is_still_checked(tmp_path: Path) -> None:
+    # In a real git repo, a .gitignore'd source file with a type error must STILL
+    # be flagged (ty default would skip it -> false clean). Live guard for the
+    # ignore-file neutrality fix.
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "m.py").write_text("bad: str = 123\n")
+    (tmp_path / ".gitignore").write_text("src/m.py\n")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    cfg = NormalizedConfig(src_roots=(str(src),))
+    argv, env = TyAdapter().command("gi", cfg, ThreadMode.ONE_CORE, workdir)
+    raw = run_command(argv, timeout=120, env=env)
+    assert TyAdapter().classify(raw) == ResultClass.DIAGNOSTICS, raw.stdout + raw.stderr
+    diags, _files = TyAdapter().parse(raw.stdout, raw.stderr, raw.exit_code)
     assert diags is not None and diags > 0

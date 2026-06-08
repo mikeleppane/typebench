@@ -159,3 +159,27 @@ def test_live_error_project(tmp_path: Path) -> None:
     diags, files = PyreflyAdapter().parse(raw.stdout, raw.stderr, raw.exit_code)
     assert diags is not None and diags > 0
     assert files is not None and files > 0
+
+
+def test_command_sets_search_path_to_src_roots(tmp_path: Path) -> None:
+    # Regression: the generated config lives in the run-scoped workdir, so without
+    # an explicit search-path pyrefly infers its import root from /tmp and a
+    # src-layout project's first-party imports become spurious `missing-import`
+    # diagnostics (neutrality leak). search-path must be pinned to the src roots.
+    cfg = NormalizedConfig(src_roots=("/abs/src",))
+    PyreflyAdapter().command("demo", cfg, ThreadMode.ONE_CORE, tmp_path)
+    written = tomllib.loads((tmp_path / "pyrefly.toml").read_text())
+    assert written["search-path"] == ["/abs/src"]
+
+
+@pytest.mark.skipif(not _HAS_PYREFLY, reason="pyrefly not installed")
+def test_live_resolves_first_party_imports_in_src_layout(tmp_path: Path) -> None:
+    # pkg_project is a clean src-layout package whose pkg/b.py does
+    # `from pkg.a import X`. With search-path pinned to the src root this resolves
+    # and the project is CLEAN; without the fix pyrefly reports `missing-import`
+    # (DIAGNOSTICS) purely because the config sits in a temp dir. Live guard for
+    # the import-root neutrality fix.
+    cfg = NormalizedConfig(src_roots=(str(_FIXTURES / "pkg_project"),))
+    argv, env = PyreflyAdapter().command("pkg", cfg, ThreadMode.ONE_CORE, tmp_path)
+    raw = run_command(argv, timeout=120, env=env)
+    assert PyreflyAdapter().classify(raw) == ResultClass.CLEAN, raw.stdout + raw.stderr
