@@ -277,6 +277,24 @@ def test_run_subprocess_missing_binary_returns_nonzero_not_raises() -> None:
     assert "typebench-nonexistent-binary-xyz" in out.stderr
 
 
+def test_prepare_project_relative_cache_root_uses_absolute_install_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # With a RELATIVE cache_root, _install must still run with an absolute
+    # VIRTUAL_ENV/cwd; otherwise (cwd=repo) the relative venv resolves against the
+    # repo dir, deps install nowhere, and the freeze comes back empty -> lock drift.
+    monkeypatch.chdir(tmp_path)
+    run = _CloningRunner({("uv", "pip"): RunOut(0, "idna==3.0\n", "")})
+    prepared = prepare_project(_httpx_entry(), Path("relcache"), run=run)
+    install_calls = [c for c in run.calls if c[0][:3] == ["uv", "pip", "install"]]
+    assert install_calls
+    for _argv, cwd, env in install_calls:
+        assert env is not None and Path(env["VIRTUAL_ENV"]).is_absolute()
+        assert cwd is not None and cwd.is_absolute()
+    assert Path(prepared.venv_python).is_absolute()
+    assert prepared.canonical_files == 2
+
+
 def test_prepare_project_rebuilds_on_corrupt_sidecar(tmp_path: Path) -> None:
     cache = tmp_path / "cache"
     first = prepare_project(

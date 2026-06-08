@@ -253,6 +253,11 @@ def prepare_project(
     run: Runner = run_subprocess,
 ) -> PreparedProject:
     """Clone, build venv, install, freeze, verify lock, count, and cache."""
+    # Resolve to absolute up front: _install runs the recipe with cwd=repo, so a
+    # relative venv/repo (e.g. the default relative `.typebench-cache`) would make
+    # VIRTUAL_ENV/PATH resolve against the repo dir instead of the caller's CWD —
+    # deps would install nowhere and the freeze would come back empty.
+    cache_root = cache_root.resolve()
     dest = cache_root / f"{entry.name}@{entry.sha}"
     sidecar = dest / _SIDECAR
     constraints_path, constraints_text = _resolve_constraints(entry)
