@@ -8,7 +8,7 @@ import os
 # runtime via inspect.signature(eval_str=True), so `Path` in `Annotated[Path,
 # typer.Option(...)]` must be importable then; `run` also calls Path() at runtime.
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 
@@ -18,13 +18,23 @@ from typebench.adapters.pyright import PyrightAdapter
 from typebench.adapters.stub import StubAdapter
 from typebench.adapters.ty import TyAdapter
 from typebench.collector import run_single
+from typebench.corpus import load_suite
+from typebench.envman import PrepareError, prepare_project
 from typebench.models import ThreadMode
-from typebench.normalized_config import NormalizedConfig
+from typebench.normalized_config import DEFAULT_EXCLUDES, NormalizedConfig
+from typebench.preflight import preflight_project
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from typebench.adapters.base import Adapter
+    from typebench.corpus import CorpusProject
+    from typebench.models import PreparedProject
 
 app = typer.Typer(help="Neutral Python type-checker performance benchmark.")
 
 # Adapter registry. All four real checkers + the controllable stub.
-_ADAPTERS = {
+_ADAPTERS: dict[str, Callable[[], Adapter]] = {
     "mypy": MypyAdapter,
     "pyright": PyrightAdapter,
     "pyrefly": PyreflyAdapter,
@@ -43,11 +53,34 @@ def main() -> None:
     """
 
 
+def _adapters_for(tools: list[str]) -> list[Adapter]:
+    """Resolve tool names to adapter instances, erroring on an unknown tool."""
+    out: list[Adapter] = []
+    for name in tools:
+        factory = _ADAPTERS.get(name)
+        if factory is None:
+            typer.echo(f"Unknown tool: {name!r}. Known: {sorted(_ADAPTERS)}", err=True)
+            raise typer.Exit(code=2)
+        out.append(factory())
+    return out
+
+
+def _lookup_project(corpus: Path, name: str) -> CorpusProject:
+    for entry in load_suite(corpus):
+        if entry.name == name:
+            return entry
+    typer.echo(f"Unknown corpus project: {name!r} in {corpus}", err=True)
+    raise typer.Exit(code=2)
+
+
 @app.command()
 def run(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI option, not a code smell
     tool: Annotated[str, typer.Option(help="Checker to run (e.g. stub).")],
-    project: Annotated[str, typer.Option(help="Project name or path.")],
     output: Annotated[Path, typer.Option(help="Where to write the results JSON.")],
+    project: Annotated[
+        str | None,
+        typer.Option(help="Project name/path (omit when using --corpus-project)."),
+    ] = None,
     thread_mode: Annotated[ThreadMode, typer.Option(help="Thread track.")] = ThreadMode.ALL_CORES,
     runs: Annotated[int, typer.Option(help="hyperfine timed runs.")] = 10,
     warmup: Annotated[int, typer.Option(help="hyperfine warmup runs.")] = 3,
@@ -63,6 +96,16 @@ def run(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI optio
     venv: Annotated[
         str | None, typer.Option(help="Project venv interpreter for dep resolution.")
     ] = None,
+    corpus: Annotated[
+        Path | None,
+        typer.Option(help="suite.toml; with --corpus-project, derive config from it."),
+    ] = None,
+    corpus_project: Annotated[
+        str | None, typer.Option(help="Corpus project name to run (requires --corpus).")
+    ] = None,
+    cache_root: Annotated[
+        Path, typer.Option(help="Where prepared clones/venvs are cached.")
+    ] = Path(".typebench-cache"),
 ) -> None:
     factory = _ADAPTERS.get(tool)
     if factory is None:
@@ -77,6 +120,31 @@ def run(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI optio
         typer.echo(f"Output directory not writable: {out_dir}", err=True)
         raise typer.Exit(code=2)
 
+    prepared: PreparedProject | None = None
+    if corpus_project is not None:
+        if corpus is None:
+            typer.echo("--corpus-project requires --corpus.", err=True)
+            raise typer.Exit(code=2)
+        if src_root or venv:
+            typer.echo("--corpus-project cannot be combined with --src-root/--venv.", err=True)
+            raise typer.Exit(code=2)
+        entry = _lookup_project(corpus, corpus_project)
+        try:
+            prepared = prepare_project(entry, cache_root)
+        except PrepareError as exc:
+            # Same controlled-failure posture as the `preflight` command: a
+            # clone/install/lock-drift failure is a CLI error, not a traceback.
+            typer.echo(f"prepare failed for {corpus_project!r}: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+        project = entry.name
+        src_root = list(prepared.src_roots)
+        python_version = prepared.python_version
+        python_platform = prepared.python_platform
+        venv = prepared.venv_python or None
+    if project is None:
+        typer.echo("Provide --project (manual) or --corpus-project (corpus mode).", err=True)
+        raise typer.Exit(code=2)
+
     src_roots = src_root or []
     # Fail fast: a real checker with no source roots yields an empty `include`
     # -> 0 files analyzed -> a false "clean". The stub legitimately ignores src
@@ -87,6 +155,7 @@ def run(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI optio
 
     config = NormalizedConfig(
         src_roots=tuple(str(Path(s).resolve()) for s in src_roots),
+        exclude_globs=(prepared.exclude_globs if prepared is not None else DEFAULT_EXCLUDES),
         python_version=python_version,
         python_platform=python_platform,
         # abspath, NOT resolve(): a venv's bin/python is a symlink to the base
@@ -107,6 +176,41 @@ def run(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI optio
     )
     output.write_text(result.model_dump_json(indent=2))
     typer.echo(f"{tool} / {project} -> {result.result_class.value} -> {output}")
+
+
+@app.command()
+def preflight(
+    corpus: Annotated[Path, typer.Option(help="Path to suite.toml.")],
+    project: Annotated[str, typer.Option(help="Corpus project name to preflight.")],
+    output: Annotated[Path, typer.Option(help="Where to write the PreflightReport JSON.")],
+    tool: Annotated[
+        list[str] | None,
+        typer.Option(help="Tools to probe (repeatable). Default: all four real checkers."),
+    ] = None,
+    cache_root: Annotated[
+        Path, typer.Option(help="Where prepared clones/venvs are cached.")
+    ] = Path(".typebench-cache"),
+    timeout: Annotated[float, typer.Option(help="Per-probe timeout (seconds).")] = 900.0,
+) -> None:
+    """Prepare a corpus project and probe each tool once."""
+    entry = _lookup_project(corpus, project)
+    tools = tool or ["mypy", "pyright", "ty", "pyrefly"]
+    adapters = _adapters_for(tools)
+    out_dir = output.parent
+    if not out_dir.exists() or not os.access(out_dir, os.W_OK):
+        typer.echo(f"Output directory not writable: {out_dir}", err=True)
+        raise typer.Exit(code=2)
+    try:
+        prepared = prepare_project(entry, cache_root)
+    except PrepareError as exc:
+        typer.echo(f"preflight: prepare failed for {project!r}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    report = preflight_project(prepared, adapters, timeout=timeout)
+    output.write_text(report.model_dump_json(indent=2))
+    status = "ready" if report.ready else "NOT READY"
+    typer.echo(f"preflight {project} -> {status} ({report.canonical_files} files) -> {output}")
+    if not report.ready:
+        raise typer.Exit(code=1)
 
 
 if __name__ == "__main__":
