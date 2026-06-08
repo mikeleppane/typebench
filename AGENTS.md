@@ -6,9 +6,9 @@ and, later, cgroup v2 (peak memory + CPU-time). Results are versioned JSON; the
 README and GH Pages are rendered views. Design spec:
 `docs/superpowers/specs/2026-06-07-typebench-design.md`.
 
-**Status:** engine spine (Plan 1) — a timing-only vertical slice driven by a stub
-adapter. Real checker adapters, corpus pinning, cgroup memory, and rendered output
-land in later plans.
+**Status:** Plan 3 (corpus + envman + preflight) — real projects pinned to release
+SHAs, per-project uv venvs so third-party imports resolve, preflight gate. cgroup
+memory, threads, and calibration remain Plan 4; renderer Plan 5; CI/bump Plan 6.
 
 ## Golden rule: this is a measurement tool
 
@@ -23,6 +23,17 @@ doubt, prefer the honest, conservative, reproducible choice over the convenient 
   - `models.py` — pydantic schemas (`RunResult`, `TimingStats`, `EnvFingerprint`),
     `ConfigDict(extra="forbid")`.
   - `env.py` — environment fingerprint.
+  - `corpus.py` — `CorpusProject`, `SizeBucket`, `load_suite` (corpus as data;
+    dir-segment exclude validation; optional checked-in constraints lock).
+  - `counting.py` — `count_first_party`, the neutral throughput denominator (§8;
+    physical-LOC, file count is the scc-independent denominator).
+  - `envman.py` — `prepare_project`: clone@SHA / uv venv / install (pinned to the
+    constraints lock) / freeze+verify / count, behind a fingerprinted cache that
+    rebuilds on stale config and cleans up partial failures. The only subprocess
+    surface besides the wrapper.
+  - `preflight.py` — `preflight_project`: probes the four tools, records the
+    self-reported-vs-canonical divergence, and gates readiness on mis-scope
+    (self < canonical) while flagging over-report for the renderer (§8/§12/§191).
   - `wrapper.py` — `RawRun`, `run_command`, `classify_default`, and the CLI used as
     hyperfine's per-run command.
   - `timing.py` — hyperfine pass + `parse_hyperfine_json`.
@@ -105,11 +116,16 @@ code unless the task is that plan. The adapter Protocol is pinned to its final-i
 shape; methods not yet exercised (`install`, `parallelism_cap`) are deliberately
 deferred — don't delete them, don't build behavior behind them early.
 
+Plan 3 adds corpus/envman/preflight. Do NOT add cgroup memory, CPU affinity, the
+results envelope, the renderer, or bump automation — those are Plans 4-6. Do NOT
+change `RunResult` or `taxonomy.py` values; the lock-manifest enrichment is Plan 5.
+
 ## Commits
 
 Conventional Commits, **required scope**, atomic, body explains the *why*. Scopes in
 use: `scaffold, models, taxonomy, env, wrapper, timing, adapters, collector, cli,
-e2e, ruff, plan, spec, docs, engine`. **No AI/assistant attribution** in commit
+e2e, ruff, plan, spec, docs, engine, corpus, envman, preflight, counting`. **No
+AI/assistant attribution** in commit
 messages or PR bodies — commits read as the author's own work. See the
 `git-conventions` skill.
 
