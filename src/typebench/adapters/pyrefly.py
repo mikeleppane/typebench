@@ -58,10 +58,15 @@ class PyreflyAdapter:
         # policy — NOT basic (under-reports -> false-clean) and NOT strict
         # (over-reports). Explicit project-includes prevents the loose-file
         # fallback to basic. json.dumps quotes string values safely.
+        # pyrefly project-excludes needs absolute globs (relative **/dir/** patterns
+        # are silently ignored in pyrefly 1.0.0). Scope each glob under each src_root.
+        excludes: tuple[str, ...] = tuple(
+            f"{root}/{glob}" for root in config.src_roots for glob in config.exclude_globs
+        )
         lines = [
             'preset = "default"',
             f"project-includes = {_toml_str_list(config.src_roots)}",
-            f"project-excludes = {_toml_str_list(config.exclude_globs)}",
+            f"project-excludes = {_toml_str_list(excludes)}",
             f'python-version = "{config.python_version}"',
             f'python-platform = "{config.python_platform}"',
             "check-unannotated-defs = true",

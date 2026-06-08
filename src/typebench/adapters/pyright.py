@@ -90,9 +90,17 @@ class PyrightAdapter:
         # a false-clean). The config lives in `workdir`, so render each absolute
         # src_root as a workdir-relative path (pyright docs: Path Handling).
         includes = [_relative_to(root, workdir) for root in config.src_roots]
+        # pyright excludes are relative to the project root (workdir). Generic globs
+        # like `**/tests/**` do NOT match under a `../../...` include tree — pyright
+        # resolves them only within direct child paths. Scope each exclude glob under
+        # each include so the §6 exclusion contract holds regardless of include depth.
+        excludes: list[str] = []
+        for inc in includes:
+            for glob in config.exclude_globs:
+                excludes.append(f"{inc}/{glob}")
         pyright_config: dict[str, object] = {
             "include": includes,
-            "exclude": list(config.exclude_globs),
+            "exclude": excludes,
             "typeCheckingMode": "standard",  # stock default (§6)
             "useLibraryCodeForTypes": True,  # resolve deps, report first-party only
             "pythonVersion": config.python_version,
