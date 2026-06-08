@@ -1,6 +1,6 @@
 ---
 name: code-review-and-quality
-description: Multi-axis code review for the typebench repo before merge — your own code, another agent's, or a teammate's PR. Adds benchmark-aware checks for measurement fidelity, record honesty, and failure completeness on top of the standard correctness/readability/architecture/security/performance review. Use whenever you are about to merge, or when asked "is this ready?", "review this", "check this change", "look this over". Reviewing AI-generated code is a stronger trigger, not a weaker one — false confidence is the dominant failure mode.
+description: Multimodal multi-axis code review for the typebench repo before merge — your own code, another agent's, or a teammate's PR. Runs two independent reviewers (Claude Opus 4.8 + Codex gpt-5.5, both at xhigh effort) and synthesizes their findings. Adds benchmark-aware checks for measurement fidelity, record honesty, and failure completeness on top of the standard correctness/readability/architecture/security/performance review. Use whenever you are about to merge, or when asked "is this ready?", "review this", "check this change", "look this over". Reviewing AI-generated code is a stronger trigger, not a weaker one — false confidence is the dominant failure mode.
 ---
 
 # Code Review & Quality (typebench)
@@ -16,6 +16,57 @@ This skill is for the *review* moment. Companion skills cover the *production* m
 **Spot-checks vs. rule restatement.** The five axes below contain triage prompts of the form "did you check X?". Those are deliberate — they name *what* to look for during the walk-through. They are not the rule itself. When you file a finding, cite the source skill or AGENTS.md section rather than restating the rule content in the review; the source is authoritative and this skill cannot stay in sync with it forever.
 
 Project-specific rules live in [AGENTS.md](../../../AGENTS.md) and override anything in this skill. The benchmark-aware checks below are this skill's highest-value contribution — a measurement tool has failure modes a generic reviewer misses.
+
+---
+
+## Multimodal review — two models, one synthesized report
+
+**This skill is run by two independent reviewers and their findings are merged.** A single model — however capable — has a blind spot that correlates with how it was trained. typebench's product is *trust in the numbers*; a review that misses a measurement-bias defect ships a tool that lies confidently. Two architecturally different models reviewing the same diff is the cheapest way to break that correlation: a finding both raise is high-confidence, and a finding only one raises is exactly the class the other was blind to.
+
+The two reviewers:
+
+| Reviewer | Model | Effort | Role |
+|---|---|---|---|
+| **Primary** | Claude Opus 4.8 | xhigh | Runs the full process below (all five axes + the benchmark-aware checks). Owns the final synthesized report. |
+| **Second** | Codex `gpt-5.5` | xhigh | Independent second pass via the Codex CLI. Read-only, non-interactive. |
+
+Both reviewers see the **same diff** and the **same intent** (Step 1). They run **concurrently** — do not let one wait on the other. Then a **synthesis pass** (run by the primary, Opus 4.8) merges the two into a single report.
+
+### Running the two reviewers
+
+Establish the base branch once (`git merge-base HEAD main`), then launch both in parallel (background each; collect when both finish):
+
+**Second reviewer — Codex `gpt-5.5`, xhigh, read-only:**
+
+```bash
+codex exec review --base <base-branch> -c model_reasoning_effort="xhigh" > /tmp/codex-review.txt 2>&1
+```
+
+Codex CLI specifics (learned the hard way — keep them here so the next run doesn't re-discover them):
+
+- `codex exec review --base <branch>` is the purpose-built, non-interactive, **read-only-sandbox** review subcommand. It diffs the branch against `<branch>` itself — you do **not** pipe the diff in.
+- **`--base` cannot be combined with a custom `[PROMPT]` positional** — Codex errors with `the argument '--base <BRANCH>' cannot be used with '[PROMPT]'`. For custom instructions use `--uncommitted` / `--commit <sha>` (which *do* allow a prompt) or pipe a prompt via stdin with `-`. With `--base`, rely on Codex's built-in reviewer.
+- **`-m gpt-5.5-codex` is rejected on a ChatGPT-account login** (`The 'gpt-5.5-codex' model is not supported when using Codex with a ChatGPT account`). Omit `-m` so Codex uses the account's default `gpt-5.5`, or log in with an API key for explicit model ids. Set effort with `-c model_reasoning_effort="xhigh"`, not `-m`.
+- If `bubblewrap` is absent Codex warns and falls back to a bundled sandbox — harmless for a read-only review.
+
+**Primary reviewer — Claude Opus 4.8, xhigh:** this is the agent running this skill. Either review inline (you are Opus 4.8), or, when you need a *third* independent Claude pass on a fresh context, run:
+
+```bash
+git diff <base-branch>...HEAD | claude -p "<paste this skill's process + the change intent>" --permission-mode plan
+```
+
+### Synthesis — merging the two reports
+
+The primary (Opus 4.8) produces **one** report from both inputs. The synthesis is not concatenation — it is adjudication. Rules:
+
+1. **Verify every finding against the code before it enters the merged report.** Both models hallucinate: a wrong `file:line`, a finding that ignores existing error handling, a fix that breaks a different invariant. The synthesizer *reads the quoted line* and confirms the defect is real. An unverifiable finding is dropped (or demoted to `FYI: <model> flagged X — could not confirm`). This gate is the whole point — two models also means two sources of false positives.
+2. **Tag every surviving finding with its origin:** `[opus]`, `[codex]`, or `[both]`. Put `[both]` (convergent) findings first within each severity — independent agreement is the strongest signal in the report.
+3. **Resolve conflicts by reading the code, not by vote.** When one model flags a defect the other implicitly or explicitly cleared, the synthesizer adjudicates from the source and records the disagreement: `[codex] flagged, [opus] cleared → confirmed real because …` (or `→ false positive because …`). Never silently drop the losing side; the disagreement is signal for the next reviewer.
+4. **Severity = the higher of the two, unless verification downgrades it.** A `Critical` from either model stays `Critical` until the synthesizer proves otherwise in writing.
+5. **Apply the budget *after* the merge.** `Critical`/`Important` stay uncapped; the `Suggestion`+`Nit` cap (5–7) applies to the merged set, preferring `[both]` items when trimming.
+6. **The benchmark-aware checks are owned by the primary.** Codex does not have this skill's project context; treat a missed measurement-fidelity / record-honesty / failure-completeness defect as the primary's responsibility regardless of what Codex returned. Convergence is a bonus there, never a substitute.
+
+If Codex fails to produce a report (auth error, model rejection, timeout), **do not block** — proceed with the Opus 4.8 review alone and record it in the report header: `Reviewers: Opus 4.8 (xhigh) · Codex unavailable (<reason>)`. A one-model review is the floor, not a failure; the multimodal pass is an upgrade, not a gate.
 
 ---
 
@@ -448,9 +499,15 @@ Render the review as Markdown using this exact template. Stable structure means 
 ````markdown
 # Review — <PR title or short change description>
 
+## Reviewers
+
+<e.g. `Opus 4.8 (xhigh) · Codex gpt-5.5 (xhigh)` — or `Opus 4.8 (xhigh) · Codex unavailable (<reason>)`.
+Synthesized by Opus 4.8. Each finding below is tagged `[both]` / `[opus]` / `[codex]`.>
+
 ## Summary
 
-<2–4 sentences: what the change does, what state it's in, headline verdict.>
+<2–4 sentences: what the change does, what state it's in, headline verdict.
+If the two models converged or conflicted in a way that matters, say so in one line.>
 
 ## Verdict
 
@@ -514,10 +571,10 @@ If the verdict says Approve and the report contains an unresolved `Important`, t
 
 ### Per-finding format
 
-Each finding follows this structure. The outer block uses **4-backtick** fences so the inner ` ```python ` blocks render correctly inside it; copy this same shape if you reproduce the format elsewhere.
+Each finding follows this structure. The origin tag (`[both]` / `[opus]` / `[codex]`) comes right after the severity; `[both]` findings sort first within their severity. The outer block uses **4-backtick** fences so the inner ` ```python ` blocks render correctly inside it; copy this same shape if you reproduce the format elsewhere.
 
 `````markdown
-**Critical: <short title>**
+**Critical [both]: <short title>**
 `src/typebench/collector.py:60`
 
 ```python
@@ -576,6 +633,14 @@ Before delivering the report, sanity-check it against this list. Each item is so
 - [ ] The verdict matches the findings — `Approve` doesn't co-exist with any unaddressed `Critical` or `Important`.
 - [ ] Approval is backed by something concrete (axes walked, verification confirmed) — never just "LGTM".
 
+**Multimodal:**
+
+- [ ] Both reviewers ran (Opus 4.8 + Codex gpt-5.5, xhigh) — or Codex's absence is recorded in the `## Reviewers` header with a reason.
+- [ ] Every finding carries an origin tag (`[both]` / `[opus]` / `[codex]`); `[both]` findings sort first within their severity.
+- [ ] Every merged finding was verified against the actual code — no model's finding was copied in unverified.
+- [ ] Conflicts (one model flagged, the other cleared) are adjudicated in writing, not silently dropped.
+- [ ] Benchmark-aware coverage was owned by the primary, not delegated to convergence with Codex.
+
 ---
 
 ## Common rationalizations
@@ -595,6 +660,9 @@ The thoughts that lead to a bad review. Notice them, reverse course.
 | "I'll approve and they can fix it later" | Later rarely comes. If it needs fixing, request changes. If it doesn't, drop the finding. |
 | "It's almost the same as how I'd write it, so close enough" | "Definitely improves overall code health" is the bar, not "matches my style". Approve. |
 | "This change is too big to review properly, so I'll skim it" | Skimming a 1500-line change is how real bugs reach main. Push back: split it. |
+| "Both models agree, so it's definitely real" | Two models share training-data blind spots and can converge on the *same* false positive. Convergence raises confidence; it doesn't replace reading the line. |
+| "Codex didn't flag it, so the measured-path / record-honesty check is covered" | Codex doesn't have this skill's benchmark context. The primary owns those checks; silence from Codex is not coverage. |
+| "Codex errored, I'll abort the review" | A one-model review is the floor, not a failure. Record Codex's absence in the header and ship the Opus 4.8 review. |
 
 ---
 
@@ -622,6 +690,11 @@ Things that are easy to get wrong here. Add to this list when a real review miss
 ````markdown
 # Review — feat(adapters): add coerce_count guard to stub parse()
 
+## Reviewers
+
+Opus 4.8 (xhigh) · Codex gpt-5.5 (xhigh). Synthesized by Opus 4.8. Both models cleared the
+measured path and the failure-record contract; the one surviving finding is `[opus]`.
+
 ## Summary
 
 Routes the stub adapter's parsed diagnostics/files counts through `coerce_count`
@@ -637,7 +710,7 @@ Approve with suggestions — change is mergeable; one non-blocking suggestion wo
 
 ### Suggestion
 
-**Suggestion: Assert the recorded RunResult, not just the parse() return**
+**Suggestion [opus]: Assert the recorded RunResult, not just the parse() return**
 `tests/test_adapters.py:22`
 
 ```python
