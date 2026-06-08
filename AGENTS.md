@@ -38,6 +38,11 @@ doubt, prefer the honest, conservative, reproducible choice over the convenient 
     hyperfine's per-run command.
   - `timing.py` — hyperfine pass + `parse_hyperfine_json`.
   - `collector.py` — `run_single`, the probe→time pipeline that assembles one `RunResult`.
+  - `measure.py` — resource pass (spec §5.5): cgroup v2 peak memory + CPU-time +
+    OOM under a transient `systemd-run --scope`. Pydantic-free (runs as a scoped
+    child); capability-gated with a timing-only fallback on mac/CI.
+  - `calibration.py` — fixed dep-free CPU workload (`calib-pyloop-v1`) timed per run
+    for VM-to-VM trend normalization (spec §5.7). Pydantic-free import.
   - `cli.py` — Typer app (`typebench run`).
   - `_fake_checker.py` — in-package controllable fake checker (ships in the wheel)
     that the stub drives.

@@ -13,8 +13,9 @@ from dataclasses import dataclass
 
 from typebench.taxonomy import ResultClass
 
-# OOM-killer signal. A bare SIGKILL with no cgroup OOM flag is treated as an
-# OOM heuristic until cgroup OOM detection lands (Plan 4 sets RawRun.oom).
+# OOM-killer signal. A bare SIGKILL is the OOM heuristic on the FALLBACK (non-
+# cgroup) probe path. The cgroup-scoped resource pass (typebench.measure, Plan 4)
+# sets RawRun.oom authoritatively from memory.events.oom_kill when available.
 _SIGKILL = 9
 
 
