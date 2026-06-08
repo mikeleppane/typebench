@@ -17,6 +17,7 @@ dev = [
     "ruff>=0.8",
     "pyrefly>=0.16",
     "pre-commit>=3.7",
+    "pyright>=1.1.400",
 ]
 
 [build-system]
