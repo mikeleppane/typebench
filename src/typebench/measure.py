@@ -6,11 +6,16 @@ run. Stays stdlib-only + `typebench.wrapper`."""
 
 from __future__ import annotations
 
+import argparse
+import json
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from typebench.wrapper import run_command
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -111,3 +116,55 @@ def capable(runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess
     except (OSError, subprocess.SubprocessError):
         return False
     return proc.returncode == 0
+
+
+def _sample_to_dict(sample: CgroupSample) -> dict[str, object]:
+    return {
+        "peak_bytes": sample.peak_bytes,
+        "cpu_usage_usec": sample.cpu_usage_usec,
+        "cpu_user_usec": sample.cpu_user_usec,
+        "cpu_system_usec": sample.cpu_system_usec,
+        "oom_kill": sample.oom_kill,
+        "mem_stat": sample.mem_stat,
+    }
+
+
+def main(raw_args: list[str] | None = None) -> int:
+    """In-scope wrapper. Run as `systemd-run --user --scope -- python -m
+    typebench.measure --out FILE --timeout S -- <argv>`. Runs the checker to
+    completion, then — WHILE STILL INSIDE THE SCOPE (§5.5 read-before-teardown) —
+    reads its own cgroup and writes a JSON payload (outcome + cgroup sample) to
+    --out. Always exits 0 so systemd-run sees success; the real outcome is in the
+    payload. The checker output is captured by run_command (bounded diagnostics
+    text), and this Python process's small footprint is a ~constant per-tool
+    baseline charged to the scope (Decision F)."""
+    parser = argparse.ArgumentParser(prog="typebench.measure")
+    parser.add_argument("--out", required=True)
+    parser.add_argument("--timeout", type=float, required=True)
+    parser.add_argument("argv", nargs=argparse.REMAINDER)
+    ns = parser.parse_args(raw_args)
+    argv = ns.argv[1:] if ns.argv and ns.argv[0] == "--" else ns.argv
+
+    raw = run_command(argv, timeout=ns.timeout)
+    try:
+        sample = read_cgroup_stats(_self_cgroup_dir())
+        cgroup: dict[str, object] | None = _sample_to_dict(sample)
+    except OSError:
+        cgroup = None
+
+    payload = {
+        "exit_code": raw.exit_code,
+        "signal": raw.signal,
+        "timed_out": raw.timed_out,
+        "oom": raw.oom,
+        "env_error": raw.env_error,
+        "stdout": raw.stdout,
+        "stderr": raw.stderr,
+        "cgroup": cgroup,
+    }
+    Path(ns.out).write_text(json.dumps(payload))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
