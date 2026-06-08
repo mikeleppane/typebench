@@ -17,6 +17,7 @@ from typebench.adapters.pyrefly import PyreflyAdapter
 from typebench.adapters.pyright import PyrightAdapter
 from typebench.adapters.stub import StubAdapter
 from typebench.adapters.ty import TyAdapter
+from typebench.calibration import calibrate
 from typebench.collector import run_single
 from typebench.corpus import load_suite
 from typebench.envman import PrepareError, prepare_project
@@ -91,6 +92,26 @@ def run(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI optio
     thread_mode: Annotated[ThreadMode, typer.Option(help="Thread track.")] = ThreadMode.ALL_CORES,
     runs: Annotated[int, typer.Option(help="hyperfine timed runs.")] = 10,
     warmup: Annotated[int, typer.Option(help="hyperfine warmup runs.")] = 3,
+    mem_runs: Annotated[
+        int,
+        typer.Option(
+            help=(
+                "Resource-pass repeats (peak memory variance, spec §5.5). >=1; >=3 for "
+                "official numbers."
+            )
+        ),
+    ] = 3,
+    measure: Annotated[
+        bool,
+        typer.Option(help="Run the cgroup memory/CPU pass (auto-skips if unavailable)."),
+    ] = True,
+    calibrate_baseline: Annotated[
+        bool,
+        typer.Option(
+            "--calibrate/--no-calibrate", help="Time the calibration workload (spec §5.7)."
+        ),
+    ] = True,
+    calib_runs: Annotated[int, typer.Option(help="Calibration workload repeats (>=1).")] = 5,
     timeout: Annotated[float, typer.Option(help="Per-invocation timeout (seconds).")] = 900.0,
     src_root: Annotated[
         list[str] | None,
@@ -125,6 +146,12 @@ def run(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI optio
     out_dir = output.parent
     if not out_dir.exists() or not os.access(out_dir, os.W_OK):
         typer.echo(f"Output directory not writable: {out_dir}", err=True)
+        raise typer.Exit(code=2)
+    if mem_runs < 1:
+        typer.echo("--mem-runs must be >= 1 (>= 3 recommended, spec §5.5).", err=True)
+        raise typer.Exit(code=2)
+    if calib_runs < 1:
+        typer.echo("--calib-runs must be >= 1.", err=True)
         raise typer.Exit(code=2)
 
     prepared: PreparedProject | None = None
@@ -172,6 +199,7 @@ def run(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI optio
         venv_python=os.path.abspath(venv) if venv is not None else None,  # noqa: PTH100 - need non-symlink-following abspath; Path.resolve() follows symlinks
     )
     adapter = factory()
+    calibration = calibrate(runs=calib_runs) if calibrate_baseline else None
     result = run_single(
         adapter,
         project=project,
@@ -180,6 +208,9 @@ def run(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI optio
         warmup=warmup,
         runs=runs,
         timeout=timeout,
+        mem_runs=mem_runs,
+        measure_enabled=measure,
+        calibration=calibration,
     )
     output.write_text(result.model_dump_json(indent=2))
     typer.echo(f"{tool} / {project} -> {result.result_class.value} -> {output}")
