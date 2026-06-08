@@ -33,6 +33,13 @@ if TYPE_CHECKING:
 
 app = typer.Typer(help="Neutral Python type-checker performance benchmark.")
 
+# Default location for prepared clones/venvs. MUST be a non-hidden directory:
+# pyrefly skips dot-directories during file discovery, so a hidden cache (e.g.
+# `.typebench-cache`) makes the corpus invisible to pyrefly ALONE — it would see
+# 0 files, fail{env}, and be silently excluded while the other tools run. A
+# tool-asymmetric cache location is a neutrality defect, so the default is plain.
+DEFAULT_CACHE_ROOT = Path("typebench-cache")
+
 # Adapter registry. All four real checkers + the controllable stub.
 _ADAPTERS: dict[str, Callable[[], Adapter]] = {
     "mypy": MypyAdapter,
@@ -105,7 +112,7 @@ def run(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI optio
     ] = None,
     cache_root: Annotated[
         Path, typer.Option(help="Where prepared clones/venvs are cached.")
-    ] = Path(".typebench-cache"),
+    ] = DEFAULT_CACHE_ROOT,
 ) -> None:
     factory = _ADAPTERS.get(tool)
     if factory is None:
@@ -189,7 +196,7 @@ def preflight(
     ] = None,
     cache_root: Annotated[
         Path, typer.Option(help="Where prepared clones/venvs are cached.")
-    ] = Path(".typebench-cache"),
+    ] = DEFAULT_CACHE_ROOT,
     timeout: Annotated[float, typer.Option(help="Per-probe timeout (seconds).")] = 900.0,
 ) -> None:
     """Prepare a corpus project and probe each tool once."""

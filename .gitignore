@@ -8,4 +8,7 @@ __pycache__/
 # Tool caches
 .pytest_cache/
 .ruff_cache/
+# Corpus clones/venvs. Non-hidden on purpose: pyrefly skips dot-dirs in file
+# discovery, so a hidden cache would hide the corpus from pyrefly alone.
+typebench-cache/
 .typebench-cache/

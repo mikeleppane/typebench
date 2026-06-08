@@ -111,6 +111,13 @@ def test_run_requires_project_or_corpus_project(tmp_path: Path) -> None:
     assert "project" in result.output.lower()
 
 
+def test_default_cache_root_is_not_hidden() -> None:
+    # pyrefly skips dot-directories in file discovery, so a hidden default cache
+    # would hide the corpus from pyrefly ALONE (it sees 0 files -> fail{env} ->
+    # silently excluded) -- a neutrality defect. Guard the default stays plain.
+    assert not cli.DEFAULT_CACHE_ROOT.name.startswith(".")
+
+
 def _boom_prepare(_entry: object, _cache_root: object) -> PreparedProject:
     raise PrepareError("clone failed: boom")
 
