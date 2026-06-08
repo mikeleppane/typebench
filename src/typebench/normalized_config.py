@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 # Excluded everywhere (spec §6): tests, vendored, generated, caches.
-_DEFAULT_EXCLUDES: tuple[str, ...] = (
+DEFAULT_EXCLUDES: tuple[str, ...] = (
     "**/tests/**",
     "**/test/**",
     "**/_vendor/**",
@@ -27,7 +27,7 @@ class NormalizedConfig:
     diagnostics only)."""
 
     src_roots: tuple[str, ...] = ()
-    exclude_globs: tuple[str, ...] = field(default=_DEFAULT_EXCLUDES)
+    exclude_globs: tuple[str, ...] = field(default=DEFAULT_EXCLUDES)
     python_version: str = "3.12"
     python_platform: str = "linux"
     venv_python: str | None = None

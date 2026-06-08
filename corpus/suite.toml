@@ -1,0 +1,17 @@
+# typebench corpus (spec §4). Each entry is pinned to a release-tag SHA so
+# third-party imports resolve identically over time. Checkers always float to
+# latest; the corpus is bumped via a PR-gated job (later plan). src_roots and
+# exclude_globs are repo-relative. install is the explicit per-entry recipe,
+# run with the prepared venv active.
+
+[[project]]
+name = "httpx"
+repo_url = "https://github.com/encode/httpx"
+sha = "80960fa31918d7663c3f4c3ad61661cf0e80628f"  # tag 0.28.0
+tag = "0.28.0"
+size_bucket = "small"
+python_version = "3.12"
+python_platform = "linux"
+src_roots = ["httpx"]
+install = ["uv pip install ."]
+constraints = "corpus/locks/httpx-0.28.0.txt"
