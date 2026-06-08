@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 # Runtime import (not TYPE_CHECKING): typer resolves option annotations at
 # runtime via inspect.signature(eval_str=True), so `Path` in `Annotated[Path,
 # typer.Option(...)]` must be importable then — else NameError. Hence noqa TC003.
@@ -45,6 +47,14 @@ def run(
     factory = _ADAPTERS.get(tool)
     if factory is None:
         typer.echo(f"Unknown tool: {tool!r}. Known: {sorted(_ADAPTERS)}", err=True)
+        raise typer.Exit(code=2)
+
+    # Fail fast on a bad --output: a single run can take many minutes, so a
+    # non-existent or read-only output directory must not surface only after all
+    # the measurement work is already done and unrecoverable.
+    out_dir = output.parent
+    if not out_dir.exists() or not os.access(out_dir, os.W_OK):
+        typer.echo(f"Output directory not writable: {out_dir}", err=True)
         raise typer.Exit(code=2)
 
     adapter = factory()

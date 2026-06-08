@@ -41,3 +41,15 @@ def test_cli_run_rejects_unknown_tool(tmp_path: Path) -> None:
     )
     assert result.exit_code == 2
     assert "Unknown tool" in result.output
+
+
+def test_cli_run_rejects_unwritable_output_dir(tmp_path: Path) -> None:
+    # A bad --output must fail fast (exit 2) BEFORE the run, not discard the work
+    # at the very end when the write fails.
+    missing = tmp_path / "does-not-exist" / "results.json"
+    result = runner.invoke(
+        app,
+        ["run", "--tool", "stub", "--project", "demo", "--output", str(missing)],
+    )
+    assert result.exit_code == 2
+    assert "writable" in result.output.lower()
