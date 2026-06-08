@@ -6,7 +6,7 @@
 
 **Architecture:** Add a `NormalizedConfig` value object and a run-scoped `workdir` so adapters can emit a tool-specific config file that suppresses the project's own config (spec §6). pyright is the reference adapter (cleanest: `--outputjson` summary gives both `errorCount` and `filesAnalyzed`; unambiguous exit codes). mypy/ty/pyrefly follow in Plan 2B against this template.
 
-**Tech Stack:** Python 3.12+, pydantic, typer, pytest, hyperfine. New external dep for tests: **pyright** (pinned npm or PyPI wrapper; tests `skipif` absent). Strict gate unchanged (ruff + pyrefly-strict + pytest).
+**Tech Stack:** Python 3.12+, pydantic, typer, pytest, hyperfine. New dev dep: **pyright** — a *hard* dev dependency (PyPI `pyright` wrapper, added to the `dev` group) so the live + e2e tests actually run in the gate and the "first real adapter end-to-end" claim is verified, not skipped. (Skip-gating the only tests that exercise the real path would let scoping bugs slip through a green CI.) `hyperfine` stays `skipif` (system binary, not pip-installable); the timing assertions skip when it is absent. Reproducible Node/pyright *pinning* for benchmark runs is a §9 lock-manifest concern (a later plan), not a test concern — the wrapper's ambient Node is fine for correctness tests. Strict gate unchanged (ruff + pyrefly-strict + pytest).
 
 **Inputs:** spec `docs/superpowers/specs/2026-06-07-typebench-design.md` (§6 LOCKED) · research `docs/superpowers/research/2026-06-08-checker-cli-facts.md` (authoritative flag facts).
 
@@ -22,13 +22,15 @@ Before every commit (pre-commit enforces): `uv run ruff format .` (clean) · `uv
 | File | Responsibility |
 |------|----------------|
 | `src/typebench/normalized_config.py` | `NormalizedConfig` frozen value object (§6 inputs: src roots, excludes, python version/platform, venv python) |
-| `src/typebench/adapters/base.py` | extend `Adapter.command(...)` to take `config` + `workdir`; add `classify_with_map()` shared helper |
+| `src/typebench/wrapper.py` | add `classify_with_map()` (single source of the universal §7 prefix; `classify_default` delegates to it) |
+| `src/typebench/adapters/base.py` | extend `Adapter.command(...)` to take `config` + `workdir` (signature only; no new runtime imports) |
 | `src/typebench/adapters/stub.py` | update `command(...)` signature (ignores config/workdir) |
 | `src/typebench/collector.py` | `run_single(...)` takes `config`, creates a run-scoped `workdir` tempdir, threads both into `command(...)` |
-| `src/typebench/cli.py` | `run` gains `--src-root/--python-version/--python-platform/--venv`; builds a `NormalizedConfig`; register `pyright` |
-| `src/typebench/adapters/pyright.py` | `PyrightAdapter` (install/version, config-gen + argv, JSON parse, exit map, cap) |
-| `tests/fixtures/clean_project/` | tiny stdlib-only package that type-checks clean |
-| `tests/fixtures/error_project/` | tiny stdlib-only package with deliberate type errors |
+| `src/typebench/cli.py` | `run` gains `--src-root/--python-version/--python-platform/--venv`; fails fast on a real tool with no src roots; builds a `NormalizedConfig`; register `pyright` |
+| `src/typebench/adapters/pyright.py` | `PyrightAdapter` (install/version no-raise + Node, config-gen + argv, JSON parse via `coerce_count`, exit map, zero-files guard, cap) |
+| `pyproject.toml` | add `pyright` to the `dev` group; add ruff `extend-exclude = ["fixtures"]` |
+| `fixtures/clean_project/` | tiny stdlib-only package that type-checks clean. **Repo-root, NOT under `tests/`** — see Task 4: the §6 default excludes carry `**/tests/**`, and pyright's `exclude` overrides `include`, so a fixture under `tests/` would be skipped (0 files analyzed). |
+| `fixtures/error_project/` | tiny stdlib-only package with deliberate type errors (same repo-root rule) |
 | `tests/test_normalized_config.py`, `tests/test_pyright_adapter.py` | new tests |
 | (modified) `tests/test_stub_adapter.py`, `tests/test_collector.py`, `tests/test_e2e.py`, `tests/test_cli.py` | updated for the new signatures |
 
@@ -40,6 +42,10 @@ Before every commit (pre-commit enforces): `uv run ruff format .` (clean) · `uv
 
 - [ ] **Step 1: Write the failing test** — `tests/test_normalized_config.py`:
 ```python
+import dataclasses
+
+import pytest
+
 from typebench.normalized_config import NormalizedConfig
 
 
@@ -58,15 +64,12 @@ def test_is_frozen_and_carries_src_roots() -> None:
     assert cfg.src_roots == ("/abs/src",)
     assert cfg.python_version == "3.11"
     assert cfg.venv_python == "/v/bin/python"
-    import dataclasses
-
     assert dataclasses.is_dataclass(cfg)
-    try:
-        cfg.python_version = "x"  # type: ignore[misc]  # frozen: must raise
-    except dataclasses.FrozenInstanceError:
-        pass
-    else:
-        raise AssertionError("NormalizedConfig must be frozen")
+    # frozen: mutation must raise. `setattr` (not `cfg.x = ...`) keeps the
+    # assignment dynamic so the static checker doesn't flag a frozen-field write
+    # — avoids a suppression entirely (AGENTS.md: never `# type: ignore`).
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        setattr(cfg, "python_version", "x")
 ```
 
 - [ ] **Step 2: Run, expect FAIL** (`ModuleNotFoundError`): `uv run pytest tests/test_normalized_config.py -v`
@@ -115,19 +118,19 @@ class NormalizedConfig:
 
 ## Task 2: Evolve the adapter seam (command takes config + workdir) + shared classifier
 
-**Files:** Modify `src/typebench/adapters/base.py`, `src/typebench/adapters/stub.py`, `tests/test_stub_adapter.py`.
+**Files:** Modify `src/typebench/wrapper.py`, `src/typebench/adapters/base.py`, `src/typebench/adapters/stub.py`, `tests/test_stub_adapter.py`.
 
-The §4 protocol said "Plan 2 adds the normalized-config argument." Do it now, plus a `workdir` (a run-scoped dir an adapter writes its generated config into; persists across probe + timing).
+The §4 protocol said "Plan 2 adds the normalized-config argument." Do it now, plus a `workdir` (a run-scoped dir an adapter writes its generated config into; persists across probe + timing). The shared classifier lands in `wrapper.py` (next to `RawRun`/`_SIGKILL`), not `base.py` — see Step 3a.
 
 - [ ] **Step 1: Update the failing test first** — in `tests/test_stub_adapter.py`, the stub `command(...)` calls gain `config` + `workdir`. Replace the command-call sites and add a protocol assertion. New relevant tests:
 ```python
 from pathlib import Path
 
-from typebench.adapters.base import Adapter, classify_with_map
+from typebench.adapters.base import Adapter
 from typebench.adapters.stub import StubAdapter
 from typebench.models import ResultClass, ThreadMode
 from typebench.normalized_config import NormalizedConfig
-from typebench.wrapper import RawRun, run_command
+from typebench.wrapper import RawRun, classify_with_map, run_command
 
 
 def _cfg() -> NormalizedConfig:
@@ -178,14 +181,37 @@ def test_classify_with_map_honors_universal_prefix_then_exit_map() -> None:
 
 - [ ] **Step 2: Run, expect FAIL** (signature/argument + missing `classify_with_map`/`NormalizedConfig`): `uv run pytest tests/test_stub_adapter.py -v`
 
-- [ ] **Step 3: Edit `src/typebench/adapters/base.py`** — extend the protocol `command` signature and add the shared classifier. Replace the `command` method signature and add `classify_with_map` + the needed imports:
+- [ ] **Step 3a: Edit `src/typebench/wrapper.py`** — add `classify_with_map` *here* (next to `RawRun`/`_SIGKILL`/`_EXIT_CODE_CLASSES`, its true home), and collapse `classify_default` to delegate to it. This gives the universal §7 prefix **one** definition shared by the spine wrapper and every adapter, and avoids a private cross-module `_SIGKILL` import (the earlier draft put this in `base.py`, which both duplicated the prefix ladder and forced importing a module-private name). Insert `classify_with_map` immediately after `_EXIT_CODE_CLASSES` and replace the body of `classify_default`:
 ```python
-# add to the TYPE_CHECKING block:
+def classify_with_map(raw: RawRun, exit_map: dict[int, ResultClass]) -> ResultClass:
+    """Universal §7 prefix (env/oom/timeout/signal) then the tool's exit-code
+    map; unknown codes fall to FAILED_CRASH. Tools with overloaded codes
+    (mypy 2, pyrefly 1) override classify() with extra stdout/stderr logic."""
+    if raw.env_error:
+        return ResultClass.FAILED_ENV
+    if raw.oom:
+        return ResultClass.FAILED_OOM
+    if raw.timed_out:
+        return ResultClass.FAILED_TIMEOUT
+    if raw.signal == _SIGKILL:
+        return ResultClass.FAILED_OOM
+    if raw.signal is not None:
+        return ResultClass.FAILED_CRASH
+    return exit_map.get(raw.exit_code, ResultClass.FAILED_CRASH)
+
+
+def classify_default(raw: RawRun) -> ResultClass:
+    """Generic classifier (stub + spine). Real per-tool maps arrive via
+    `classify_with_map` in Plan 2; this is the {0: clean, 1: diagnostics} default."""
+    return classify_with_map(raw, _EXIT_CODE_CLASSES)
+```
+`wrapper.py` already imports `ResultClass` and defines `RawRun`/`_SIGKILL`/`_EXIT_CODE_CLASSES`, so **no new imports**. Existing `test_wrapper.py` stays green — behavior is identical (the old ladder is exactly `classify_with_map(raw, {0: CLEAN, 1: DIAGNOSTICS})`). Keep `classify_default`'s original docstring detail if you prefer; only the body changes.
+
+- [ ] **Step 3b: Edit `src/typebench/adapters/base.py`** — extend ONLY the protocol `command` signature. Do **not** add a runtime `RawRun` import: `RawRun` is used solely in annotations, so it stays in the `TYPE_CHECKING` block (a runtime import trips ruff `TC001` and `F811` against the existing type-only import). Add `Path` + `NormalizedConfig` to the `TYPE_CHECKING` block (alongside the existing `RawRun`, `ResultClass`, `ThreadMode`):
+```python
+# add to the existing TYPE_CHECKING block:
 #   from pathlib import Path
 #   from typebench.normalized_config import NormalizedConfig
-# and at runtime import the SIGKILL constant + ResultClass for classify_with_map:
-from typebench.wrapper import RawRun, _SIGKILL, classify_default
-from typebench.models import ResultClass  # promote to runtime import (used by classify_with_map)
 ```
 Change the protocol method to:
 ```python
@@ -203,25 +229,7 @@ Change the protocol method to:
         TY_MAX_PARALLELISM (§5.3)."""
         ...
 ```
-Add the shared classifier (DRYs the universal §7 prefix across adapters):
-```python
-def classify_with_map(raw: RawRun, exit_map: dict[int, ResultClass]) -> ResultClass:
-    """Universal §7 prefix (env/oom/timeout/signal) then the tool's exit-code
-    map; unknown codes fall to FAILED_CRASH. Tools with overloaded codes
-    (mypy 2, pyrefly 1) override classify() with extra stdout/stderr logic."""
-    if raw.env_error:
-        return ResultClass.FAILED_ENV
-    if raw.oom:
-        return ResultClass.FAILED_OOM
-    if raw.timed_out:
-        return ResultClass.FAILED_TIMEOUT
-    if raw.signal == _SIGKILL:
-        return ResultClass.FAILED_OOM
-    if raw.signal is not None:
-        return ResultClass.FAILED_CRASH
-    return exit_map.get(raw.exit_code, ResultClass.FAILED_CRASH)
-```
-> Note: `_SIGKILL` is module-private in `wrapper.py` but reused here intentionally to keep one source of truth for the heuristic. If ruff/pyrefly object to importing a private name across modules, promote `_SIGKILL` to a public `SIGKILL` constant in `wrapper.py` and update `classify_default` + this import. Keep behavior identical.
+`base.py` keeps its existing `from typebench.wrapper import classify_default` (used by `default_classify`); adapters import `classify_with_map` from `typebench.wrapper`, not from here.
 
 - [ ] **Step 4: Edit `src/typebench/adapters/stub.py`** — update `command` to the new signature (ignores `config`/`workdir`; ARG002 already ignored for `adapters/**`):
 ```python
@@ -250,7 +258,7 @@ def classify_with_map(raw: RawRun, exit_map: dict[int, ResultClass]) -> ResultCl
 Add the TYPE_CHECKING imports it now needs: `from pathlib import Path` and `from typebench.normalized_config import NormalizedConfig`.
 
 - [ ] **Step 5: Run, expect PASS:** `uv run pytest tests/test_stub_adapter.py -v` (then full gate).
-- [ ] **Step 6: Commit:** `git add -A && git commit -m "feat(adapters): command() takes NormalizedConfig + workdir; add classify_with_map"`
+- [ ] **Step 6: Commit:** `git add -A && git commit -m "feat(adapters,wrapper): command() takes NormalizedConfig + workdir; classify_with_map in wrapper"`
 
 ---
 
@@ -298,23 +306,33 @@ def run_single(
 ```
 Move the entire existing probe/time/assembly block inside the `with` (the `return RunResult(...)` happens inside, before the tempdir is cleaned up). Everything else (classification, timing, error_detail, CalledProcessError handling) is unchanged.
 
-- [ ] **Step 4: Edit `src/typebench/cli.py`** — add normalized-config flags + build a `NormalizedConfig`, pass to `run_single`. Add options (Annotated form) and resolve src roots to absolute:
+- [ ] **Step 4: Edit `src/typebench/cli.py`** — add normalized-config flags + build a `NormalizedConfig`, pass to `run_single`. Use a `None` default for the repeatable `--src-root` and coerce inside — a mutable `[]` default trips ruff **B006** (enabled in the rule set; this fires for certain, so do NOT use `= []`):
 ```python
 from typebench.normalized_config import NormalizedConfig
 ...
     src_root: Annotated[
-        list[str], typer.Option(help="First-party source dir to analyze (repeatable). Required for real tools.")
-    ] = [],
+        list[str] | None,
+        typer.Option(help="First-party source dir to analyze (repeatable). Required for real tools."),
+    ] = None,
     python_version: Annotated[str, typer.Option(help="Target Python version.")] = "3.12",
     python_platform: Annotated[str, typer.Option(help="Target platform.")] = "linux",
     venv: Annotated[
         str | None, typer.Option(help="Project venv interpreter for dep resolution.")
     ] = None,
 ```
-Then before calling `run_single`:
+Then, after the unknown-tool / output-dir guards, fail fast on a real tool with no source roots, then build the config and call `run_single`:
 ```python
+    src_roots = src_root or []
+    # Fail fast: a real checker with no source roots yields an empty `include`
+    # -> 0 files analyzed -> a false "clean". The stub is the one adapter that
+    # legitimately ignores src roots. (The runtime `files == 0 -> failed{env}`
+    # guard in the adapter is the real backstop; this is fast, actionable UX.)
+    if tool != "stub" and not src_roots:
+        typer.echo("--src-root is required for real tools (got none).", err=True)
+        raise typer.Exit(code=2)
+
     config = NormalizedConfig(
-        src_roots=tuple(str(Path(s).resolve()) for s in src_root),
+        src_roots=tuple(str(Path(s).resolve()) for s in src_roots),
         python_version=python_version,
         python_platform=python_platform,
         venv_python=venv,
@@ -324,7 +342,7 @@ Then before calling `run_single`:
         thread_mode=thread_mode, warmup=warmup, runs=runs, timeout=timeout,
     )
 ```
-> typer mutable default `[]` for `src_root`: ruff B006 may flag a mutable default. typer requires it for repeatable options; if ruff flags it, the established fix is `Annotated[list[str], typer.Option(...)] = []` is actually typer-idiomatic — but if B006 fires, change default to `None` typed `list[str] | None` and coerce `src_root = src_root or []` inside. Keep behavior identical; prefer whichever passes the strict gate cleanly.
+> The `tool != "stub"` carve-out is honest for Plan 2A (stub is the only config-ignoring adapter in the registry). When a second synthetic adapter appears, promote this to an adapter capability flag rather than a name check.
 
 - [ ] **Step 5: Run, expect PASS:** full gate `uv run pytest -q` (stub path still green; CLI builds config).
 - [ ] **Step 6: Commit:** `git add -A && git commit -m "feat(collector,cli): thread NormalizedConfig + run-scoped workdir through the pipeline"`
@@ -333,16 +351,18 @@ Then before calling `run_single`:
 
 ## Task 4: Fixture projects (clean + error)
 
-**Files:** Create `tests/fixtures/clean_project/__init__.py`, `tests/fixtures/clean_project/sample.py`, `tests/fixtures/error_project/__init__.py`, `tests/fixtures/error_project/sample.py`. Stdlib-only (no third-party deps → no envman needed; deps resolution is fully exercised in Plan 3).
+**Files:** Create `fixtures/clean_project/__init__.py`, `fixtures/clean_project/sample.py`, `fixtures/error_project/__init__.py`, `fixtures/error_project/sample.py`. **Repo-root `fixtures/`, NOT `tests/fixtures/`** (see below). Stdlib-only (no third-party deps → no envman needed; deps resolution is fully exercised in Plan 3).
 
-> **Strict-gate scope:** these fixtures must NOT be type-checked by typebench's own pyrefly gate (the error fixture is type-wrong on purpose). Add `tests/fixtures/**` to `[tool.pyrefly] project-excludes` AND to ruff `per-file-ignores` (or `extend-exclude`) so the deliberately-broken fixture doesn't fail the repo gate.
+> **CRITICAL — fixture location (do not move under `tests/`):** the §6 default excludes carry `**/tests/**`, and pyright's `exclude` **overrides** `include` (verified against pyright docs: "exclude ... overriding include matches"). A fixture under `tests/` (any depth) has a `/tests/` path segment → it would be excluded → `filesAnalyzed == 0` → exit 0 → recorded as a false **clean**, breaking every live + e2e test. Repo-root `fixtures/` has no excluded segment, so the tool under test actually sees the files.
+>
+> **Strict-gate scope:** the error fixture is type-wrong on purpose, so it must stay out of typebench's own pyrefly dogfood gate. Repo-root `fixtures/` is already outside `[tool.pyrefly] project-includes = ["src", "tests"]`, so **pyrefly ignores it automatically — no `project-excludes` needed**. Only ruff (which walks the whole tree) needs an exclude.
 
-- [ ] **Step 1: Add gate exclusions** in `pyproject.toml`:
-  - `[tool.pyrefly]`: add `project-excludes = ["**/tests/fixtures/**"]` (pyrefly excludes the fixtures from the dogfood check).
-  - `[tool.ruff]`: add `extend-exclude = ["tests/fixtures"]` (ruff skips them — they are sample inputs, not project code).
+- [ ] **Step 1: Add the ruff exclusion** in `pyproject.toml`:
+  - `[tool.ruff]`: add `extend-exclude = ["fixtures"]` (ruff skips them — they are sample inputs, not project code).
+  - No `[tool.pyrefly]` change required (root `fixtures/` is outside `project-includes`). If `uv run pyrefly check` ever reports the fixtures (e.g. a future config change adds them to includes), add `project-excludes = ["fixtures/**"]` then.
   Run `uv run pyrefly check` and `uv run ruff check .` to confirm still clean (fixtures ignored).
 
-- [ ] **Step 2: Create the clean fixture** — `tests/fixtures/clean_project/sample.py`:
+- [ ] **Step 2: Create the clean fixture** — `fixtures/clean_project/sample.py`:
 ```python
 def add(a: int, b: int) -> int:
     return a + b
@@ -350,9 +370,9 @@ def add(a: int, b: int) -> int:
 
 result: int = add(2, 3)
 ```
-and an empty `tests/fixtures/clean_project/__init__.py`.
+and an empty `fixtures/clean_project/__init__.py`.
 
-- [ ] **Step 3: Create the error fixture** — `tests/fixtures/error_project/sample.py` (at least one unambiguous type error every checker flags):
+- [ ] **Step 3: Create the error fixture** — `fixtures/error_project/sample.py` (at least one unambiguous type error every checker flags):
 ```python
 def add(a: int, b: int) -> int:
     return a + b
@@ -361,7 +381,7 @@ def add(a: int, b: int) -> int:
 wrong: int = add("not", "ints")  # two type errors: str args to int params
 bad: str = 123  # assignment type error
 ```
-and an empty `tests/fixtures/error_project/__init__.py`.
+and an empty `fixtures/error_project/__init__.py`.
 
 - [ ] **Step 4: Verify gate still green** (fixtures excluded): `uv run ruff check . && uv run pyrefly check && uv run pytest -q`.
 - [ ] **Step 5: Commit:** `git add -A && git commit -m "test(fixtures): clean + error sample projects for adapter tests"`
@@ -370,9 +390,11 @@ and an empty `tests/fixtures/error_project/__init__.py`.
 
 ## Task 5: `PyrightAdapter`
 
-**Files:** Create `src/typebench/adapters/pyright.py`; Test `tests/test_pyright_adapter.py`.
+**Files:** Modify `pyproject.toml` (dev dep); Create `src/typebench/adapters/pyright.py`; Test `tests/test_pyright_adapter.py`.
 
 Reference facts: research doc → pyright section. JSON output gives both counts; exit map 0/1/2/3/4; `--project <workdir>` suppresses the project's own config; stateless.
+
+- [ ] **Step 0: Add pyright as a dev dependency** so the live + e2e tests actually run in the gate. In `pyproject.toml` `[dependency-groups] dev`, add `"pyright>=1.1.400"` (PyPI wrapper), then `uv sync`. `shutil.which("pyright")` now resolves, so the `skipif(not _HAS_PYRIGHT)` guards remain only as a courtesy for contributors who deliberately strip it — CI/dev exercises the real path. (`hyperfine` stays a `skipif` system binary; it is not pip-installable.)
 
 - [ ] **Step 1: Write the failing test** — `tests/test_pyright_adapter.py` (pure parse/classify tests always run; live tests `skipif` pyright absent):
 ```python
@@ -382,13 +404,18 @@ from pathlib import Path
 
 import pytest
 
+from typebench.adapters import pyright as pyright_mod
 from typebench.adapters.base import Adapter
 from typebench.adapters.pyright import PyrightAdapter
-from typebench.models import ResultClass, ThreadMode
+from typebench.collector import run_single
+from typebench.models import ResultClass, RunResult, ThreadMode
 from typebench.normalized_config import NormalizedConfig
 from typebench.wrapper import RawRun, run_command
 
-_FIXTURES = Path(__file__).parent / "fixtures"
+# Fixtures live at the REPO ROOT (../fixtures), not tests/fixtures: the §6
+# default excludes carry **/tests/** and pyright's exclude overrides include,
+# so a fixture under tests/ would be skipped (0 files analyzed) — see Task 4.
+_FIXTURES = Path(__file__).parent.parent / "fixtures"
 _HAS_PYRIGHT = shutil.which("pyright") is not None
 
 
@@ -407,6 +434,13 @@ def test_parse_is_graceful_on_garbage() -> None:
     assert PyrightAdapter().parse("not json", "", 2) == (None, None)
 
 
+def test_parse_rejects_bool_counts() -> None:
+    # JSON booleans are ints in Python; coerce_count() must reject them so a
+    # malformed summary cannot inject a 0/1 count (mirrors the stub parse tests).
+    blob = json.dumps({"summary": {"errorCount": True, "filesAnalyzed": False}})
+    assert PyrightAdapter().parse(blob, "", 1) == (None, None)
+
+
 def test_classify_exit_map() -> None:
     a = PyrightAdapter()
     assert a.classify(RawRun(0, None, False, False, "", "")) == ResultClass.CLEAN
@@ -417,16 +451,71 @@ def test_classify_exit_map() -> None:
     assert a.classify(RawRun(0, None, True, False, "", "")) == ResultClass.FAILED_TIMEOUT
 
 
+def test_classify_zero_files_on_exit0_is_env_failure() -> None:
+    # exit 0 but filesAnalyzed == 0 = mis-scoped include, NOT a clean project
+    # (research doc §pyright parse-sanity). Must be failed{env}, never false-clean.
+    blob = json.dumps({"summary": {"errorCount": 0, "filesAnalyzed": 0}})
+    raw = RawRun(0, None, False, False, blob, "")
+    assert PyrightAdapter().classify(raw) == ResultClass.FAILED_ENV
+
+
 def test_command_writes_pyrightconfig_and_targets_project(tmp_path: Path) -> None:
     cfg = NormalizedConfig(src_roots=("/abs/src",), python_version="3.11")
     argv, env = PyrightAdapter().command("demo", cfg, ThreadMode.ONE_CORE, tmp_path)
+    assert env == {}  # pyright needs no extra env (no TY_MAX_PARALLELISM etc.)
     written = json.loads((tmp_path / "pyrightconfig.json").read_text())
     assert written["include"] == ["/abs/src"]
     assert written["typeCheckingMode"] == "standard"
     assert written["pythonVersion"] == "3.11"
+    assert written["pythonPlatform"] == "Linux"  # mapped from cfg.python_platform "linux"
     assert "--project" in argv and str(tmp_path) in argv
     assert "--outputjson" in argv
     assert "--skipunannotated" not in argv  # analyze ALL bodies (§6)
+
+
+def test_command_maps_python_platform(tmp_path: Path) -> None:
+    # §6 platform is a normalized input; pyright wants capitalized names. The
+    # adapter must thread config.python_platform through, not hardcode "Linux".
+    cfg = NormalizedConfig(src_roots=("/abs/src",), python_platform="darwin")
+    argv, _env = PyrightAdapter().command("demo", cfg, ThreadMode.ONE_CORE, tmp_path)
+    written = json.loads((tmp_path / "pyrightconfig.json").read_text())
+    assert written["pythonPlatform"] == "Darwin"
+    assert "Darwin" in argv
+
+
+def test_command_derives_venv_path_layout(tmp_path: Path) -> None:
+    # pyright wants venvPath = dir CONTAINING the venv + venv = its name.
+    # <venv>/bin/python -> venvPath="/proj", venv=".venv".
+    cfg = NormalizedConfig(src_roots=("/abs/src",), venv_python="/proj/.venv/bin/python")
+    PyrightAdapter().command("demo", cfg, ThreadMode.ONE_CORE, tmp_path)
+    written = json.loads((tmp_path / "pyrightconfig.json").read_text())
+    assert written["venvPath"] == "/proj"
+    assert written["venv"] == ".venv"
+
+
+def test_version_is_no_raise_when_binary_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    # version() runs during the collector's RunResult assembly even on the
+    # env-failure path; it must NOT raise when pyright is missing, or the whole
+    # failure record is dropped (repo invariant: record every failure).
+    def _boom(*_a: object, **_k: object) -> object:
+        raise FileNotFoundError("pyright")
+
+    monkeypatch.setattr(pyright_mod.subprocess, "run", _boom)
+    assert PyrightAdapter().version() == "unknown"
+
+
+def test_missing_pyright_yields_schema_valid_failed_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    # End-to-end of the dropped-record bug: with pyright unresolvable (empty
+    # PATH), run_single must still return a schema-valid failed{env} RunResult.
+    monkeypatch.setenv("PATH", "")
+    cfg = NormalizedConfig(src_roots=("/abs/src",))
+    result = run_single(
+        PyrightAdapter(), project="demo", config=cfg,
+        thread_mode=ThreadMode.ONE_CORE, warmup=1, runs=2, timeout=10,
+    )
+    assert isinstance(result, RunResult)
+    assert result.result_class == ResultClass.FAILED_ENV
+    assert result.tool_version == "unknown"
 
 
 @pytest.mark.skipif(not _HAS_PYRIGHT, reason="pyright not installed")
@@ -454,8 +543,16 @@ def test_live_error_project(tmp_path: Path) -> None:
 def test_version_probe() -> None:
     v = PyrightAdapter().version()
     assert v.startswith("pyright") or v[0].isdigit()
+
+
+@pytest.mark.skipif(not _HAS_PYRIGHT, reason="pyright not installed")
+def test_install_records_node_version() -> None:
+    # Reproducibility: `pyright --version` omits Node, so install() records both
+    # (the §9 lock manifest consumes this). Plan 2A only asserts Node is present.
+    info = PyrightAdapter().install()
+    assert "node" in info.lower()
 ```
-> Note: the test references `Path(__file__).parent / "fixtures"` — but the fixtures live under `tests/fixtures`, and this test file is `tests/test_pyright_adapter.py`, so `Path(__file__).parent / "fixtures"` resolves to `tests/fixtures`. Correct.
+> Note on the fixtures path: `__file__` is `tests/test_pyright_adapter.py`, so `Path(__file__).parent.parent` is the repo root and `_FIXTURES` is the repo-root `fixtures/` dir (Task 4) — deliberately NOT `tests/fixtures`, which the §6 `**/tests/**` exclude would hide from pyright.
 
 - [ ] **Step 2: Run, expect FAIL** (`ModuleNotFoundError`): `uv run pytest tests/test_pyright_adapter.py -v`
 
@@ -467,16 +564,15 @@ See docs/superpowers/research/2026-06-08-checker-cli-facts.md (pyright)."""
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
+from pathlib import Path  # runtime: used to derive venvPath (not annotation-only)
 from typing import TYPE_CHECKING
 
-from typebench.adapters.base import ParallelismCap, classify_with_map
+from typebench.adapters.base import ParallelismCap, coerce_count
 from typebench.models import ResultClass, ThreadMode
+from typebench.wrapper import classify_with_map
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from typebench.normalized_config import NormalizedConfig
     from typebench.wrapper import RawRun
 
@@ -489,20 +585,45 @@ _EXIT_MAP: dict[int, ResultClass] = {
     4: ResultClass.FAILED_ENV,
 }
 
+# §6 platform (canonical lowercase) -> pyright's capitalized spelling.
+_PYRIGHT_PLATFORM: dict[str, str] = {
+    "linux": "Linux",
+    "darwin": "Darwin",
+    "win32": "Windows",
+    "windows": "Windows",
+}
+
+
+def _node_version() -> str:
+    """Node version (pyright is a Node app; `pyright --version` omits it). No-raise."""
+    try:
+        out = subprocess.run(["node", "--version"], capture_output=True, text=True, check=False)
+    except OSError:
+        return "unknown"
+    return out.stdout.strip() or "unknown"
+
 
 class PyrightAdapter:
     name = "pyright"
 
     def version(self) -> str:
-        out = subprocess.run(  # noqa: S603 — fixed argv, no shell
-            ["pyright", "--version"], capture_output=True, text=True, check=False
-        )
-        return out.stdout.strip() or out.stderr.strip()
+        # No-raise: called during RunResult assembly even on the env-failure path,
+        # so a missing binary must NOT crash and drop the record (repo invariant).
+        try:
+            out = subprocess.run(
+                ["pyright", "--version"], capture_output=True, text=True, check=False
+            )
+        except OSError:
+            return "unknown"
+        return out.stdout.strip() or out.stderr.strip() or "unknown"
 
     def install(self) -> str:
-        # Distribution/version verification (Node pinning is an env concern,
-        # documented in the research doc). Records the version for the manifest.
-        return self.version()
+        # `pyright --version` omits Node; record both for reproducibility (the §9
+        # lock manifest consumes this). Node *pinning* is an env concern (later plan).
+        return f"{self.version()} (node {_node_version()})"
+
+    def _platform(self, config: NormalizedConfig) -> str:
+        return _PYRIGHT_PLATFORM.get(config.python_platform.lower(), config.python_platform.capitalize())
 
     def command(
         self,
@@ -511,18 +632,19 @@ class PyrightAdapter:
         thread_mode: ThreadMode,
         workdir: Path,
     ) -> tuple[list[str], dict[str, str]]:
+        platform = self._platform(config)
         pyright_config: dict[str, object] = {
             "include": list(config.src_roots),
             "exclude": list(config.exclude_globs),
             "typeCheckingMode": "standard",  # stock default (§6)
             "useLibraryCodeForTypes": True,  # resolve deps, report first-party only
             "pythonVersion": config.python_version,
-            "pythonPlatform": "Linux",
+            "pythonPlatform": platform,  # threaded from §6, not hardcoded
         }
         if config.venv_python is not None:
-            from pathlib import Path as _P  # local: only needed when a venv is set
-
-            venv_dir = _P(config.venv_python).resolve().parent.parent
+            # pyright wants venvPath = dir CONTAINING the venv, venv = its name.
+            # config.venv_python is <venv>/bin/python -> parents[1] is <venv>.
+            venv_dir = Path(config.venv_python).resolve().parents[1]
             pyright_config["venvPath"] = str(venv_dir.parent)
             pyright_config["venv"] = venv_dir.name
         (workdir / "pyrightconfig.json").write_text(json.dumps(pyright_config, indent=2))
@@ -532,10 +654,10 @@ class PyrightAdapter:
             "--project", str(workdir),
             "--outputjson",
             "--pythonversion", config.python_version,
-            "--pythonplatform", "Linux",
+            "--pythonplatform", platform,
         ]
         if thread_mode is ThreadMode.ALL_CORES:
-            argv.append("--threads")  # bare = auto-parallelism (research doc)
+            argv.append("--threads")  # bare = auto-parallelism by logical CPUs (pyright docs)
         # ONE_CORE: omit --threads (default single main thread); affinity in Plan 4.
         return (argv, {})
 
@@ -555,15 +677,22 @@ class PyrightAdapter:
         summary = payload.get("summary")
         if not isinstance(summary, dict):
             return (None, None)
-        errors = summary.get("errorCount")
-        files = summary.get("filesAnalyzed")
+        # coerce_count (base.py) rejects JSON bools/non-ints -> no garbage counts.
         return (
-            errors if isinstance(errors, int) else None,
-            files if isinstance(files, int) else None,
+            coerce_count(summary.get("errorCount")),
+            coerce_count(summary.get("filesAnalyzed")),
         )
 
     def classify(self, raw: RawRun) -> ResultClass:
-        return classify_with_map(raw, _EXIT_MAP)
+        result = classify_with_map(raw, _EXIT_MAP)
+        # Parse-sanity (research doc): exit 0 + 0 files analyzed = a mis-scoped
+        # include, NOT a clean project. Promote to failed{env} so a false-clean
+        # never enters the data set. files is None (parse failed) -> leave as-is.
+        if result is ResultClass.CLEAN:
+            _diags, files = self.parse(raw.stdout, raw.stderr, raw.exit_code)
+            if files == 0:
+                return ResultClass.FAILED_ENV
+        return result
 
     def clear_cache(self, project: str) -> None:
         return None  # stateless single-shot (research doc)
@@ -571,7 +700,7 @@ class PyrightAdapter:
     def prepare_command(self, project: str) -> str | None:
         return None
 ```
-> ruff `S603` (subprocess without shell-injection check) may fire on `version()`. The argv is a fixed literal, no shell. `S` (flake8-bandit) is NOT in the selected rule set per Plan 1's config (`E,W,F,I,N,UP,B,C4,SIM,PTH,RET,ARG,TID,TC,PL,RUF`), so S603 will NOT fire — **remove the `# noqa: S603`** when implementing (an unused noqa trips ruff RUF100). It's shown here only to flag the consideration. Verify with `uv run ruff check`.
+> ruff: `subprocess.run` with a fixed argv (no shell) would trip `S603`, but `S` (flake8-bandit) is **not** in the selected rule set (`E,W,F,I,N,UP,B,C4,SIM,PTH,RET,ARG,TID,TC,PL,RUF`) — so no `# noqa` is needed and an unused one would trip `RUF100`. `Path` is imported at module top because the venv branch uses it at runtime (a `TYPE_CHECKING`-only import would `NameError`); `Path.write_text` keeps `PTH` happy (no `open`). Unused `stderr`/`exit_code`/`project`/`thread_mode` params are covered by the `adapters/**` `ARG002` ignore. Verify with `uv run ruff check`.
 
 - [ ] **Step 4: Run, expect PASS** (pure tests pass; live tests pass if pyright installed, else skip): `uv run pytest tests/test_pyright_adapter.py -v`
 - [ ] **Step 5: Commit:** `git add -A && git commit -m "feat(adapters): PyrightAdapter (config-gen, JSON parse, exit map)"`
@@ -595,7 +724,8 @@ from typebench.models import ResultClass, RunResult
 
 runner = CliRunner()
 _HAS = shutil.which("pyright") is not None and shutil.which("hyperfine") is not None
-_FIXTURES = Path(__file__).parent / "fixtures"
+# Repo-root fixtures (see Task 4) — NOT tests/fixtures, which the **/tests/** exclude would hide.
+_FIXTURES = Path(__file__).parent.parent / "fixtures"
 
 
 @pytest.mark.skipif(not _HAS, reason="needs pyright + hyperfine")
@@ -636,15 +766,19 @@ _ADAPTERS = {
 ---
 
 ## Definition of Done (Plan 2A)
-- Quality gate green (ruff + pyrefly-strict + pytest); fixtures excluded from the dogfood gate.
+- Quality gate green (ruff + pyrefly-strict + pytest). Fixtures live at repo-root `fixtures/` — outside `[tool.pyrefly] project-includes`, so the deliberately-broken error fixture is auto-excluded from the dogfood gate; ruff `extend-exclude` skips them too.
+- pyright is a hard dev dependency, so the live + e2e tests actually **run** in the gate (not skipped) and verify the real path.
 - `typebench run --tool pyright --src-root <dir> --output r.json` produces a schema-valid `RunResult` with real `diagnostics`, `files`, and (with hyperfine) `timing`.
-- `NormalizedConfig` drives a generated `pyrightconfig.json` that suppresses the project's own config; `--skipunannotated` is never passed (analyze all bodies, §6).
+- `NormalizedConfig` drives a generated `pyrightconfig.json` that suppresses the project's own config; python version **and platform** are both threaded from §6 (platform mapped to pyright casing); `--skipunannotated` is never passed (analyze all bodies, §6).
 - Stub path + all Plan 1 tests still green under the new `command(config, workdir)` / `run_single(config)` signatures.
-- pyright exit codes mapped (0/1/2/3/4 + universal env/oom/timeout/signal prefix); parse is garbage-safe; parse-sanity asserts `filesAnalyzed > 0`.
+- pyright exit codes mapped (0/1/2/3/4 + universal env/oom/timeout/signal prefix via the shared `classify_with_map`); parse is garbage-safe and rejects JSON bools (`coerce_count`).
+- **Parse-sanity is enforced, not just asserted:** `classify()` promotes exit 0 + `filesAnalyzed == 0` to `failed{env}` (a mis-scoped include never lands as a false clean); the CLI also fails fast when a real tool gets no `--src-root`; the e2e additionally asserts `files > 0`.
+- **No dropped records:** `version()`/`install()` are no-raise, so a missing pyright/Node yields a schema-valid `failed{env}` record (`tool_version="unknown"`), never a crash. `install()` records both pyright and Node versions for the §9 manifest.
 - No real mypy/ty/pyrefly adapters yet (Plan 2B); no corpus/envman/cgroup/renderer (Plans 3–6).
 
 ## Self-Review notes
-- **§6 coverage (pyright):** target file set (`include`=src_roots) · excludes (tests/vendored/generated) · python version+platform · resolve-deps-report-first-party (`useLibraryCodeForTypes`+`include`) · analyze all bodies (no `--skipunannotated`, `standard` mode) · stock severities (`standard`) · suppress project config (`--project <workdir>`) · no plugins (n/a). Third-party *resolution* via venv is wired (`venvPath`/`venv`) but only lightly tested here (stdlib fixtures) — fully exercised in Plan 3.
+- **§6 coverage (pyright):** target file set (`include`=src_roots) · excludes (tests/vendored/generated) · python version **and platform** (both threaded; platform mapped to pyright casing) · resolve-deps-report-first-party (`useLibraryCodeForTypes`+`include`) · analyze all bodies (no `--skipunannotated`, `standard` mode) · stock severities (`standard`) · suppress project config (`--project <workdir>`) · no plugins (n/a). Third-party *resolution* via venv is wired (`venvPath`/`venv`) and unit-tested (`test_command_*`) but only stdlib-exercised here — fully exercised in Plan 3.
+- **Wrapper/timing interaction (verified safe for pyright):** the timing pass wraps argv in `python -m typebench.wrapper`, whose generic gate treats {0 clean, 1 diagnostics} as measured-success. pyright's success codes are exactly {0,1}, so the wrapper never aborts hyperfine and the probe (real `classify`) and timing agree. 2B tools with overloaded success codes (pyrefly exit 1) will need the wrapper to receive tool-specific success codes — out of scope here, flagged for 2B.
 - **Deferred to 2B:** mypy (text-summary parse, `--config-file=`, `--cache-dir=/dev/null`, overloaded exit 2), ty (no-JSON `concise` parse, `-v` files count, soft `TY_MAX_PARALLELISM`, exit 101), pyrefly (`--config` + `preset=default`, JSON parse, overloaded exit 1 disambiguation, hard `--threads 1`). All follow this template.
-- **Cross-tool seam:** `classify_with_map` + `NormalizedConfig` + `workdir` are the shared surface 2B reuses; only parse/classify/config-gen differ per tool.
+- **Cross-tool seam:** `classify_with_map` (now in `wrapper.py`, the single source of the universal §7 prefix) + `NormalizedConfig` + `workdir` are the shared surface 2B reuses; only parse/classify/config-gen differ per tool.
 - **Placeholders:** none — every step has full code/commands.
