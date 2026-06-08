@@ -83,7 +83,7 @@ def run(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI optio
         src_roots=tuple(str(Path(s).resolve()) for s in src_roots),
         python_version=python_version,
         python_platform=python_platform,
-        venv_python=venv,
+        venv_python=str(Path(venv).resolve()) if venv is not None else None,
     )
     adapter = factory()
     result = run_single(
