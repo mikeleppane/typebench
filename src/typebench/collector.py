@@ -18,6 +18,23 @@ if TYPE_CHECKING:
     from typebench.normalized_config import NormalizedConfig
 
 
+_AFFINITY_PREFIX = ["taskset", "-c", "0"]  # uniform single-core floor (spec §5.3)
+
+
+def _taskset_available() -> bool:
+    return shutil.which("taskset") is not None
+
+
+def _apply_affinity(argv: list[str], thread_mode: ThreadMode) -> tuple[list[str], bool]:
+    """Prepend the uniform single-core affinity prefix for the ONE_CORE track.
+    Returns (argv, enforced). ALL_CORES is unconstrained by design (not pinned).
+    enforced is True ONLY when ONE_CORE AND taskset is actually available — the
+    honesty flag must never claim a pin we could not apply (§5.3, Decision D)."""
+    if thread_mode is ThreadMode.ONE_CORE and _taskset_available():
+        return ([*_AFFINITY_PREFIX, *argv], True)
+    return (argv, False)
+
+
 def run_single(
     adapter: Adapter,
     project: str,
@@ -53,6 +70,18 @@ def run_single(
                 error_detail=f"command construction failed: {exc}".strip()[-500:],
                 env=detect_env(),
             )
+
+        # Apply the uniform 1-core affinity prefix (ONE_CORE only) BEFORE any run,
+        # so probe + resource + timing all share the same pinned command (§5.3).
+        argv, thread_enforced = _apply_affinity(argv, thread_mode)
+        cap = adapter.parallelism_cap(thread_mode)
+        # The adapter mechanism strings bake in "cpu-affinity" (Plan 4's floor), so
+        # record the cap ONLY when affinity actually ran. On ONE_CORE without
+        # taskset (mac/dev), or on ALL_CORES, record neither — never claim a pin we
+        # did not apply (§5.3 honesty, Decision A).
+        record_cap = thread_mode is ThreadMode.ONE_CORE and thread_enforced
+        hard_cap = cap.hard_cap if record_cap else None
+        cap_mechanism = cap.mechanism if record_cap else None
 
         # Phase 1: probe — one real run to classify and parse counts.
         raw = run_command(argv, timeout=timeout, env=extra_env)
@@ -110,8 +139,9 @@ def run_single(
             tool_version=adapter.version(),
             project=project,
             thread_mode=thread_mode,
-            # Plan 1 applies no CPU affinity/cap -> never claim an unenforced mode (§5.3).
-            thread_mode_enforced=False,
+            thread_mode_enforced=thread_enforced,
+            hard_cap=hard_cap,
+            cap_mechanism=cap_mechanism,
             result_class=result_class,
             failure_phase=failure_phase,
             real_exit_code=raw.exit_code,
