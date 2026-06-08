@@ -13,10 +13,13 @@ from typebench.taxonomy import FailurePhase, ResultClass, ThreadMode
 __all__ = [
     "EnvFingerprint",
     "FailurePhase",
+    "PreflightReport",
+    "PreparedProject",
     "ResultClass",
     "RunResult",
     "ThreadMode",
     "TimingStats",
+    "ToolPreflight",
 ]
 
 
@@ -81,3 +84,58 @@ class RunResult(BaseModel):
     files: int | None = None
     timing: TimingStats | None = None
     env: EnvFingerprint
+
+
+class PreparedProject(BaseModel):
+    """An envman-prepared corpus project persisted as a cache sidecar."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    checkout: str
+    venv_python: str
+    src_roots: tuple[str, ...]
+    exclude_globs: tuple[str, ...]
+    python_version: str
+    python_platform: str
+    sha: str
+    lock_hash: str
+    frozen: tuple[str, ...]
+    canonical_files: int
+    canonical_loc: int
+    fingerprint: str
+
+
+class ToolPreflight(BaseModel):
+    """One tool's preflight outcome on a prepared project."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool: str
+    version: str
+    result_class: ResultClass
+    real_exit_code: int
+    signal: int | None = None
+    timed_out: bool = False
+    oom: bool = False
+    error_detail: str | None = None
+    self_reported_files: int | None = None
+    files_divergence: int | None = None
+    scope_ok: bool = True
+    over_reports: bool = False
+
+
+class PreflightReport(BaseModel):
+    """Per-project preflight result (spec §12)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    project: str
+    sha: str
+    python_version: str
+    lock_hash: str
+    canonical_files: int
+    canonical_loc: int
+    ready: bool
+    throughput_review_required: bool = False
+    tools: list[ToolPreflight]
