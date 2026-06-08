@@ -12,6 +12,7 @@ from typing import Annotated
 
 import typer
 
+from typebench.adapters.pyright import PyrightAdapter
 from typebench.adapters.stub import StubAdapter
 from typebench.collector import run_single
 from typebench.models import ThreadMode
@@ -22,6 +23,7 @@ app = typer.Typer(help="Neutral Python type-checker performance benchmark.")
 # Adapter registry. Real checkers (mypy/pyright/pyrefly/ty) are added in Plan 2.
 _ADAPTERS = {
     "stub": StubAdapter,
+    "pyright": PyrightAdapter,
 }
 
 
