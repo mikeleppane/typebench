@@ -6,6 +6,7 @@ import pytest
 from typebench.adapters.stub import StubAdapter
 from typebench.collector import run_single
 from typebench.models import ResultClass, RunResult, ThreadMode
+from typebench.normalized_config import NormalizedConfig
 
 requires_posix = pytest.mark.skipif(
     os.name != "posix", reason="signal semantics are POSIX-specific"
@@ -35,6 +36,7 @@ def test_pipeline_classes_round_trip_to_json(
     result = run_single(
         adapter,
         project="demo",
+        config=NormalizedConfig(),
         thread_mode=ThreadMode.ONE_CORE,
         warmup=1,
         runs=2,
@@ -55,6 +57,7 @@ def test_pipeline_records_timeout(tmp_path: Path) -> None:
     result = run_single(
         adapter,
         project="demo",
+        config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
         warmup=1,
         runs=2,
@@ -73,6 +76,7 @@ def test_pipeline_records_oom_heuristic(tmp_path: Path) -> None:
     result = run_single(
         adapter,
         project="demo",
+        config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
         warmup=1,
         runs=2,

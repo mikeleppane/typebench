@@ -6,8 +6,8 @@ import os
 
 # Runtime import (not TYPE_CHECKING): typer resolves option annotations at
 # runtime via inspect.signature(eval_str=True), so `Path` in `Annotated[Path,
-# typer.Option(...)]` must be importable then — else NameError. Hence noqa TC003.
-from pathlib import Path  # noqa: TC003
+# typer.Option(...)]` must be importable then; `run` also calls Path() at runtime.
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -15,6 +15,7 @@ import typer
 from typebench.adapters.stub import StubAdapter
 from typebench.collector import run_single
 from typebench.models import ThreadMode
+from typebench.normalized_config import NormalizedConfig
 
 app = typer.Typer(help="Neutral Python type-checker performance benchmark.")
 
@@ -35,7 +36,7 @@ def main() -> None:
 
 
 @app.command()
-def run(
+def run(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI option, not a code smell
     tool: Annotated[str, typer.Option(help="Checker to run (e.g. stub).")],
     project: Annotated[str, typer.Option(help="Project name or path.")],
     output: Annotated[Path, typer.Option(help="Where to write the results JSON.")],
@@ -43,6 +44,17 @@ def run(
     runs: Annotated[int, typer.Option(help="hyperfine timed runs.")] = 10,
     warmup: Annotated[int, typer.Option(help="hyperfine warmup runs.")] = 3,
     timeout: Annotated[float, typer.Option(help="Per-invocation timeout (seconds).")] = 900.0,
+    src_root: Annotated[
+        list[str] | None,
+        typer.Option(
+            help="First-party source dir to analyze (repeatable). Required for real tools."
+        ),
+    ] = None,
+    python_version: Annotated[str, typer.Option(help="Target Python version.")] = "3.12",
+    python_platform: Annotated[str, typer.Option(help="Target platform.")] = "linux",
+    venv: Annotated[
+        str | None, typer.Option(help="Project venv interpreter for dep resolution.")
+    ] = None,
 ) -> None:
     factory = _ADAPTERS.get(tool)
     if factory is None:
@@ -57,10 +69,25 @@ def run(
         typer.echo(f"Output directory not writable: {out_dir}", err=True)
         raise typer.Exit(code=2)
 
+    src_roots = src_root or []
+    # Fail fast: a real checker with no source roots yields an empty `include`
+    # -> 0 files analyzed -> a false "clean". The stub legitimately ignores src
+    # roots, so it is exempt.
+    if tool != "stub" and not src_roots:
+        typer.echo("--src-root is required for real tools (got none).", err=True)
+        raise typer.Exit(code=2)
+
+    config = NormalizedConfig(
+        src_roots=tuple(str(Path(s).resolve()) for s in src_roots),
+        python_version=python_version,
+        python_platform=python_platform,
+        venv_python=venv,
+    )
     adapter = factory()
     result = run_single(
         adapter,
         project=project,
+        config=config,
         thread_mode=thread_mode,
         warmup=warmup,
         runs=runs,

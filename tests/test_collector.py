@@ -8,6 +8,7 @@ from typebench import collector
 from typebench.adapters.stub import StubAdapter
 from typebench.collector import run_single
 from typebench.models import FailurePhase, ResultClass, ThreadMode
+from typebench.normalized_config import NormalizedConfig
 
 
 def test_run_single_failure_skips_timing() -> None:
@@ -15,6 +16,7 @@ def test_run_single_failure_skips_timing() -> None:
     result = run_single(
         adapter,
         project="demo",
+        config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
         warmup=1,
         runs=2,
@@ -34,6 +36,7 @@ def test_run_single_env_failure_is_recorded() -> None:
     result = run_single(
         adapter,
         project="demo",
+        config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
         warmup=1,
         runs=2,
@@ -49,6 +52,7 @@ def test_run_single_diagnostics_records_counts() -> None:
     result = run_single(
         adapter,
         project="demo",
+        config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
         warmup=1,
         runs=2,
@@ -65,6 +69,7 @@ def test_run_single_success_includes_timing() -> None:
     result = run_single(
         adapter,
         project="demo",
+        config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
         warmup=1,
         runs=3,
@@ -85,6 +90,7 @@ def test_run_single_records_timing_phase_failure(tmp_path: Path) -> None:
     result = run_single(
         adapter,
         project="demo",
+        config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
         warmup=1,
         runs=2,
@@ -110,6 +116,7 @@ def test_run_single_timing_crash_marks_timing_phase(monkeypatch: pytest.MonkeyPa
     result = run_single(
         StubAdapter(exit_code=0),
         project="demo",
+        config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
         warmup=1,
         runs=2,
@@ -135,6 +142,7 @@ def test_run_single_timing_harness_error_is_failed_env(monkeypatch: pytest.Monke
     result = run_single(
         StubAdapter(exit_code=0),
         project="demo",
+        config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
         warmup=1,
         runs=2,
