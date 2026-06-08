@@ -107,11 +107,11 @@ _EXIT_CODE_CLASSES: dict[int, ResultClass] = {
 }
 
 
-def classify_default(raw: RawRun) -> ResultClass:
-    """Generic classifier. Real per-tool exit maps arrive in Plan 2 (§7).
+def classify_with_map(raw: RawRun, exit_map: dict[int, ResultClass]) -> ResultClass:
+    """Universal §7 prefix (env/oom/timeout/signal) then the tool's exit-code
+    map; unknown codes fall to FAILED_CRASH. Tools with overloaded codes
+    (mypy 2, pyrefly 1) override classify() with extra stdout/stderr logic.
 
-    Convention shared by the stub and most checkers: 0 = clean, 1 = diagnostics
-    found, anything else / signal / timeout / oom / env-error = failure.
     Precedence (order matters, spec §5.1/§7): env-error, then explicit OOM,
     then timeout, then the SIGKILL->OOM heuristic, then other signals -> crash,
     then the exit-code table."""
@@ -125,7 +125,13 @@ def classify_default(raw: RawRun) -> ResultClass:
         return ResultClass.FAILED_OOM
     if raw.signal is not None:
         return ResultClass.FAILED_CRASH
-    return _EXIT_CODE_CLASSES.get(raw.exit_code, ResultClass.FAILED_CRASH)
+    return exit_map.get(raw.exit_code, ResultClass.FAILED_CRASH)
+
+
+def classify_default(raw: RawRun) -> ResultClass:
+    """Generic classifier (stub + spine). Real per-tool maps arrive via
+    `classify_with_map` in Plan 2; this is the {0: clean, 1: diagnostics} default."""
+    return classify_with_map(raw, _EXIT_CODE_CLASSES)
 
 
 def main(raw_args: list[str] | None = None) -> int:

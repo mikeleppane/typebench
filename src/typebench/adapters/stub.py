@@ -11,7 +11,10 @@ from typing import TYPE_CHECKING
 from typebench.adapters.base import ParallelismCap, coerce_count, default_classify
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from typebench.models import ResultClass, ThreadMode
+    from typebench.normalized_config import NormalizedConfig
     from typebench.wrapper import RawRun
 
 
@@ -45,7 +48,13 @@ class StubAdapter:
         # No distribution to verify; real checks land in Plan 2.
         return self.version()
 
-    def command(self, project: str, thread_mode: ThreadMode) -> tuple[list[str], dict[str, str]]:
+    def command(
+        self,
+        project: str,
+        config: NormalizedConfig,
+        thread_mode: ThreadMode,
+        workdir: Path,
+    ) -> tuple[list[str], dict[str, str]]:
         if self._missing_binary:
             # Nonexistent executable -> run_command raises OSError -> failed{env}.
             return (["typebench-nonexistent-checker-xyz"], {})

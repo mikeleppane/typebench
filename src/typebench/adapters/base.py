@@ -15,7 +15,10 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from typebench.wrapper import classify_default
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from typebench.models import ResultClass, ThreadMode
+    from typebench.normalized_config import NormalizedConfig
     from typebench.wrapper import RawRun
 
 
@@ -41,10 +44,18 @@ class Adapter(Protocol):
         version (spec §4). Plan 2 implements real verification; stub no-ops."""
         ...
 
-    def command(self, project: str, thread_mode: ThreadMode) -> tuple[list[str], dict[str, str]]:
-        """(argv, extra_env) that runs the checker on `project` under
-        `thread_mode`. `extra_env` carries vars like TY_MAX_PARALLELISM (§5.3),
-        empty when none. Plan 2 adds the normalized-config argument (§6)."""
+    def command(
+        self,
+        project: str,
+        config: NormalizedConfig,
+        thread_mode: ThreadMode,
+        workdir: Path,
+    ) -> tuple[list[str], dict[str, str]]:
+        """(argv, extra_env) running the checker on `project` under the
+        normalized `config` (§6) and `thread_mode`. `workdir` is a run-scoped
+        dir the adapter may write a generated tool config into (it persists
+        across the probe + all timed runs). `extra_env` carries vars like
+        TY_MAX_PARALLELISM (§5.3)."""
         ...
 
     def parallelism_cap(self, thread_mode: ThreadMode) -> ParallelismCap:

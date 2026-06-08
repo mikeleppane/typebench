@@ -1,9 +1,11 @@
 import shutil
+from pathlib import Path
 
 import pytest
 
 from typebench.adapters.stub import StubAdapter
 from typebench.models import ThreadMode, TimingStats
+from typebench.normalized_config import NormalizedConfig
 from typebench.timing import parse_hyperfine_json, run_timing
 
 
@@ -35,9 +37,9 @@ def test_parse_hyperfine_json_rejects_empty_results() -> None:
 
 
 @pytest.mark.skipif(shutil.which("hyperfine") is None, reason="hyperfine not installed")
-def test_run_timing_against_stub() -> None:
+def test_run_timing_against_stub(tmp_path: Path) -> None:
     adapter = StubAdapter(exit_code=0, sleep=0.02)
-    argv, env = adapter.command("demo", ThreadMode.ALL_CORES)
+    argv, env = adapter.command("demo", NormalizedConfig(), ThreadMode.ALL_CORES, tmp_path)
     stats = run_timing(argv, prepare_cmd=None, extra_env=env, warmup=1, runs=3, timeout=30)
     assert stats.runs == 3
     assert stats.min_s > 0

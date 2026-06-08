@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import tempfile
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from typebench.env import detect_env
 from typebench.models import FailurePhase, ResultClass, RunResult, ThreadMode
+from typebench.normalized_config import NormalizedConfig
 from typebench.timing import run_timing
 from typebench.wrapper import run_command
 
@@ -24,7 +27,29 @@ def run_single(
     timeout: float,
 ) -> RunResult:
     adapter.clear_cache(project)
-    argv, extra_env = adapter.command(project, thread_mode)
+    # Run-scoped workdir for any adapter-generated tool config; it must outlive
+    # both the probe and every timed run, so it wraps the whole body (§6).
+    # Plan 2 threads a caller-supplied NormalizedConfig through run_single; for
+    # now the neutral default stands in.
+    with tempfile.TemporaryDirectory(prefix="typebench-") as tmp:
+        workdir = Path(tmp)
+        config = NormalizedConfig()
+        return _run_single_in_workdir(
+            adapter, project, config, thread_mode, workdir, warmup, runs, timeout
+        )
+
+
+def _run_single_in_workdir(
+    adapter: Adapter,
+    project: str,
+    config: NormalizedConfig,
+    thread_mode: ThreadMode,
+    workdir: Path,
+    warmup: int,
+    runs: int,
+    timeout: float,
+) -> RunResult:
+    argv, extra_env = adapter.command(project, config, thread_mode, workdir)
 
     # Phase 1: probe — one real run to classify and parse counts.
     raw = run_command(argv, timeout=timeout, env=extra_env)
