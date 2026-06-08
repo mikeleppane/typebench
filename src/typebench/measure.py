@@ -259,13 +259,28 @@ def scoped_probe(
             cgroup = payload.get("cgroup")
             oom_killed = isinstance(cgroup, dict) and _coerce_int(cgroup["oom_kill"]) > 0
             raw = _raw_from_payload(payload, oom_killed=oom_killed)
+            # Parse the memory sample INSIDE the same guard. A cgroup dict missing
+            # peak_bytes/cpu_usage_usec (truncated payload, schema drift, a custom
+            # runner) must skip this repeat, never raise out of scoped_probe: the
+            # KeyError from cgroup["peak_bytes"] is NOT in the collector's fallback
+            # except set, so an escape here would drop the record (§12, Decision J).
+            sample: tuple[int, int, dict[str, int]] | None = None
+            if isinstance(cgroup, dict):
+                sample = (
+                    _coerce_int(cgroup["peak_bytes"]),
+                    _coerce_int(cgroup["cpu_usage_usec"]),
+                    _memory_stat_from_payload(cgroup),
+                )
         except (KeyError, ValueError):
             continue
         raws.append(raw)
-        if isinstance(cgroup, dict):
-            peaks.append(_coerce_int(cgroup["peak_bytes"]))
-            cpu_usages.append(_coerce_int(cgroup["cpu_usage_usec"]))
-            mem_stats.append(_memory_stat_from_payload(cgroup))
+        # peaks/cpu_usages/mem_stats stay parallel: all three append together (or
+        # none do), so representative_index can index mem_stats by a peaks position.
+        if sample is not None:
+            peak_bytes, cpu_usage, mem_stat = sample
+            peaks.append(peak_bytes)
+            cpu_usages.append(cpu_usage)
+            mem_stats.append(mem_stat)
             oom = oom or oom_killed
 
     if not raws:
@@ -309,11 +324,20 @@ def main(raw_args: list[str] | None = None) -> int:
     ns = parser.parse_args(raw_args)
     argv = ns.argv[1:] if ns.argv and ns.argv[0] == "--" else ns.argv
 
+    # run_command buffers the checker's stdout/stderr in THIS process's memory,
+    # which is inside the measured cgroup. For normal diagnostics (KBs) this is
+    # negligible vs the checker's own analysis memory, but a diagnostics-flood run
+    # would inflate memory.peak output-dependently (documented in MemoryStats; a
+    # streaming variant is the fix if such a corpus entry is ever added).
     raw = run_command(argv, timeout=ns.timeout)
     try:
         sample = read_cgroup_stats(_self_cgroup_dir())
         cgroup: dict[str, object] | None = _sample_to_dict(sample)
-    except OSError:
+    except (OSError, ValueError):
+        # OSError: missing cgroup files / no 0:: entry. ValueError: a present-but-
+        # non-integer memory.peak (_read_int). Either way the cgroup sample is
+        # unreadable -> record cgroup=None but STILL write the payload, so the
+        # checker's outcome for this repeat is never lost (read-before-teardown §5.5).
         cgroup = None
 
     payload = {

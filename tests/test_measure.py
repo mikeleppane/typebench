@@ -240,6 +240,54 @@ def test_scoped_probe_rejects_zero_repeats() -> None:
         scoped_probe(["t"], extra_env={}, timeout=60, repeats=0)
 
 
+def test_scoped_probe_malformed_cgroup_dict_skips_repeat_not_raises() -> None:
+    # Review finding: a cgroup dict present but missing peak_bytes (truncated
+    # payload / schema drift / custom runner) must SKIP that repeat, never raise a
+    # KeyError out of scoped_probe -> the collector's fallback except did not list
+    # KeyError, so an escape would drop the record (§12, Decision J).
+    bad = _payload(999)
+    bad_cgroup = bad["cgroup"]
+    assert isinstance(bad_cgroup, dict)
+    del bad_cgroup["peak_bytes"]
+    runner = _fake_runner_factory([_payload(100), bad])
+    res = scoped_probe(["t"], extra_env={}, timeout=60, repeats=2, runner=runner)
+    assert res.memory is not None
+    assert res.memory.runs == 1  # only the well-formed repeat contributes memory
+    assert res.memory.peak_bytes_median == 100
+
+
+def test_scoped_probe_all_malformed_cgroup_raises_measure_error() -> None:
+    # When every repeat is malformed, no usable payload survives -> MeasureError,
+    # which the collector catches and turns into a plain-probe fallback.
+    bad = _payload(1)
+    bad_cgroup = bad["cgroup"]
+    assert isinstance(bad_cgroup, dict)
+    del bad_cgroup["peak_bytes"]
+    runner = _fake_runner_factory([bad])
+    with pytest.raises(measure.MeasureError):
+        scoped_probe(["t"], extra_env={}, timeout=60, repeats=1, runner=runner)
+
+
+def test_measure_main_cgroup_none_on_noninteger_peak(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Review finding: a present-but-non-integer memory.peak raises ValueError from
+    # _read_int; measure.main must degrade to cgroup=None and STILL write the
+    # payload (the checker outcome for this repeat is never lost, §5.5).
+    cg = tmp_path / "cg"
+    cg.mkdir()
+    (cg / "memory.peak").write_text("not-a-number\n")
+    (cg / "cpu.stat").write_text("usage_usec 1\n")
+    (cg / "memory.stat").write_text("anon 1\n")
+    (cg / "memory.events").write_text("oom_kill 0\n")
+    monkeypatch.setattr(measure, "_self_cgroup_dir", lambda: cg)
+    out = tmp_path / "p.json"
+    measure.main(["--out", str(out), "--timeout", "30", "--", sys.executable, "-c", "pass"])
+    payload = json.loads(out.read_text())
+    assert payload["exit_code"] == 0
+    assert payload["cgroup"] is None
+
+
 @pytest.mark.skipif(not measure.capable(), reason="no cgroup v2 / systemd-run user scope")
 def test_scoped_probe_real_scope_measures_nonzero_peak() -> None:
     argv = [sys.executable, "-c", "x = bytearray(40_000_000); print(len(x))"]

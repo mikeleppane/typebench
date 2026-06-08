@@ -418,3 +418,18 @@ def test_resource_pass_falls_back_to_plain_probe_on_measure_error(
     assert result.files == 5
     assert result.memory is None
     assert result.cpu_time_s is None
+
+
+def test_taskset_unavailable_when_core0_not_in_affinity(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Review finding: taskset installed but core 0 outside the cpuset (containers /
+    # restricted CI) -> `taskset -c 0` would exit 1 BEFORE the checker runs, which
+    # reads as diagnostics and fakes thread_mode_enforced. Guard on the affinity mask.
+    monkeypatch.setattr(collector.shutil, "which", lambda _n: "/usr/bin/taskset")
+    monkeypatch.setattr(collector.os, "sched_getaffinity", lambda _pid: {1, 2, 3})
+    assert collector._taskset_available() is False
+
+
+def test_taskset_available_when_core0_in_affinity(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(collector.shutil, "which", lambda _n: "/usr/bin/taskset")
+    monkeypatch.setattr(collector.os, "sched_getaffinity", lambda _pid: {0, 1, 2})
+    assert collector._taskset_available() is True

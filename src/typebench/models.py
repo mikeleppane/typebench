@@ -45,8 +45,13 @@ class MemoryStats(BaseModel):
     "Peak cgroup memory," NOT RSS: cgroup v2 `memory.peak` is the max usage charged
     to the scope and ALL descendants (page cache, kernel structs, every child) — the
     right cross-tool number (it catches pyright's Node process and worker threads
-    `/usr/bin/time -v` would miss). It includes a ~constant ~10-15 MB Python-harness
-    baseline that is identical for every tool, so cross-tool comparison stays fair.
+    `/usr/bin/time -v` would miss). It also includes the in-scope Python wrapper: a
+    ~10-15 MB interpreter baseline PLUS the captured checker stdout/stderr buffer.
+    That buffer is small + output-dependent, not strictly constant — for normal
+    type-check diagnostics (KBs) it is <1% of the checker's own analysis memory
+    (tens-hundreds of MB) and does not set the peak, but a pathologically
+    diagnostics-heavy run could inflate it. Known limitation (measure.main); a
+    diagnostics-flood corpus entry would warrant streaming output to disk.
     `peak_bytes_*` are min/median/max over `runs` repeats. `memory_stat` is the
     `memory.stat` snapshot of the median-peak run (a data point, never a ranking)."""
 

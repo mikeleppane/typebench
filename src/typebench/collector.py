@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import tempfile
@@ -28,7 +29,18 @@ _AFFINITY_PREFIX = ["taskset", "-c", "0"]  # uniform single-core floor (spec §5
 
 
 def _taskset_available() -> bool:
-    return shutil.which("taskset") is not None
+    """taskset present AND core 0 is in this process's CPU affinity mask. The mask
+    check is load-bearing: under a restrictive cpuset (containers, some CI runners)
+    core 0 may be disallowed, so `taskset -c 0 <checker>` would EXIT 1 *before the
+    checker runs* — and exit 1 reads as diagnostics/measured-success, recording a
+    bogus fast timing AND a false thread_mode_enforced for a command that never ran.
+    Only claim the pin we can actually apply (§5.3, Decision D)."""
+    if shutil.which("taskset") is None:
+        return False
+    getaffinity = getattr(os, "sched_getaffinity", None)
+    if getaffinity is None:  # non-Linux without the affinity API (taskset is Linux-only anyway)
+        return False
+    return 0 in getaffinity(0)
 
 
 def _apply_affinity(argv: list[str], thread_mode: ThreadMode) -> tuple[list[str], bool]:
@@ -112,7 +124,16 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
                     repeats=mem_runs,
                     prepare=lambda: adapter.clear_cache(project),
                 )
-            except (measure.MeasureError, OSError, ValueError, subprocess.SubprocessError):
+            except (
+                measure.MeasureError,
+                OSError,
+                ValueError,
+                KeyError,
+                subprocess.SubprocessError,
+            ):
+                # Defense-in-depth: scoped_probe is built not to escape a malformed
+                # payload, but ANY resource-pass failure must fall back to a plain
+                # probe so a record is never dropped (§12, Decision J).
                 resource = None
         if resource is not None:
             raw = resource.raw
@@ -178,6 +199,12 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
             if memory_summary is not None
             else None
         )
+        # Parallel efficiency = CPU-time / wall (§8). NOTE the two numbers come from
+        # DIFFERENT passes: cpu_time_s is the median over the COLD scoped resource
+        # repeats (under the cgroup), timing.median_s is the WARM hyperfine wall
+        # median (not scoped). The ratio is a robust ~parallelism indicator (≈1 for
+        # single-threaded, >1 for parallel tools) but is not a within-run figure;
+        # the Plan 5 renderer must interpret it as cross-pass (cold-cpu / warm-wall).
         parallel_efficiency = (
             cpu_time_s / timing.median_s
             if cpu_time_s is not None and timing is not None and timing.median_s > 0
