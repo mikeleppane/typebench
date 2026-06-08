@@ -11,7 +11,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 
-from typebench.models import ResultClass
+from typebench.taxonomy import ResultClass
 
 # OOM-killer signal. A bare SIGKILL with no cgroup OOM flag is treated as an
 # OOM heuristic until cgroup OOM detection lands (Plan 4 sets RawRun.oom).
@@ -29,30 +29,38 @@ class RawRun:
     env_error: bool = False
 
 
+def _terminate_tree(proc: subprocess.Popen[str]) -> None:
+    """SIGKILL the child and any grandchildren. The child leads its own session
+    (start_new_session), so killing its process group reaps the whole tree — a
+    plain proc.kill() on timeout would orphan grandchildren that then steal CPU
+    from later benchmark runs. Non-POSIX has no process groups, so kill the child."""
+    if os.name == "posix":
+        try:
+            os.killpg(os.getpgid(proc.pid), _SIGKILL)
+            return
+        except (ProcessLookupError, PermissionError):
+            pass
+    proc.kill()
+
+
 def run_command(argv: list[str], timeout: float, env: dict[str, str] | None = None) -> RawRun:
     """Run argv to completion, capturing the real outcome. Never raises: a
     nonzero exit, a timeout, a signal death, AND an environment error (missing
     binary / not executable) are all captured as a RawRun so the caller can
-    record the right §7 class. `env` is merged over the inherited environment
-    (adapters inject e.g. TY_MAX_PARALLELISM)."""
+    record the right §7 class. On POSIX the command runs in a new session so a
+    timeout kills its whole process tree, not just the direct child (benchmark
+    isolation). `env` is merged over the inherited environment (adapters inject
+    e.g. TY_MAX_PARALLELISM)."""
     run_env = {**os.environ, **env} if env else None
     try:
-        proc = subprocess.run(
+        # nonzero exit is data here (diagnostics), not an error -> no check.
+        proc = subprocess.Popen(
             argv,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout,
             env=run_env,
-            check=False,  # nonzero exit is data here (diagnostics), not an error.
-        )
-    except subprocess.TimeoutExpired as exc:
-        return RawRun(
-            exit_code=-1,
-            signal=None,
-            timed_out=True,
-            oom=False,
-            stdout=exc.stdout or "" if isinstance(exc.stdout, str) else "",
-            stderr=exc.stderr or "" if isinstance(exc.stderr, str) else "",
+            start_new_session=os.name == "posix",
         )
     except OSError as exc:
         # Missing binary, not executable, etc. -> environment failure (§7).
@@ -65,16 +73,30 @@ def run_command(argv: list[str], timeout: float, env: dict[str, str] | None = No
             stderr=str(exc),
             env_error=True,
         )
-    returncode = proc.returncode
-    signal = -returncode if returncode < 0 else None
-    return RawRun(
-        exit_code=returncode,
-        signal=signal,
-        timed_out=False,
-        oom=False,
-        stdout=proc.stdout,
-        stderr=proc.stderr,
-    )
+    with proc:
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _terminate_tree(proc)
+            stdout, stderr = proc.communicate()
+            return RawRun(
+                exit_code=-1,
+                signal=None,
+                timed_out=True,
+                oom=False,
+                stdout=stdout or "",
+                stderr=stderr or "",
+            )
+        returncode = proc.returncode
+        sig = -returncode if returncode < 0 else None
+        return RawRun(
+            exit_code=returncode,
+            signal=sig,
+            timed_out=False,
+            oom=False,
+            stdout=stdout,
+            stderr=stderr,
+        )
 
 
 # Generic exit-code convention: 0 = clean, 1 = diagnostics found, anything
@@ -127,6 +149,14 @@ def main(raw_args: list[str] | None = None) -> int:
     raw = run_command(argv, timeout=ns.timeout)
     sys.stdout.write(raw.stdout)
     sys.stderr.write(raw.stderr)
+    # PLAN 2 TRAP: this gate uses the GENERIC classifier. Real adapters own
+    # classification (Adapter.classify), and a tool whose "diagnostics" exit code
+    # is not 1 (e.g. ty) would be misjudged HERE -> the wrapper reports failure on
+    # an otherwise-successful timed run -> hyperfine aborts -> the collector
+    # records failed{crash}. The probe (which DOES use Adapter.classify) and the
+    # timing phase then disagree. Plan 2 MUST pass the tool's measured-success
+    # exit codes into this wrapper so both phases agree. Stub uses {0,1} -> no
+    # divergence yet, which is why this is safe for the spine only.
     return 0 if classify_default(raw).is_measured_success else 1
 
 

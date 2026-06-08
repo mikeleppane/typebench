@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from typebench.models import (
     EnvFingerprint,
+    FailurePhase,
     ResultClass,
     RunResult,
     ThreadMode,
@@ -130,3 +131,30 @@ def test_failure_metadata_round_trips() -> None:
     assert restored == result
     assert restored.error_detail is not None
     assert restored.timing is None
+
+
+def test_failure_phase_defaults_none_and_round_trips() -> None:
+    # Measured-success carries no failure phase; a timing-phase failure records
+    # FailurePhase.TIMING so real_exit_code (the clean probe's) is unambiguous.
+    clean = RunResult(
+        tool="stub",
+        tool_version="1.0",
+        project="demo",
+        thread_mode=ThreadMode.ALL_CORES,
+        result_class=ResultClass.CLEAN,
+        real_exit_code=0,
+        env=_env(),
+    )
+    assert clean.failure_phase is None
+    crashed = RunResult(
+        tool="stub",
+        tool_version="1.0",
+        project="demo",
+        thread_mode=ThreadMode.ALL_CORES,
+        result_class=ResultClass.FAILED_CRASH,
+        real_exit_code=0,
+        failure_phase=FailurePhase.TIMING,
+        env=_env(),
+    )
+    restored = RunResult.model_validate_json(crashed.model_dump_json())
+    assert restored.failure_phase == FailurePhase.TIMING

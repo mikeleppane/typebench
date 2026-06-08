@@ -2,32 +2,22 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
-
 from pydantic import BaseModel, ConfigDict
 
+# ResultClass / ThreadMode / FailurePhase live in a pydantic-free module so the
+# exit-code wrapper (hyperfine's per-run command) can import them without paying
+# pydantic's import cost on every timed run. Re-exported here for the stable
+# `typebench.models` import path the rest of the package and tests use.
+from typebench.taxonomy import FailurePhase, ResultClass, ThreadMode
 
-class ResultClass(StrEnum):
-    """Spec §7 failure taxonomy. String values are stable on disk."""
-
-    CLEAN = "clean"
-    DIAGNOSTICS = "diagnostics"
-    FAILED_ENV = "failed{env}"
-    FAILED_CRASH = "failed{crash}"
-    FAILED_TIMEOUT = "failed{timeout}"
-    FAILED_OOM = "failed{oom}"
-
-    @property
-    def is_measured_success(self) -> bool:
-        """clean and diagnostics are successes; only real failures are excluded."""
-        return self in (ResultClass.CLEAN, ResultClass.DIAGNOSTICS)
-
-
-class ThreadMode(StrEnum):
-    """Spec §5.3. A literal '1 thread' is not claimed; the floor is 1-core."""
-
-    ONE_CORE = "1-core-constrained"
-    ALL_CORES = "all-cores"
+__all__ = [
+    "EnvFingerprint",
+    "FailurePhase",
+    "ResultClass",
+    "RunResult",
+    "ThreadMode",
+    "TimingStats",
+]
 
 
 class TimingStats(BaseModel):
@@ -76,6 +66,10 @@ class RunResult(BaseModel):
     # record must not imply a methodology the engine did not run.
     thread_mode_enforced: bool = False
     result_class: ResultClass
+    # Which pass produced a failure: PROBE (real_exit_code is the failing
+    # command's) or TIMING (real_exit_code is the *successful* probe's — the
+    # failure was a flaky timed run). None on measured-success (spec §5.1 audit).
+    failure_phase: FailurePhase | None = None
     real_exit_code: int
     # Failure metadata — enough to audit failed{env} vs failed{crash}/{oom}
     # after the fact (spec §5.1). None/False on success.
