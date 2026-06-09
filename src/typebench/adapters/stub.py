@@ -1,4 +1,4 @@
-"""StubAdapter — drives typebench._fake_checker. Exercises the full pipeline
+"""StubAdapter — drives typebench._internal.fake_checker. Exercises the full pipeline
 deterministically: chosen exit code, diagnostics, files, duration, a signal
 death, or a missing-binary environment failure."""
 
@@ -62,7 +62,7 @@ class StubAdapter:
         argv = [
             sys.executable,
             "-m",
-            "typebench._fake_checker",
+            "typebench._internal.fake_checker",
             "--exit-code",
             str(self._exit_code),
             "--diagnostics",

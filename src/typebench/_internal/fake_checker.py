@@ -14,7 +14,7 @@ from pathlib import Path
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="typebench._fake_checker")
+    parser = argparse.ArgumentParser(prog="typebench._internal.fake_checker")
     parser.add_argument("--exit-code", type=int, default=0)
     parser.add_argument("--sleep", type=float, default=0.0)
     parser.add_argument("--diagnostics", type=int, default=0)
