@@ -1,4 +1,4 @@
-"""Canonical first-party counter (spec §8).
+"""Canonical first-party counter.
 
 The neutral throughput denominator is identical across all four tools. It walks
 only the declared `src_roots`, so any installed third-party dependency (which
@@ -8,8 +8,7 @@ this number.
 
 LOC semantics: `loc` is a physical line count (blanks + comments included), a
 coarse secondary number. The neutrality denominator that gates readiness is the
-file count. tokei code-LOC is computed here in Plan 5 and consumed by the
-renderer.
+file count. tokei code-LOC is computed here and consumed by the renderer.
 """
 
 from __future__ import annotations
@@ -33,12 +32,12 @@ class FileCount:
 
 
 def _excluded_dir_names(globs: tuple[str, ...]) -> frozenset[str]:
-    """Derive directory names excluded by the §6 dir-segment globs."""
+    """Derive directory names excluded by the normalized dir-segment globs."""
     return frozenset(glob.strip("*/ ").split("/")[0] for glob in globs if glob.strip("*/ "))
 
 
 def first_party_files(roots: list[Path], exclude_globs: tuple[str, ...]) -> list[Path]:
-    """Return the canonical first-party `.py` file set (spec §6/§8)."""
+    """Return the canonical first-party `.py` file set."""
     excluded = _excluded_dir_names(exclude_globs)
     out: list[Path] = []
     for root in roots:

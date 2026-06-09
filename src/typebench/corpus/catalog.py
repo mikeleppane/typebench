@@ -1,4 +1,4 @@
-"""Corpus as data (spec §4).
+"""Corpus as data.
 
 `suite.toml` declares each pinned real-world project: its release-tag SHA,
 first-party source roots, size bucket, target Python, and an explicit install
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 
 class SizeBucket(StrEnum):
-    """LOC bands that reveal scaling curves (spec §2 decision 8a)."""
+    """LOC bands that reveal scaling curves."""
 
     SMALL = "small"
     MEDIUM = "medium"
@@ -40,7 +40,7 @@ class CorpusProject(BaseModel):
     tag: str
     size_bucket: SizeBucket
     python_version: str
-    # §6 locks BOTH version and platform; defaulted so existing minimal entries
+    # Normalized config locks BOTH version and platform; defaulted so existing minimal entries
     # stay valid, but the suite pins it explicitly.
     python_platform: str = "linux"
     src_roots: tuple[str, ...]
@@ -49,7 +49,7 @@ class CorpusProject(BaseModel):
     # to it via UV_CONSTRAINT and prepare verifies the frozen resolution still
     # matches. None => resolve-and-freeze is a lock seed only.
     constraints: str | None = None
-    # Extends (never replaces) the §6 defaults so tests/vendored/generated are
+    # Extends (never replaces) the default excludes so tests/vendored/generated are
     # always excluded; restricted to dir-segment globs by the validator.
     exclude_globs: tuple[str, ...] = ()
 
@@ -65,7 +65,7 @@ class CorpusProject(BaseModel):
         return globs
 
     def effective_excludes(self) -> tuple[str, ...]:
-        """Return the §6 default excludes followed by this entry's extensions."""
+        """Return the default excludes followed by this entry's extensions."""
         return DEFAULT_EXCLUDES + self.exclude_globs
 
 
@@ -95,7 +95,7 @@ def load_suite(path: Path) -> list[CorpusProject]:
 
 
 def load_suite_version(path: Path) -> str:
-    """Read `[suite] version` from suite.toml; 'unversioned' when absent (spec §9)."""
+    """Read `[suite] version` from suite.toml; 'unversioned' when absent."""
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
     suite = raw.get("suite", {})
     version = suite.get("version") if isinstance(suite, dict) else None

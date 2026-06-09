@@ -1,6 +1,7 @@
-"""Suite orchestration (spec §10/§11). Loops the (project x tool x thread-mode)
-matrix behind the §12 preflight gate and writes a ResultsEnvelope. Off the measured
-path; pydantic via `models` is fine here.
+"""Suite orchestration for the project x tool x thread-mode matrix.
+
+Runs the matrix behind the preflight gate and writes a ResultsEnvelope. Off the
+measured path; pydantic via `models` is fine here.
 """
 
 from __future__ import annotations
@@ -54,7 +55,7 @@ def build_matrix(
 
 
 def shard(cells: list[SuiteCell], index: int, total: int) -> list[SuiteCell]:
-    """Deterministic round-robin partition (spec §10 sharding). `total=1` is the
+    """Deterministic round-robin partition. `total=1` is the
     identity. Round-robin (not contiguous slices) spreads heavy/light cells evenly
     across shards so no single CI job inherits all the giant-bucket work.
     """
@@ -74,8 +75,8 @@ def _excluded_record(
     calibration: CalibrationStats | None,
 ) -> RunResult:
     """A FAILED_ENV record for a cell whose project was excluded by preflight or a
-    prepare failure. The bar must read 'didn't compete', never be silently absent
-    (spec §7/§12). Carries whatever repro scalars are known."""
+    prepare failure. The bar must read 'didn't compete', never be silently absent.
+    Carries whatever repro scalars are known."""
     ch = (
         config_hash(
             entry.src_roots,
@@ -144,13 +145,13 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
     run_one: Callable[..., RunResult] = run_single,
     calibrate_fn: Callable[[int], CalibrationStats] | None = None,
 ) -> ResultsEnvelope:
-    """Run the sharded matrix behind the §12 preflight gate -> ResultsEnvelope.
+    """Run the sharded matrix behind the preflight gate -> ResultsEnvelope.
 
     Per project (project-major, so the clone/venv is reused): prepare -> preflight;
     if the project is not ready (or prepare fails), emit one FAILED_ENV record per
-    cell (visible 'didn't compete', §12) and skip running. Otherwise run each ready
+    cell (visible 'didn't compete') and skip running. Otherwise run each ready
     cell via run_one with a stamped RunManifest. One calibration per invocation
-    (Decision H) attached to every record."""
+    is attached to every record."""
     if adapter_factory is None:
         raise ValueError("adapter_factory is required")
     if lookup_entry is None:

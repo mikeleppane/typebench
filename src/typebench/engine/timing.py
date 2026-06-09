@@ -1,6 +1,9 @@
-"""Timing pass via hyperfine (spec §5.4). hyperfine handles warmup, repeated
-runs, and statistics; we hand it the wrapper (Task 5) so diagnostics exits do
-not abort the run, and `--prepare` clears the checker cache before each run."""
+"""Timing pass via hyperfine.
+
+hyperfine handles warmup, repeated runs, and statistics; we hand it the wrapper
+so diagnostics exits do not abort the run, and `--prepare` clears the checker
+cache before each run.
+"""
 
 from __future__ import annotations
 
@@ -58,7 +61,7 @@ def run_timing(
 
     `argv` is the *real* checker invocation; it is wrapped so hyperfine sees a
     success exit for diagnostics. `prepare_cmd` (e.g. cache clear) runs before
-    every timed run, keeping each run cold (§5.2); None means nothing to prepare
+    every timed run, keeping each run cold; None means nothing to prepare
     (stub has no cache). `extra_env` is set on the hyperfine process and inherited
     by the wrapped command (e.g. TY_MAX_PARALLELISM)."""
     run_env = {**os.environ, **extra_env} if extra_env else None

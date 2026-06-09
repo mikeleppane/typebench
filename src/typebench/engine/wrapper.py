@@ -1,7 +1,10 @@
-"""Exit-code wrapper (spec §5.1). Type checkers exit nonzero when they find
-diagnostics — that is success, not failure. This module captures the real
-outcome and maps it to the §7 taxonomy. It also exposes a CLI (Task 5) used
-as hyperfine's command so hyperfine does not abort on diagnostics."""
+"""Exit-code wrapper for checker subprocesses.
+
+Type checkers exit nonzero when they find diagnostics; that is success, not
+failure. This module captures the real outcome and maps it to the failure
+taxonomy. It also exposes the CLI used as hyperfine's command so hyperfine does
+not abort on diagnostics.
+"""
 
 from __future__ import annotations
 
@@ -13,9 +16,9 @@ from dataclasses import dataclass
 
 from typebench.contracts.taxonomy import ResultClass
 
-# OOM-killer signal. A bare SIGKILL is the OOM heuristic on the FALLBACK (non-
-# cgroup) probe path. The cgroup-scoped resource pass (typebench.engine.measure, Plan 4)
-# sets RawRun.oom authoritatively from memory.events.oom_kill when available.
+# OOM-killer signal. A bare SIGKILL is the OOM heuristic on the fallback
+# non-cgroup probe path. The cgroup-scoped resource pass sets RawRun.oom
+# authoritatively from memory.events.oom_kill when available.
 _SIGKILL = 9
 
 
@@ -48,8 +51,8 @@ def run_command(argv: list[str], timeout: float, env: dict[str, str] | None = No
     """Run argv to completion, capturing the real outcome. Never raises: a
     nonzero exit, a timeout, a signal death, AND an environment error (missing
     binary / not executable) are all captured as a RawRun so the caller can
-    record the right §7 class. On POSIX the command runs in a new session so a
-    timeout kills its whole process tree, not just the direct child (benchmark
+    record the right taxonomy class. On POSIX the command runs in a new session
+    so a timeout kills its whole process tree, not just the direct child (benchmark
     isolation). `env` is merged over the inherited environment (adapters inject
     e.g. TY_MAX_PARALLELISM)."""
     run_env = {**os.environ, **env} if env else None
@@ -64,7 +67,7 @@ def run_command(argv: list[str], timeout: float, env: dict[str, str] | None = No
             start_new_session=os.name == "posix",
         )
     except OSError as exc:
-        # Missing binary, not executable, etc. -> environment failure (§7).
+        # Missing binary, not executable, etc. -> environment failure.
         return RawRun(
             exit_code=-1,
             signal=None,
@@ -101,7 +104,8 @@ def run_command(argv: list[str], timeout: float, env: dict[str, str] | None = No
 
 
 # Generic exit-code convention: 0 = clean, 1 = diagnostics found, anything
-# else = crash. Real per-tool exit maps arrive in Plan 2 (§7).
+# else = crash. Per-tool exit maps override this default when a checker needs a
+# different mapping.
 _EXIT_CODE_CLASSES: dict[int, ResultClass] = {
     0: ResultClass.CLEAN,
     1: ResultClass.DIAGNOSTICS,
@@ -109,12 +113,14 @@ _EXIT_CODE_CLASSES: dict[int, ResultClass] = {
 
 
 def universal_failure_prefix(raw: RawRun) -> ResultClass | None:
-    """The env/oom/timeout/signal classification shared by EVERY tool, in §7
-    precedence order. Returns the failure class when a universal condition
-    applies, else None — the caller then applies its own exit-code logic. This
-    is the single source of the prefix for both `classify_with_map` (tools with a
-    clean exit map) and the overloaded-exit adapters (mypy 2, pyrefly 1) that
-    need custom per-code logic afterwards."""
+    """Classify env/oom/timeout/signal failures before tool-specific exit logic.
+
+    Returns the failure class when a universal condition applies, else None; the
+    caller then applies its own exit-code logic. This is the single source of the
+    prefix for both `classify_with_map` (tools with a clean exit map) and the
+    overloaded-exit adapters (mypy 2, pyrefly 1) that need custom per-code logic
+    afterwards.
+    """
     if raw.env_error:
         return ResultClass.FAILED_ENV
     if raw.oom:
@@ -129,9 +135,12 @@ def universal_failure_prefix(raw: RawRun) -> ResultClass | None:
 
 
 def classify_with_map(raw: RawRun, exit_map: dict[int, ResultClass]) -> ResultClass:
-    """Universal §7 prefix then the tool's exit-code map; unknown codes fall to
-    FAILED_CRASH. Tools with overloaded codes (mypy 2, pyrefly 1) instead call
-    `universal_failure_prefix` directly and run their own exit-code logic."""
+    """Apply universal failures, then the tool's exit-code map.
+
+    Unknown codes fall to FAILED_CRASH. Tools with overloaded codes (mypy 2,
+    pyrefly 1) instead call `universal_failure_prefix` directly and run their
+    own exit-code logic.
+    """
     prefix = universal_failure_prefix(raw)
     if prefix is not None:
         return prefix
@@ -139,8 +148,7 @@ def classify_with_map(raw: RawRun, exit_map: dict[int, ResultClass]) -> ResultCl
 
 
 def classify_default(raw: RawRun) -> ResultClass:
-    """Generic classifier (stub + spine). Real per-tool maps arrive via
-    `classify_with_map` in Plan 2; this is the {0: clean, 1: diagnostics} default."""
+    """Generic classifier for tools that use 0=clean and 1=diagnostics."""
     return classify_with_map(raw, _EXIT_CODE_CLASSES)
 
 
@@ -165,12 +173,12 @@ def main(raw_args: list[str] | None = None) -> int:
     raw = run_command(argv, timeout=ns.timeout)
     sys.stdout.write(raw.stdout)
     sys.stderr.write(raw.stderr)
-    # PLAN 2 TRAP — partially defused, residual blind spot documented.
+    # Known limitation: partially defused, with one blind spot documented.
     # SUCCESS PATH: all four tools (mypy/pyright/ty/pyrefly) use measured-success
     # codes ⊆ {0,1}, so this generic gate agrees with each adapter's probe
     # `classify` and no tool-specific code threading is needed.
     #
-    # RESIDUAL BLIND SPOT (pyrefly): exit 1 is overloaded (diagnostics OR fatal
+    # BLIND SPOT (pyrefly): exit 1 is overloaded (diagnostics OR fatal
     # config/env). The probe phase uses the real Adapter.classify, disambiguates
     # it, and gates whether timing runs — so a *deterministically* broken run is
     # caught at probe and never timed. But a FLAKY fatal pyrefly exit-1 that
@@ -178,8 +186,9 @@ def main(raw_args: list[str] | None = None) -> int:
     # measured-success → hyperfine silently times a broken run. Threading {0,1}
     # success codes would NOT fix this (exit 1 is in the success set yet still
     # ambiguous). The only real fix is adapter-aware timing classification, which
-    # the wrapper CANNOT do without importing pydantic (violates
-    # test_wrapper_import_does_not_pull_pydantic). Accepted residual risk for 2B.
+    # the wrapper CANNOT do without importing pydantic. Keeping pydantic off the
+    # measured path is required because this wrapper runs inside every hyperfine
+    # measurement.
     #
     # mypy (NO blind spot): overloaded exit 2 is OUTSIDE {0,1}, so a flaky
     # timed-run exit 2 → wrapper returns nonzero → hyperfine aborts → collector

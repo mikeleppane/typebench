@@ -1,4 +1,4 @@
-"""On-disk enums (spec §7 taxonomy, §5.3 thread modes).
+"""On-disk enums for result taxonomy and thread modes.
 
 Deliberately pydantic-free: the exit-code wrapper imports ResultClass and runs
 as hyperfine's per-run command, so importing pydantic here would add ~50ms of
@@ -11,7 +11,7 @@ from enum import StrEnum
 
 
 class ResultClass(StrEnum):
-    """Spec §7 failure taxonomy. String values are stable on disk."""
+    """Failure taxonomy. String values are stable on disk."""
 
     CLEAN = "clean"
     DIAGNOSTICS = "diagnostics"
@@ -27,14 +27,14 @@ class ResultClass(StrEnum):
 
 
 class ThreadMode(StrEnum):
-    """Spec §5.3. A literal '1 thread' is not claimed; the floor is 1-core."""
+    """Thread-mode labels. A literal '1 thread' is not claimed; the floor is 1-core."""
 
     CONSTRAINED = "constrained"
     ALL_CORES = "all-cores"
 
 
 class FailurePhase(StrEnum):
-    """Which pass produced a failure (spec §5.1 audit trail).
+    """Which pass produced a failure.
 
     PROBE  — the probe invocation itself failed; real_exit_code is its code.
     TIMING — the probe measured-succeeded but a timed run failed under hyperfine;

@@ -1,4 +1,4 @@
-"""typebench CLI (spec §5). Plan 1 exposes `run` for a single invocation."""
+"""typebench command-line interface."""
 
 from __future__ import annotations
 
@@ -159,10 +159,7 @@ def run(  # noqa: PLR0913, PLR0915 — many user-facing CLI options + linear arg
     mem_runs: Annotated[
         int,
         typer.Option(
-            help=(
-                "Resource-pass repeats (peak memory variance, spec §5.5). >=1; >=3 for "
-                "official numbers."
-            )
+            help=("Resource-pass repeats (peak memory variance). >=1; >=3 for official numbers.")
         ),
     ] = 3,
     measure: Annotated[
@@ -171,9 +168,7 @@ def run(  # noqa: PLR0913, PLR0915 — many user-facing CLI options + linear arg
     ] = True,
     calibrate_baseline: Annotated[
         bool,
-        typer.Option(
-            "--calibrate/--no-calibrate", help="Time the calibration workload (spec §5.7)."
-        ),
+        typer.Option("--calibrate/--no-calibrate", help="Time the calibration workload."),
     ] = True,
     calib_runs: Annotated[int, typer.Option(help="Calibration workload repeats (>=1).")] = 5,
     timeout: Annotated[float, typer.Option(help="Per-invocation timeout (seconds).")] = 900.0,
@@ -224,7 +219,7 @@ def run(  # noqa: PLR0913, PLR0915 — many user-facing CLI options + linear arg
         typer.echo(f"Output directory not writable: {out_dir}", err=True)
         raise typer.Exit(code=2)
     if mem_runs < 1:
-        typer.echo("--mem-runs must be >= 1 (>= 3 recommended, spec §5.5).", err=True)
+        typer.echo("--mem-runs must be >= 1 (>= 3 recommended).", err=True)
         raise typer.Exit(code=2)
     if calib_runs < 1:
         typer.echo("--calib-runs must be >= 1.", err=True)

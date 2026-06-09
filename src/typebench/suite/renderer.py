@@ -1,9 +1,10 @@
-"""Renderer (spec §8/§11) — pure functions from results models to the README
-markdown block and the GH Pages trends.json. No filesystem I/O here (the CLI does
-it); golden-tested. Hard rules: diagnostics counts are NEVER a headline column
-(§8); kLOC/s uses the canonical code-LOC denominator and is withheld for
-over-reporting tools; parallel_efficiency is labelled cross-pass (cold-cpu ÷
-warm-wall), not a within-run figure."""
+"""Pure renderers from results models to README markdown and GH Pages trends JSON.
+
+No filesystem I/O here (the CLI does it); golden-tested. Hard rules: diagnostics
+counts are NEVER a headline column; kLOC/s uses the canonical code-LOC denominator
+and is withheld for over-reporting tools; parallel_efficiency is labelled
+cross-pass (cold-cpu ÷ warm-wall), not a within-run figure.
+"""
 
 from __future__ import annotations
 
@@ -24,7 +25,7 @@ def _peak_mem_mb(record: RunResult) -> str:
 
 def _kloc_s(record: RunResult) -> str:
     """Headline throughput = canonical code-LOC / wall median. Withheld (—*) for
-    over-reporters (their analyzed set diverges from the canonical denominator, §8).
+    over-reporters (their analyzed set diverges from the canonical denominator).
     Physical-denominator rows are footnoted by the caller via loc_denominator."""
     if record.over_reports:
         return "—*"
@@ -67,7 +68,8 @@ def _table(records: list[RunResult]) -> str:
 def render_readme(envelope: ResultsEnvelope) -> str:
     """Markdown block (between the TYPEBENCH markers) — one table per
     (project, thread-mode), ordered fastest-first (ranking by the measured metric,
-    §11). Includes the suite version, generated timestamp, and the caveat footnotes."""
+    not diagnostics). Includes the suite version, generated timestamp, and the
+    caveat footnotes."""
     groups: dict[tuple[str, str], list[RunResult]] = {}
     for record in envelope.runs:
         groups.setdefault((record.project, record.thread_mode.value), []).append(record)
@@ -85,7 +87,7 @@ def render_readme(envelope: ResultsEnvelope) -> str:
         "because the tool over-reports its analyzed set vs the canonical denominator. "
         "Parallel efficiency is cross-pass (cold cgroup CPU-time ÷ warm hyperfine wall). "
         "Checker issue counts are intentionally omitted — they are not comparable across "
-        "tools and are not a ranking (spec §8).\n"
+        "tools and are not a ranking.\n"
     )
     parts.append(_README_END)
     return "\n".join(parts)
@@ -96,7 +98,7 @@ def _calib_median(record: RunResult) -> float | None:
 
 
 def cpu_model_anchors(history: list[ResultsEnvelope]) -> dict[str, float]:
-    """Fixed per-CPU-model calibration anchor (Decision I): for each CPU model, the
+    """Fixed per-CPU-model calibration anchor: for each CPU model, the
     calibration raw_median_s of the EARLIEST envelope (by generated_at) that has a
     run on that model with a calibration. Anchors only ever add, so a published
     point's normalized value never changes when later data arrives."""

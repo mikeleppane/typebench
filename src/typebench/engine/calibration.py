@@ -1,11 +1,13 @@
-"""Calibration baseline (spec §5.7). A fixed, dep-free CPU-bound Python workload
-timed alongside each run so weekly trends can be normalized against the VM-to-VM
-hardware lottery. Pydantic-free except the final stats construction is done by the
-caller (collector); this module returns plain floats via `calibrate`.
+"""Calibration baseline for a fixed, dep-free CPU-bound Python workload.
+
+The workload is timed alongside each run so weekly trends can be normalized
+against the VM-to-VM hardware lottery. Pydantic-free except the final stats
+construction is done by the caller (collector); this module returns plain floats
+via `calibrate`.
 
 The workload identity is LOCKED by WORKLOAD_ID + ITERATIONS — changing either is a
 new workload id (the manifest records it). Normalization (raw / reference) is a
-render-time transform (Plan 5); we store RAW seconds only (Decision C)."""
+render-time transform; we store RAW seconds only."""
 
 from __future__ import annotations
 
@@ -33,9 +35,9 @@ ITERATIONS = 5_000_000
 def _run_workload() -> None:
     """Deterministic integer/float CPU-bound loop. No allocation growth, no I/O,
     no randomness — pure ALU work whose wall-time scales inversely with core speed.
-    A documented limitation (§5.7): this calibrates Python/CPU speed, not the Rust
+    A documented limitation: this calibrates Python/CPU speed, not the Rust
     (pyrefly/ty) or Node (pyright) runtimes; inter-checker ratios + CPU-model
-    segmentation cover the residual. It is a coarse hardware scalar by design."""
+    segmentation cover the remainder. It is a coarse hardware scalar by design."""
     acc = 0
     x = 1.0
     for i in range(ITERATIONS):

@@ -1,13 +1,15 @@
-"""The normalized benchmark config (spec §6) — the equal observable inputs fed
-to every checker. A pure value object; each adapter renders it into its own
-config file / flags. Defaults are the neutral, stock-but-equal policy."""
+"""The normalized benchmark config: equal observable inputs for every checker.
+
+A pure value object; each adapter renders it into its own config file / flags.
+Defaults are the neutral, stock-but-equal policy.
+"""
 
 from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
 
-# Excluded everywhere (spec §6): tests, vendored, generated, caches.
+# Excluded everywhere: tests, vendored, generated, caches.
 DEFAULT_EXCLUDES: tuple[str, ...] = (
     "**/tests/**",
     "**/test/**",
@@ -19,7 +21,7 @@ DEFAULT_EXCLUDES: tuple[str, ...] = (
     "**/node_modules/**",
 )
 
-# Bump when the LOCKED §6 policy set (flags/posture) changes, so config_hash
+# Bump when the locked policy set (flags/posture) changes, so config_hash
 # distinguishes pre/post-policy runs even at identical inputs.
 NORMALIZED_POLICY_VERSION = "v1"
 
@@ -30,7 +32,7 @@ def config_hash(
     python_version: str,
     python_platform: str,
 ) -> str:
-    """Stable, machine-independent hash of the resolved normalized config (spec §6).
+    """Stable, machine-independent hash of the resolved normalized config.
 
     Callers MUST pass REPO-RELATIVE src_roots (e.g. CorpusProject.src_roots), never
     the absolute checkout path or the venv — those are machine-specific and would
@@ -51,20 +53,22 @@ def config_hash(
 
 @dataclass(frozen=True)
 class NormalizedConfig:
-    """§6 inputs. `src_roots` are absolute first-party dirs to analyze (the
-    throughput denominator); `venv_python` is the project venv interpreter used
-    to resolve installed third-party imports (deps resolved, first-party
-    diagnostics only)."""
+    """Equalized checker inputs.
+
+    `src_roots` are absolute first-party dirs to analyze (the throughput
+    denominator); `venv_python` is the project venv interpreter used to resolve
+    installed third-party imports (deps resolved, first-party diagnostics only).
+    """
 
     src_roots: tuple[str, ...] = ()
     exclude_globs: tuple[str, ...] = field(default=DEFAULT_EXCLUDES)
     python_version: str = "3.12"
     python_platform: str = "linux"
     venv_python: str | None = None
-    # §5.3 CONSTRAINED-track core count: the collector pins to taskset -c 0..cores-1
+    # CONSTRAINED-track core count: the collector pins to taskset -c 0..cores-1
     # and each adapter caps its workers to this many. Default 1 = the single-core
-    # algorithmic floor; raise it (e.g. 8) for a reproducible multi-core run. NOT a §6
-    # policy input, so it is deliberately excluded from config_hash (the same
+    # algorithmic floor; raise it (e.g. 8) for a reproducible multi-core run. NOT a
+    # normalized policy input, so it is deliberately excluded from config_hash (the same
     # normalized config benchmarked at different core counts is the SAME config).
     # Ignored on the ALL_CORES track.
     cores: int = 1

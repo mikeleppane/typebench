@@ -1,5 +1,8 @@
-"""mypy adapter (spec §4, §6). Text-summary parse (mypy JSON has no files count
-and is empty on clean). See docs/superpowers/research/2026-06-08-checker-cli-facts.md."""
+"""mypy adapter.
+
+Uses text-summary parsing because mypy JSON has no files count and is empty on
+clean output.
+"""
 
 from __future__ import annotations
 
@@ -22,11 +25,11 @@ if TYPE_CHECKING:
     from typebench.contracts.config import NormalizedConfig
     from typebench.engine.wrapper import RawRun
 
-# Text summaries (research doc). errors+files, and the clean form.
+# Text summaries: errors+files, and the clean form.
 _FOUND_RE = re.compile(r"Found (\d+) errors? in \d+ files? \(checked (\d+) source files?\)")
 _CLEAN_RE = re.compile(r"Success: no issues found in (\d+) source files?")
 
-# Exit codes (research doc): 0 clean, 1 diagnostics, 2 overloaded (usage/crash).
+# Exit codes: 0 clean, 1 diagnostics, 2 overloaded (usage/crash).
 _EXIT_DIAGNOSTICS = 1
 _EXIT_OVERLOADED = 2
 
@@ -59,9 +62,10 @@ def _cache_dir(project: str) -> str:
 
 def _globs_to_exclude_regex(globs: tuple[str, ...]) -> str:
     """mypy --exclude takes a REGEX (matched against discovered paths), not globs.
-    Render the §6 exclude globs as an alternation of their dir-name segments, e.g.
-    '**/tests/**' -> 'tests'. Anchored on path separators so it matches a segment,
-    not a substring."""
+    Render the normalized exclude globs as an alternation of their dir-name
+    segments, e.g. '**/tests/**' -> 'tests'. Anchored on path separators so it
+    matches a segment, not a substring."""
+
     names = sorted({g.strip("*/ ").split("/")[0] for g in globs if g.strip("*/ ")})
     if not names:
         return r"(?!)"  # match nothing
@@ -76,8 +80,8 @@ class MypyAdapter:
         return probe_version(["mypy", "--version"], runner=subprocess.run)
 
     def install(self) -> str:
-        # Records the version string, which carries "(compiled: yes)" for the §9
-        # lock manifest (mypyc-compiled wheels are the default distribution).
+        # Records the version string, which carries "(compiled: yes)" for the lock
+        # manifest (mypyc-compiled wheels are the default distribution).
         return self.version()
 
     def _supports_parallel(self) -> bool:
@@ -110,9 +114,9 @@ class MypyAdapter:
             config.python_version,
             "--platform",
             config.python_platform,
-            "--check-untyped-defs",  # analyze all bodies (§6)
+            "--check-untyped-defs",  # analyze all bodies
             "--follow-imports=silent",  # resolve dep types, report first-party only
-            "--config-file=",  # empty value suppresses the project's own config (§6)
+            "--config-file=",  # empty value suppresses the project's own config
         ]
         # Parallel pass (mypy >= 2.0). CONSTRAINED -> config.cores, ALL_CORES ->
         # every logical CPU. Only parallelize when workers > 1: -n1 is single-
@@ -125,7 +129,7 @@ class MypyAdapter:
             # /dev/null. Point it at a FRESH per-run cache dir instead: clear_cache
             # + the hyperfine --prepare empty it before every run, so each measured
             # run still starts COLD (empty cache -> full recompute). The cache-write
-            # cost is intrinsic to mypy's parallel mode and fairly counted (§5.2/§5.3).
+            # cost is intrinsic to mypy's parallel mode and fairly counted.
             argv += ["--cache-dir", _cache_dir(project), "--num-workers", str(workers)]
         else:
             # Cold single-shot: write no cache at all (the default headline path).
@@ -181,11 +185,11 @@ class MypyAdapter:
     def clear_cache(self, project: str) -> None:
         # Single-process path is stateless (--cache-dir=/dev/null + --no-incremental).
         # Parallel path writes a real cache; wipe it so each cold repeat starts empty
-        # (§5.2). Idempotent + harmless when the cache was never created.
+        # Idempotent + harmless when the cache was never created.
         shutil.rmtree(_cache_dir(project), ignore_errors=True)
 
     def prepare_command(self, project: str) -> str | None:
         # hyperfine --prepare: wipe the parallel cache before EVERY timed run so each
-        # starts cold (§5.2). hyperfine does not time --prepare, so zero measurement
+        # starts cold. hyperfine does not time --prepare, so zero measurement
         # impact; a no-op rm for the single-process path (cache dir never exists).
         return f"rm -rf {shlex.quote(_cache_dir(project))}"

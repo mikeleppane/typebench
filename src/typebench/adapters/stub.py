@@ -46,7 +46,7 @@ class StubAdapter:
         return "stub-1.0"
 
     def install(self) -> str:
-        # No distribution to verify; real checks land in Plan 2.
+        # No distribution to verify.
         return self.version()
 
     def command(

@@ -1,7 +1,7 @@
-"""Preflight gate (spec §12).
+"""Preflight gate for prepared corpus projects.
 
 Validates a prepared corpus project is checkable before timing, and records each
-tool's self-reported file count against the canonical denominator (§8).
+tool's self-reported file count against the canonical denominator.
 """
 
 from __future__ import annotations

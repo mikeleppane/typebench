@@ -1,5 +1,7 @@
-"""pyright adapter (spec §4, §6). Node-based; reference adapter for Plan 2.
-See docs/superpowers/research/2026-06-08-checker-cli-facts.md (pyright)."""
+"""pyright adapter.
+
+Node-based checker with JSON output and explicit project config generation.
+"""
 
 from __future__ import annotations
 
@@ -18,7 +20,7 @@ if TYPE_CHECKING:
     from typebench.contracts.config import NormalizedConfig
     from typebench.engine.wrapper import RawRun
 
-# Exit codes (research doc): 0 clean, 1 errors, 2 fatal, 3 config, 4 bad-CLI/missing-path.
+# Exit codes: 0 clean, 1 errors, 2 fatal, 3 config, 4 bad-CLI/missing-path.
 _EXIT_MAP: dict[int, ResultClass] = {
     0: ResultClass.CLEAN,
     1: ResultClass.DIAGNOSTICS,
@@ -27,7 +29,7 @@ _EXIT_MAP: dict[int, ResultClass] = {
     4: ResultClass.FAILED_ENV,
 }
 
-# §6 platform (canonical lowercase) -> pyright's capitalized spelling.
+# Canonical lowercase platform -> pyright's capitalized spelling.
 _PYRIGHT_PLATFORM: dict[str, str] = {
     "linux": "Linux",
     "darwin": "Darwin",
@@ -62,8 +64,8 @@ class PyrightAdapter:
         return probe_version(["pyright", "--version"], runner=subprocess.run)
 
     def install(self) -> str:
-        # `pyright --version` omits Node; record both for reproducibility (the §9
-        # lock manifest consumes this). Node *pinning* is an env concern (later plan).
+        # `pyright --version` omits Node; record both for reproducibility. Node
+        # pinning is an environment concern.
         return f"{self.version()} (node {_node_version()})"
 
     def _platform(self, config: NormalizedConfig) -> str:
@@ -87,7 +89,7 @@ class PyrightAdapter:
         # pyright excludes are relative to the project root (workdir). Generic globs
         # like `**/tests/**` do NOT match under a `../../...` include tree — pyright
         # resolves them only within direct child paths. Scope each exclude glob under
-        # each include so the §6 exclusion contract holds regardless of include depth.
+        # each include so the exclusion contract holds regardless of include depth.
         excludes: list[str] = []
         for inc in includes:
             for glob in config.exclude_globs:
@@ -95,10 +97,10 @@ class PyrightAdapter:
         pyright_config: dict[str, object] = {
             "include": includes,
             "exclude": excludes,
-            "typeCheckingMode": "standard",  # stock default (§6)
+            "typeCheckingMode": "standard",  # stock default
             "useLibraryCodeForTypes": True,  # resolve deps, report first-party only
             "pythonVersion": config.python_version,
-            "pythonPlatform": platform,  # threaded from §6, not hardcoded
+            "pythonPlatform": platform,  # threaded from normalized config, not hardcoded
         }
         if config.venv_python is not None:
             # pyright wants venvPath = dir CONTAINING the venv, venv = its name.
@@ -125,7 +127,7 @@ class PyrightAdapter:
         ]
         if thread_mode is ThreadMode.ALL_CORES:
             argv.append("--threads")  # bare = auto-parallelism by logical CPUs (pyright docs)
-        # CONSTRAINED: omit --threads (default single main thread); affinity in Plan 4.
+        # CONSTRAINED: omit --threads (default single main thread); affinity is uniform.
         return (argv, {})
 
     def parallelism_cap(self, thread_mode: ThreadMode, cores: int) -> ParallelismCap:
@@ -151,18 +153,18 @@ class PyrightAdapter:
 
     def classify(self, raw: RawRun) -> ResultClass:
         result = classify_with_map(raw, _EXIT_MAP)
-        # Parse-sanity (research doc): a CLEAN verdict is only honest if we can
+        # Parse-sanity: a CLEAN verdict is only honest if we can
         # confirm a positive file count. Promote to failed{env} when files is 0
         # (mis-scoped include) OR None (exit 0 but --outputjson was unparsable /
         # dropped summary.filesAnalyzed). Recording an unverifiable clean would let
-        # a false-clean enter the data set -> record-honesty violation (§7/§12).
+        # a false-clean enter the data set -> record-honesty violation.
         if result is ResultClass.CLEAN:
             _diags, files = self.parse(raw.stdout, raw.stderr, raw.exit_code)
             return confirm_clean(files, tolerate_unknown=False)
         return result
 
     def clear_cache(self, project: str) -> None:
-        return None  # stateless single-shot (research doc)
+        return None  # stateless single-shot
 
     def prepare_command(self, project: str) -> str | None:
         return None

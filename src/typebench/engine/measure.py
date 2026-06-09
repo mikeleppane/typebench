@@ -1,8 +1,10 @@
-"""Resource pass (spec §5.5) — peak cgroup memory + CPU-time under a transient
-cgroup v2 scope, plus real cgroup OOM detection. Deliberately pydantic-free: the
-in-scope wrapper runs as a child process and reuses the (also pydantic-free)
-exit-code wrapper; importing pydantic here would add startup cost to every scoped
-run. Stays stdlib-only + `typebench.engine.wrapper`."""
+"""Resource pass: peak cgroup memory + CPU-time under a transient cgroup v2 scope.
+
+Also detects real cgroup OOM kills. Deliberately pydantic-free: the in-scope
+wrapper runs as a child process and reuses the (also pydantic-free) exit-code
+wrapper; importing pydantic here would add startup cost to every scoped run.
+Stays stdlib-only + `typebench.engine.wrapper`.
+"""
 
 from __future__ import annotations
 
@@ -24,8 +26,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 _CGROUP_ROOT = Path("/sys/fs/cgroup")
-# core 0, uniform single-core floor (spec §5.3, Decision B). Applied by the
-# collector as an argv prefix; referenced here only for documentation parity.
+# Core 0 is the uniform single-core floor. Applied by the collector as an argv
+# prefix; referenced here only for documentation parity.
 _AFFINITY_CORE = 0
 
 
@@ -63,7 +65,7 @@ def _read_int(path: Path) -> int:
 def read_cgroup_stats(cgroup_dir: Path) -> CgroupSample:
     """Read memory.peak / cpu.stat / memory.stat / memory.events from a cgroup v2
     directory. Pure (no process spawned) so it is unit-testable against fixture
-    files. Callers MUST invoke this while the scope still exists (§5.5)."""
+    files. Callers MUST invoke this while the scope still exists."""
     cpu = _read_kv(cgroup_dir / "cpu.stat")
     events = _read_kv(cgroup_dir / "memory.events")
     return CgroupSample(
@@ -91,7 +93,7 @@ def capable(runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess
     usable here. Probes the EXACT properties the real resource pass sets
     (`MemoryAccounting`/`CPUAccounting`), not a bare `true` scope — on a host where
     the cpu controller is not delegated to user scopes, `-p CPUAccounting=yes`
-    fails, so we fall back to timing-only (§15) instead of silently recording
+    fails, so we fall back to timing-only instead of silently recording
     `cpu_time_s=0`. `taskset` is deliberately NOT checked here: it gates only the
     CONSTRAINED affinity floor (`collector._taskset_available`), never all-cores
     memory measurement, so a box without `taskset` still measures memory."""
@@ -263,7 +265,7 @@ def scoped_probe(
             # peak_bytes/cpu_usage_usec (truncated payload, schema drift, a custom
             # runner) must skip this repeat, never raise out of scoped_probe: the
             # KeyError from cgroup["peak_bytes"] is NOT in the collector's fallback
-            # except set, so an escape here would drop the record (§12, Decision J).
+            # except set, so an escape here would drop the record.
             sample: tuple[int, int, dict[str, int]] | None = None
             if isinstance(cgroup, dict):
                 sample = (
@@ -311,12 +313,12 @@ def scoped_probe(
 def main(raw_args: list[str] | None = None) -> int:
     """In-scope wrapper. Run as `systemd-run --user --scope -- python -m
     typebench.engine.measure --out FILE --timeout S -- <argv>`. Runs the checker to
-    completion, then — WHILE STILL INSIDE THE SCOPE (§5.5 read-before-teardown) —
+    completion, then — WHILE STILL INSIDE THE SCOPE, before teardown —
     reads its own cgroup and writes a JSON payload (outcome + cgroup sample) to
     --out. Always exits 0 so systemd-run sees success; the real outcome is in the
     payload. The checker output is captured by run_command (bounded diagnostics
     text), and this Python process's small footprint is a ~constant per-tool
-    baseline charged to the scope (Decision F)."""
+    baseline charged to the scope."""
     parser = argparse.ArgumentParser(prog="typebench.engine.measure")
     parser.add_argument("--out", required=True)
     parser.add_argument("--timeout", type=float, required=True)
@@ -337,7 +339,7 @@ def main(raw_args: list[str] | None = None) -> int:
         # OSError: missing cgroup files / no 0:: entry. ValueError: a present-but-
         # non-integer memory.peak (_read_int). Either way the cgroup sample is
         # unreadable -> record cgroup=None but STILL write the payload, so the
-        # checker's outcome for this repeat is never lost (read-before-teardown §5.5).
+        # checker's outcome for this repeat is never lost.
         cgroup = None
 
     payload = {

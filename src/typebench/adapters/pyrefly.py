@@ -1,8 +1,11 @@
-"""pyrefly adapter (spec §4, §6). Project-mode check driven by a generated
-pyrefly.toml (preset="default" — the loose-file fallback to basic silences
-errors). JSON stdout errors[] + --summary=full stderr module count. Exit 1 is
-overloaded (diagnostics vs fatal config). pyrefly is treated identically to every
-other entrant — no favorable defaults. See the research doc (pyrefly)."""
+"""pyrefly adapter.
+
+Project-mode check driven by a generated pyrefly.toml (preset="default"; the
+loose-file fallback to basic silences errors). JSON stdout errors[] plus
+--summary=full stderr module count. Exit 1 is overloaded (diagnostics vs fatal
+config). pyrefly is treated identically to every other entrant: no favorable
+defaults.
+"""
 
 from __future__ import annotations
 
@@ -50,7 +53,7 @@ class PyreflyAdapter:
         thread_mode: ThreadMode,
         workdir: Path,
     ) -> tuple[list[str], dict[str, str]]:
-        # kebab-case keys (research doc). preset="default" is the stock-neutral
+        # kebab-case keys. preset="default" is the stock-neutral
         # policy — NOT basic (under-reports -> false-clean) and NOT strict
         # (over-reports). Explicit project-includes prevents the loose-file
         # fallback to basic. json.dumps quotes string values safely.

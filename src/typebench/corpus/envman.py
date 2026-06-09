@@ -1,4 +1,4 @@
-"""Environment management (spec §4 envman, §12 preflight gate).
+"""Environment management for corpus preparation and preflight.
 
 Clones a corpus project at its pinned SHA, builds an isolated uv venv against
 the pinned Python, installs deps via the explicit recipe, and freezes the

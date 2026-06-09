@@ -1,4 +1,4 @@
-"""Environment fingerprint (spec §9). Expanded with cgroup/lock data later."""
+"""Environment fingerprint for result reproducibility."""
 
 from __future__ import annotations
 

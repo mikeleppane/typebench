@@ -1,6 +1,8 @@
-"""ty adapter (spec §4, §6). ty has NO JSON output: diagnostics come from the
-`concise` stdout summary, file count only from `-v` stderr (fragile -> may be
-None). See docs/superpowers/research/2026-06-08-checker-cli-facts.md (ty)."""
+"""ty adapter.
+
+ty has NO JSON output: diagnostics come from the `concise` stdout summary, and
+file count comes only from `-v` stderr (fragile -> may be None).
+"""
 
 from __future__ import annotations
 
@@ -23,7 +25,7 @@ if TYPE_CHECKING:
 _FOUND_RE = re.compile(r"Found (\d+) diagnostics?")
 _INDEXED_RE = re.compile(r"Indexed (\d+) file\(s\)")
 
-# Exit codes (research doc): 0 clean, 1 diagnostics, 2 config/IO/CLI, 101 panic.
+# Exit codes: 0 clean, 1 diagnostics, 2 config/IO/CLI, 101 panic.
 _EXIT_MAP: dict[int, ResultClass] = {
     0: ResultClass.CLEAN,
     1: ResultClass.DIAGNOSTICS,
@@ -51,7 +53,7 @@ class TyAdapter:
     ) -> tuple[list[str], dict[str, str]]:
         # Hand-render the tiny ty.toml (tomllib is read-only — no writer; the test
         # reads it back, the adapter only writes it). [environment] carries
-        # version/platform; [src].exclude carries the §6 excludes in ty's
+        # version/platform; [src].exclude carries the normalized excludes in ty's
         # gitignore-style syntax (anchored to the project root). json.dumps quotes
         # the string values safely; keys are fixed literals (no user strings).
         exclude_items = ", ".join(json.dumps(g) for g in config.exclude_globs)
@@ -75,7 +77,7 @@ class TyAdapter:
             # CRITICAL (ty docs, locally verified): gitignore-style excludes do NOT
             # apply to paths passed on the command line unless --force-exclude is set.
             # Without it a nested tests/ dir under an absolute src_root is still
-            # checked -> breaks the §6 excludes contract and inflates ty's
+            # checked -> breaks the exclusion contract and inflates ty's
             # diagnostics/file-count vs the others (neutrality leak).
             "--force-exclude",
             # The normalized file set must come ONLY from src_roots + exclude_globs.

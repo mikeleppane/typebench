@@ -1,4 +1,4 @@
-"""Collector — assembles one RunResult (spec §4, §8). Probe then time."""
+"""Assemble one RunResult: probe the checker, then time it."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class RunManifest:
-    """Per-cell reproducibility data the collector stamps onto a RunResult (spec §9).
+    """Per-cell reproducibility data the collector stamps onto a RunResult.
 
     Built by the suite orchestrator and corpus-mode `typebench run`; None in manual
     mode. Carries scalars only; frozen dep contents stay in the committed lockfile.
@@ -47,7 +47,7 @@ _scoped_probe = measure.scoped_probe
 
 def _affinity_spec(cores: int) -> str:
     """taskset -c cpu-list for the CONSTRAINED track: '0' for a single core, else
-    '0-(N-1)' to pin to the first N cores (spec §5.3)."""
+    '0-(N-1)' to pin to the first N cores."""
     return "0" if cores <= 1 else f"0-{cores - 1}"
 
 
@@ -57,7 +57,8 @@ def _taskset_available(cores: int) -> bool:
     runners) or on a box with fewer than N usable cores, `taskset -c 0-(N-1) <checker>`
     would EXIT 1 *before the checker runs* — and exit 1 reads as diagnostics/measured-
     success, recording a bogus fast timing AND a false thread_mode_enforced for a
-    command that never ran. Only claim the pin we can actually apply (§5.3, Decision D)."""
+    command that never ran. Only claim the pin we can actually apply, so the
+    honesty flag never asserts a constraint the OS rejected."""
     if cores < 1 or shutil.which("taskset") is None:
         return False
     getaffinity = getattr(os, "sched_getaffinity", None)
@@ -71,14 +72,13 @@ def _apply_affinity(argv: list[str], thread_mode: ThreadMode, cores: int) -> tup
     """Prepend the taskset affinity prefix for the CONSTRAINED track, pinning to the
     first `cores` cores. Returns (argv, enforced). ALL_CORES is unconstrained by design
     (not pinned). enforced is True ONLY when CONSTRAINED AND all N cores are actually
-    pinnable — the honesty flag must never claim a pin we could not apply (§5.3,
-    Decision D)."""
+    pinnable; the honesty flag must never claim a pin we could not apply."""
     if thread_mode is ThreadMode.CONSTRAINED and _taskset_available(cores):
         return (["taskset", "-c", _affinity_spec(cores), *argv], True)
     return (argv, False)
 
 
-def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threaded from the CLI; the probe→time→assemble phases intentionally share ONE workdir scope (§6: workdir must outlive every timed run), so they stay in one function by design
+def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threaded from the CLI; the probe→time→assemble phases intentionally share ONE workdir scope because the workdir must outlive every timed run, so they stay in one function by design
     adapter: Adapter,
     project: str,
     config: NormalizedConfig,
@@ -93,8 +93,8 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
 ) -> RunResult:
     if mem_runs < 1:
         raise ValueError(f"mem_runs must be >= 1, got {mem_runs}")
-    # Lock-manifest stamp (spec §9). loc_denominator records which throughput
-    # denominator the headline kLOC/s should use: "code" when tokei produced a
+    # Lock-manifest stamp. loc_denominator records which throughput denominator
+    # the headline kLOC/s should use: "code" when tokei produced a
     # reconciled code-LOC, else "physical". None when no canonical denominator
     # is known at all (manual run without a corpus project).
     man = manifest or RunManifest()
@@ -107,8 +107,8 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
     )
     adapter.clear_cache(project)
     # Run-scoped workdir for any adapter-generated tool config; it must outlive
-    # both the probe and every timed run, so it wraps the whole body (§6). The
-    # RunResult is built INSIDE the `with` so the dir survives every timed run.
+    # both the probe and every timed run, so it wraps the whole body. The RunResult
+    # is built INSIDE the `with` so the dir survives every timed run.
     with tempfile.TemporaryDirectory(prefix="typebench-") as tmp:
         workdir = Path(tmp)
         try:
@@ -116,8 +116,8 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
         except (OSError, ValueError) as exc:
             # Building the command can touch disk / do path math (e.g. writing a
             # generated tool config, relpath across drives). A failure here is a
-            # setup/env problem, NOT a checker result — record failed{env} so the
-            # record is never dropped (spec §12; "never drop a record"). No process
+            # setup/env problem, NOT a checker result; record failed{env} so the
+            # record is never dropped. No process
             # ran, so real_exit_code is the -1 sentinel.
             return RunResult(
                 tool=adapter.name,
@@ -142,13 +142,13 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
             )
 
         # Apply the N-core affinity prefix (CONSTRAINED only) BEFORE any run, so
-        # probe + resource + timing all share the same pinned command (§5.3).
+        # probe + resource + timing all share the same pinned command.
         argv, thread_enforced = _apply_affinity(argv, thread_mode, config.cores)
         cap = adapter.parallelism_cap(thread_mode, config.cores)
-        # The adapter mechanism strings bake in "cpu-affinity" (Plan 4's floor), so
-        # record the cap + pinned core count ONLY when affinity actually ran. On
-        # CONSTRAINED without taskset (mac/dev) or on ALL_CORES, record neither —
-        # never claim a pin we did not apply (§5.3 honesty, Decision A).
+        # The adapter mechanism strings bake in "cpu-affinity", so record the cap
+        # + pinned core count ONLY when affinity actually ran. On CONSTRAINED
+        # without taskset (mac/dev) or on ALL_CORES, record neither; never claim a
+        # pin we did not apply.
         record_cap = thread_mode is ThreadMode.CONSTRAINED and thread_enforced
         hard_cap = cap.hard_cap if record_cap else None
         cap_mechanism = cap.mechanism if record_cap else None
@@ -156,12 +156,11 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
 
         # Phase 1: probe. When measurement is available, the probe runs UNDER a
         # transient cgroup scope (M COLD repeats) so it yields peak memory +
-        # cpu-time + real OOM in one pass (§5.5); the authoritative repeat drives
-        # classify+parse and a generic failure on any repeat is surfaced
-        # (Decision I). A TOTAL harness failure (MeasureError / OSError / timeout /
-        # bad JSON) falls back to a plain run_command so the record is NEVER dropped
-        # (Decision J). The prepare callback clears the checker cache before each
-        # cold repeat (§5.2).
+        # cpu-time + real OOM in one pass; the authoritative repeat drives
+        # classify+parse and a generic failure on any repeat is surfaced. A TOTAL
+        # harness failure (MeasureError / OSError / timeout / bad JSON) falls back
+        # to a plain run_command so the record is NEVER dropped. The prepare
+        # callback clears the checker cache before each cold repeat.
         resource: measure.ResourceResult | None = None
         if measure_enabled and _resource_capable():
             try:
@@ -181,7 +180,7 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
             ):
                 # Defense-in-depth: scoped_probe is built not to escape a malformed
                 # payload, but ANY resource-pass failure must fall back to a plain
-                # probe so a record is never dropped (§12, Decision J).
+                # probe so a record is never dropped.
                 resource = None
         if resource is not None:
             raw = resource.raw
@@ -198,7 +197,7 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
             diagnostics, files = adapter.parse(raw.stdout, raw.stderr, raw.exit_code)
 
         # Phase 2: time — only for measured-success, only if hyperfine present.
-        # prepare_command clears the checker cache before EVERY timed run (§5.2);
+        # prepare_command clears the checker cache before EVERY timed run;
         # None for stateless tools like the stub.
         timing = None
         timing_error: str | None = None
@@ -214,12 +213,12 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
                 )
             except subprocess.CalledProcessError as exc:
                 # The probe was measured-success but a TIMED run failed under
-                # hyperfine (flaky crash/oom/timeout). Spec §5.1/§12: record a
+                # hyperfine (flaky crash/oom/timeout). Record a
                 # failure, never crash or drop the record. Precise reclassification
-                # of the timing-phase failure is deferred (Plan 2/4); FAILED_CRASH
-                # is the honest floor. failure_phase=TIMING marks that real_exit_code
-                # is the *successful probe's*, so the record cannot be misread as a
-                # clean command with a failed result.
+                # of the timing-phase failure is not yet implemented; FAILED_CRASH
+                # is the honest floor. failure_phase=TIMING marks that
+                # real_exit_code is the *successful probe's*, so the record cannot
+                # be misread as a clean command with a failed result.
                 result_class = ResultClass.FAILED_CRASH
                 failure_phase = FailurePhase.TIMING
                 timing = None
@@ -229,7 +228,7 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
             except (OSError, ValueError, KeyError) as exc:
                 # hyperfine emitted no/garbled JSON, or its export file vanished
                 # (a shutil.which TOCTOU): a HARNESS failure, not a checker result.
-                # Record failed{env} so the record is never dropped (spec §12).
+                # Record failed{env} so the record is never dropped.
                 result_class = ResultClass.FAILED_ENV
                 failure_phase = FailurePhase.TIMING
                 timing = None
@@ -247,12 +246,12 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
             if memory_summary is not None
             else None
         )
-        # Parallel efficiency = CPU-time / wall (§8). NOTE the two numbers come from
+        # Parallel efficiency = CPU-time / wall. NOTE the two numbers come from
         # DIFFERENT passes: cpu_time_s is the median over the COLD scoped resource
         # repeats (under the cgroup), timing.median_s is the WARM hyperfine wall
         # median (not scoped). The ratio is a robust ~parallelism indicator (≈1 for
         # single-threaded, >1 for parallel tools) but is not a within-run figure;
-        # the Plan 5 renderer must interpret it as cross-pass (cold-cpu / warm-wall).
+        # the renderer must interpret it as cross-pass (cold-cpu / warm-wall).
         parallel_efficiency = (
             cpu_time_s / timing.median_s
             if cpu_time_s is not None and timing is not None and timing.median_s > 0
