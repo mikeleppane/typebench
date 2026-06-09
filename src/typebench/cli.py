@@ -112,8 +112,34 @@ def _adapters_for(tools: list[str]) -> list[Adapter]:
     return out
 
 
+def _validate_timing(runs: int, warmup: int, timeout: float) -> None:
+    """Reject timing args that would hang or corrupt measurement before any work
+    starts: `hyperfine --runs 0` spins forever, and a negative warmup / non-positive
+    timeout is meaningless. Mirrors the existing mem_runs/calib_runs guards."""
+    if runs < 1:
+        typer.echo("--runs must be >= 1.", err=True)
+        raise typer.Exit(code=2)
+    if warmup < 0:
+        typer.echo("--warmup must be >= 0.", err=True)
+        raise typer.Exit(code=2)
+    if timeout <= 0:
+        typer.echo("--timeout must be > 0.", err=True)
+        raise typer.Exit(code=2)
+
+
+def _load_suite_or_exit(corpus: Path) -> list[CorpusProject]:
+    """Load the corpus, turning a missing/unreadable/malformed suite.toml into a
+    clean CLI error rather than a raw traceback (load_suite's read_text has no
+    existence check)."""
+    try:
+        return load_suite(corpus)
+    except (OSError, ValueError) as exc:
+        typer.echo(f"Could not read corpus {corpus}: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+
 def _lookup_project(corpus: Path, name: str) -> CorpusProject:
-    for entry in load_suite(corpus):
+    for entry in _load_suite_or_exit(corpus):
         if entry.name == name:
             return entry
     typer.echo(f"Unknown corpus project: {name!r} in {corpus}", err=True)
@@ -225,6 +251,7 @@ def run(  # noqa: PLR0913, PLR0915 — many user-facing CLI options + linear arg
     if calib_runs < 1:
         typer.echo("--calib-runs must be >= 1.", err=True)
         raise typer.Exit(code=2)
+    _validate_timing(runs, warmup, timeout)
 
     prepared: PreparedProject | None = None
     entry: CorpusProject | None = None
@@ -353,6 +380,8 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
     if mem_runs < 1 or calib_runs < 1:
         typer.echo("--mem-runs and --calib-runs must be >= 1.", err=True)
         raise typer.Exit(code=2)
+    _validate_timing(runs, warmup, timeout)
+    _load_suite_or_exit(corpus)  # fail fast on a bad corpus path before any work
     cores = _validate_cores(cores)
     shard_index, shard_total = _parse_shard(shard)
     tools = tool or ["mypy", "pyright", "pyrefly", "ty"]
