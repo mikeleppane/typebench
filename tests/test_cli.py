@@ -249,6 +249,8 @@ def test_run_threads_cores_into_normalized_config(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     # --cores N must reach the NormalizedConfig the collector runs under.
+    # Pin available cores high so the clamp never interferes on a small CI host.
+    monkeypatch.setattr(cli, "_available_cores", lambda: 64)
     captured: dict[str, object] = {}
 
     def fake_run_single(adapter: object, **kwargs: object) -> RunResult:
@@ -277,6 +279,7 @@ def test_run_rejects_cores_below_one(tmp_path: Path) -> None:
 def test_suite_threads_cores_into_run_suite(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    monkeypatch.setattr(cli, "_available_cores", lambda: 64)
     captured: dict[str, object] = {}
 
     def fake_run_suite(**kwargs: object) -> object:
@@ -317,3 +320,48 @@ def test_suite_rejects_cores_below_one(tmp_path: Path) -> None:
     )
     assert result.exit_code == 2
     assert "--cores must be >= 1" in result.output
+
+
+def test_run_clamps_cores_above_available(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # --cores above the usable core count clamps down (no checker self-crash from an
+    # absurd worker count) and records the clamped value honestly.
+    monkeypatch.setattr(cli, "_available_cores", lambda: 4)
+    captured: dict[str, object] = {}
+
+    def fake_run_single(adapter: object, **kwargs: object) -> RunResult:
+        captured.update(kwargs)
+        return _fake_result()
+
+    monkeypatch.setattr(cli, "run_single", fake_run_single)
+    out = tmp_path / "r.json"
+    args = ["--tool", "stub", "--project", "demo", "--output", str(out)]
+    result = _invoke_run([*args, "--no-calibrate", "--cores", "999"])
+    assert result.exit_code == 0, result.output
+    assert "clamping to 4" in result.output
+    cfg = captured["config"]
+    assert isinstance(cfg, NormalizedConfig)
+    assert cfg.cores == 4
+
+
+def test_render_malformed_envelope_fails_cleanly(tmp_path: Path) -> None:
+    # One corrupt envelope -> clean error naming the file, NOT a raw pydantic
+    # traceback, and a nonzero exit.
+    results = tmp_path / "results"
+    results.mkdir()
+    (results / "2026-01-01.json").write_text("{not valid json")
+    result = runner.invoke(
+        app,
+        [
+            "render",
+            "--results-dir",
+            str(results),
+            "--readme",
+            str(tmp_path / "README.md"),
+            "--trends",
+            str(tmp_path / "trends.json"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "Malformed results envelope" in result.output
+    assert "2026-01-01.json" in result.output
+    assert "Traceback" not in result.output

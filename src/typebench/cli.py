@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
 
 import typer
+from pydantic import ValidationError
 
 from typebench.adapters.mypy import MypyAdapter
 from typebench.adapters.pyrefly import PyreflyAdapter
@@ -56,6 +57,36 @@ _ADAPTERS: dict[str, Callable[[], Adapter]] = {
     "stub": StubAdapter,
     "ty": TyAdapter,
 }
+
+
+def _available_cores() -> int:
+    """Cores this process may actually use — the CPU-affinity mask size on Linux
+    (honors container/cpuset limits), else the logical CPU count. The upper bound
+    for `--cores`: asking for more would tell a checker to spawn more workers than
+    exist (mypy `--num-workers 999` self-crashes with an INTERNAL ERROR) and the
+    `taskset` pin could never be applied anyway."""
+    getaffinity = getattr(os, "sched_getaffinity", None)
+    if getaffinity is not None:
+        return len(getaffinity(0))
+    return os.cpu_count() or 1
+
+
+def _validate_cores(cores: int) -> int:
+    """Validate + clamp `--cores`. Below 1 is a hard error; above the available
+    core count is clamped down (with a notice) rather than crashed — the recorded
+    `cores` then honestly reflects what actually ran, and the same command stays
+    portable across machines with different core counts."""
+    if cores < 1:
+        typer.echo("--cores must be >= 1.", err=True)
+        raise typer.Exit(code=2)
+    available = _available_cores()
+    if cores > available:
+        typer.echo(
+            f"--cores {cores} exceeds {available} usable cores; clamping to {available}.",
+            err=True,
+        )
+        return available
+    return cores
 
 
 @app.callback()
@@ -183,9 +214,7 @@ def run(  # noqa: PLR0913, PLR0915 — many user-facing CLI options + linear arg
     if factory is None:
         typer.echo(f"Unknown tool: {tool!r}. Known: {sorted(_ADAPTERS)}", err=True)
         raise typer.Exit(code=2)
-    if cores < 1:
-        typer.echo("--cores must be >= 1.", err=True)
-        raise typer.Exit(code=2)
+    cores = _validate_cores(cores)
 
     # Fail fast on a bad --output: a single run can take many minutes, so a
     # non-existent or read-only output directory must not surface only after all
@@ -328,9 +357,7 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
     if mem_runs < 1 or calib_runs < 1:
         typer.echo("--mem-runs and --calib-runs must be >= 1.", err=True)
         raise typer.Exit(code=2)
-    if cores < 1:
-        typer.echo("--cores must be >= 1.", err=True)
-        raise typer.Exit(code=2)
+    cores = _validate_cores(cores)
     shard_index, shard_total = _parse_shard(shard)
     tools = tool or ["mypy", "pyright", "pyrefly", "ty"]
     modes = thread_mode or [ThreadMode.ALL_CORES, ThreadMode.CONSTRAINED]
@@ -369,7 +396,17 @@ def render(
     if not files:
         typer.echo(f"No results/*.json found under {results_dir}", err=True)
         raise typer.Exit(code=1)
-    history = [ResultsEnvelope.model_validate_json(file.read_text()) for file in files]
+    history: list[ResultsEnvelope] = []
+    for file in files:
+        try:
+            history.append(ResultsEnvelope.model_validate_json(file.read_text()))
+        except (ValidationError, ValueError, OSError) as exc:
+            # One corrupt/half-written envelope must not dump a raw pydantic
+            # traceback at the user; fail loudly with the offending file + a
+            # one-line reason (spec: fail loudly rather than emit garbage).
+            reason = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+            typer.echo(f"Malformed results envelope {file}: {reason}", err=True)
+            raise typer.Exit(code=1) from exc
     history.sort(key=lambda envelope: envelope.generated_at)
 
     block = render_readme(history[-1])
