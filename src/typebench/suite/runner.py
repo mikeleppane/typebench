@@ -20,7 +20,7 @@ from typebench.corpus.catalog import load_suite, load_suite_version
 from typebench.corpus.envman import prepare_project
 from typebench.engine.collector import RunManifest, run_single
 from typebench.engine.env import detect_env
-from typebench.preflight import preflight_project
+from typebench.suite.preflight import preflight_project
 
 if TYPE_CHECKING:
     from collections.abc import Callable

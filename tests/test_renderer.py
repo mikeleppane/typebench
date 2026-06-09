@@ -10,7 +10,7 @@ from typebench.contracts.models import (
     TimingStats,
 )
 from typebench.engine.env import EnvFingerprint
-from typebench.renderer import build_trends, cpu_model_anchors, render_readme
+from typebench.suite.renderer import build_trends, cpu_model_anchors, render_readme
 
 
 def _env(cpu: str = "Test CPU") -> EnvFingerprint:

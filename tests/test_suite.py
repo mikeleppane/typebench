@@ -15,7 +15,7 @@ from typebench.contracts.models import (
 )
 from typebench.corpus.catalog import CorpusProject, SizeBucket
 from typebench.engine.env import detect_env
-from typebench.suite import SuiteCell, build_matrix, run_suite, shard
+from typebench.suite.runner import SuiteCell, build_matrix, run_suite, shard
 
 
 def test_build_matrix_is_project_major() -> None:

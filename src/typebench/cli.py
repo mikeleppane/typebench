@@ -26,9 +26,9 @@ from typebench.corpus.catalog import load_suite
 from typebench.corpus.envman import PrepareError, prepare_project
 from typebench.engine.calibration import calibrate
 from typebench.engine.collector import RunManifest, run_single
-from typebench.preflight import preflight_project
-from typebench.renderer import build_trends, render_readme
-from typebench.suite import run_suite
+from typebench.suite.preflight import preflight_project
+from typebench.suite.renderer import build_trends, render_readme
+from typebench.suite.runner import run_suite
 
 if TYPE_CHECKING:
     from collections.abc import Callable

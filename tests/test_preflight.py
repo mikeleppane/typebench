@@ -20,7 +20,7 @@ from typebench.contracts.models import (
 )
 from typebench.corpus.counting import count_first_party
 from typebench.engine.wrapper import RawRun
-from typebench.preflight import preflight_project
+from typebench.suite.preflight import preflight_project
 
 _FIXTURES = Path(__file__).parent.parent / "fixtures"
 
