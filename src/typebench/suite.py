@@ -16,10 +16,10 @@ from typebench.contracts.models import (
     ResultsEnvelope,
     RunResult,
 )
-from typebench.corpus import load_suite, load_suite_version
+from typebench.corpus.catalog import load_suite, load_suite_version
+from typebench.corpus.envman import prepare_project
 from typebench.engine.collector import RunManifest, run_single
 from typebench.engine.env import detect_env
-from typebench.envman import prepare_project
 from typebench.preflight import preflight_project
 
 if TYPE_CHECKING:
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
 
     from typebench.adapters.base import Adapter
     from typebench.contracts.models import PreparedProject, ThreadMode
-    from typebench.corpus import CorpusProject
+    from typebench.corpus.catalog import CorpusProject
     from typebench.engine.calibration import CalibrationStats
 
 

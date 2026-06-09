@@ -6,7 +6,7 @@ from typer.testing import CliRunner
 
 from typebench import cli
 from typebench.contracts.models import PreparedProject
-from typebench.envman import PrepareError
+from typebench.corpus.envman import PrepareError
 
 runner = CliRunner()
 _FIXTURES = Path(__file__).parent.parent / "fixtures"

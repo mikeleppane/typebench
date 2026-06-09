@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from typebench import counting
+import typebench.corpus.counting
 from typebench.contracts.config import DEFAULT_EXCLUDES
-from typebench.counting import count_code_loc, count_first_party, first_party_files
+from typebench.corpus.counting import count_code_loc, count_first_party, first_party_files
 
 
 def _write(path: Path, text: str) -> None:
@@ -65,7 +65,7 @@ def test_count_code_loc_returns_none_without_tokei(
 ) -> None:
     f = tmp_path / "m.py"
     f.write_text("x = 1\n", encoding="utf-8")
-    monkeypatch.setattr(counting.shutil, "which", lambda _name: None, raising=True)
+    monkeypatch.setattr(typebench.corpus.counting.shutil, "which", lambda _name: None, raising=True)
     assert count_code_loc([f]) is None
 
 

@@ -21,12 +21,12 @@ from typing import TYPE_CHECKING, Protocol
 from pydantic import ValidationError
 
 from typebench.contracts.models import PreparedProject
-from typebench.counting import count_code_loc, count_first_party, first_party_files
+from typebench.corpus.counting import count_code_loc, count_first_party, first_party_files
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from typebench.corpus import CorpusProject
+    from typebench.corpus.catalog import CorpusProject
 
 
 @dataclass(frozen=True)

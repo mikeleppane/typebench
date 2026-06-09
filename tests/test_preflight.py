@@ -18,7 +18,7 @@ from typebench.contracts.models import (
     ThreadMode,
     ToolPreflight,
 )
-from typebench.counting import count_first_party
+from typebench.corpus.counting import count_first_party
 from typebench.engine.wrapper import RawRun
 from typebench.preflight import preflight_project
 

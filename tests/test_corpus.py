@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from typebench.corpus import CorpusProject, SizeBucket, load_suite, load_suite_version
+from typebench.corpus.catalog import CorpusProject, SizeBucket, load_suite, load_suite_version
 
 _SUITE = Path(__file__).parent.parent / "corpus" / "suite.toml"
 

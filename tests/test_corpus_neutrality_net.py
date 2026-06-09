@@ -17,8 +17,8 @@ from typebench.adapters.mypy import MypyAdapter
 from typebench.adapters.pyrefly import PyreflyAdapter
 from typebench.adapters.pyright import PyrightAdapter
 from typebench.adapters.ty import TyAdapter
-from typebench.corpus import CorpusProject, load_suite
-from typebench.envman import prepare_project
+from typebench.corpus.catalog import CorpusProject, load_suite
+from typebench.corpus.envman import prepare_project
 from typebench.preflight import preflight_project
 
 if TYPE_CHECKING:

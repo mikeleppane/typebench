@@ -15,7 +15,7 @@ from typebench.contracts.models import (
     RunResult,
     ThreadMode,
 )
-from typebench.corpus import CorpusProject
+from typebench.corpus.catalog import CorpusProject
 from typebench.engine.collector import RunManifest
 
 runner = CliRunner()

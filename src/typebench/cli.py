@@ -22,10 +22,10 @@ from typebench.adapters.stub import StubAdapter
 from typebench.adapters.ty import TyAdapter
 from typebench.contracts.config import DEFAULT_EXCLUDES, NormalizedConfig, config_hash
 from typebench.contracts.models import ResultsEnvelope, ThreadMode
-from typebench.corpus import load_suite
+from typebench.corpus.catalog import load_suite
+from typebench.corpus.envman import PrepareError, prepare_project
 from typebench.engine.calibration import calibrate
 from typebench.engine.collector import RunManifest, run_single
-from typebench.envman import PrepareError, prepare_project
 from typebench.preflight import preflight_project
 from typebench.renderer import build_trends, render_readme
 from typebench.suite import run_suite
@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
     from typebench.adapters.base import Adapter
     from typebench.contracts.models import PreparedProject
-    from typebench.corpus import CorpusProject
+    from typebench.corpus.catalog import CorpusProject
 
 app = typer.Typer(help="Neutral Python type-checker performance benchmark.")
 

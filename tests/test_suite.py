@@ -13,7 +13,7 @@ from typebench.contracts.models import (
     ThreadMode,
     ToolPreflight,
 )
-from typebench.corpus import CorpusProject, SizeBucket
+from typebench.corpus.catalog import CorpusProject, SizeBucket
 from typebench.engine.env import detect_env
 from typebench.suite import SuiteCell, build_matrix, run_suite, shard
 

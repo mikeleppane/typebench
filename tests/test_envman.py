@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from typebench import envman
+import typebench.corpus.envman
 from typebench.contracts.models import PreparedProject
-from typebench.corpus import CorpusProject, SizeBucket
-from typebench.envman import (
+from typebench.corpus.catalog import CorpusProject, SizeBucket
+from typebench.corpus.envman import (
     _SIDECAR,
     PrepareError,
     RunOut,
@@ -190,7 +190,7 @@ def test_prepare_project_assembles_prepared_with_canonical_count(
     def fake_count_code_loc(_files: list[Path]) -> int:
         return 1234
 
-    monkeypatch.setattr(envman, "count_code_loc", fake_count_code_loc)
+    monkeypatch.setattr(typebench.corpus.envman, "count_code_loc", fake_count_code_loc)
     prepared = prepare_project(_httpx_entry(), cache, run=run)
 
     assert prepared.name == "demo"
@@ -348,8 +348,10 @@ def test_backfill_code_loc_refreshes_missing_count(
     sidecar = tmp_path / _SIDECAR
     cached = _prepared_stub(None)
     sidecar.write_text(cached.model_dump_json())
-    monkeypatch.setattr(envman.shutil, "which", lambda _name: "/usr/bin/tokei", raising=True)
-    monkeypatch.setattr(envman, "count_code_loc", lambda _files: 88, raising=True)
+    monkeypatch.setattr(
+        typebench.corpus.envman.shutil, "which", lambda _name: "/usr/bin/tokei", raising=True
+    )
+    monkeypatch.setattr(typebench.corpus.envman, "count_code_loc", lambda _files: 88, raising=True)
     refreshed = _backfill_code_loc(cached, sidecar)
     assert refreshed.canonical_code_loc == 88
     assert PreparedProject.model_validate_json(sidecar.read_text()).canonical_code_loc == 88
@@ -362,12 +364,12 @@ def test_backfill_code_loc_noop_when_already_present(
     def _boom(_files: object) -> int:
         raise AssertionError("count_code_loc must not be called when code_loc is present")
 
-    monkeypatch.setattr(envman, "count_code_loc", _boom, raising=True)
+    monkeypatch.setattr(typebench.corpus.envman, "count_code_loc", _boom, raising=True)
     cached = _prepared_stub(500)
     assert _backfill_code_loc(cached, tmp_path / _SIDECAR).canonical_code_loc == 500
 
 
 def test_backfill_code_loc_stays_none_without_tokei(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(envman.shutil, "which", lambda _name: None, raising=True)
+    monkeypatch.setattr(typebench.corpus.envman.shutil, "which", lambda _name: None, raising=True)
     cached = _prepared_stub(None)
     assert _backfill_code_loc(cached, Path("/nonexistent/prepared.json")).canonical_code_loc is None
