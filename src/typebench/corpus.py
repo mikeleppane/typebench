@@ -92,3 +92,11 @@ def load_suite(path: Path) -> list[CorpusProject]:
         msg = f"duplicate corpus project name(s): {dupes}"
         raise ValueError(msg)
     return projects
+
+
+def load_suite_version(path: Path) -> str:
+    """Read `[suite] version` from suite.toml; 'unversioned' when absent (spec §9)."""
+    raw = tomllib.loads(path.read_text(encoding="utf-8"))
+    suite = raw.get("suite", {})
+    version = suite.get("version") if isinstance(suite, dict) else None
+    return str(version) if version else "unversioned"

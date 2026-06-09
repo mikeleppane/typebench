@@ -1,3 +1,6 @@
+[suite]
+version = "2026-06-08"
+
 # typebench corpus (spec §4). Each entry is pinned to a release-tag SHA so
 # third-party imports resolve identically over time. Checkers always float to
 # latest; the corpus is bumped via a PR-gated job (later plan). src_roots and

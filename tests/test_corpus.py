@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from typebench.corpus import CorpusProject, SizeBucket, load_suite
+from typebench.corpus import CorpusProject, SizeBucket, load_suite, load_suite_version
 
 _SUITE = Path(__file__).parent.parent / "corpus" / "suite.toml"
 
@@ -88,3 +88,15 @@ def test_load_suite_rejects_duplicate_names(tmp_path: Path) -> None:
     dup.write_text(entry + entry)
     with pytest.raises(ValueError, match="duplicate"):
         load_suite(dup)
+
+
+def test_load_suite_version_reads_suite_table(tmp_path: Path) -> None:
+    suite = tmp_path / "suite.toml"
+    suite.write_text('[suite]\nversion = "2026-06-08"\n\n[[project]]\nname="x"\n')
+    assert load_suite_version(suite) == "2026-06-08"
+
+
+def test_load_suite_version_defaults_when_absent(tmp_path: Path) -> None:
+    suite = tmp_path / "suite.toml"
+    suite.write_text("[[project]]\nname='x'\n")
+    assert load_suite_version(suite) == "unversioned"
