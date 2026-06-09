@@ -11,6 +11,7 @@ import re
 import subprocess
 from typing import TYPE_CHECKING
 
+from typebench.adapters._support import confirm_clean, probe_version
 from typebench.adapters.base import ParallelismCap, coerce_count
 from typebench.contracts.models import ResultClass, ThreadMode
 from typebench.engine.wrapper import universal_failure_prefix
@@ -37,13 +38,7 @@ class PyreflyAdapter:
     install_source = "PyPI wheel (Rust)"
 
     def version(self) -> str:
-        try:
-            out = subprocess.run(
-                ["pyrefly", "--version"], capture_output=True, text=True, check=False
-            )
-        except OSError:
-            return "unknown"
-        return out.stdout.strip() or out.stderr.strip() or "unknown"
+        return probe_version(["pyrefly", "--version"], runner=subprocess.run)
 
     def install(self) -> str:
         return self.version()
@@ -132,7 +127,7 @@ class PyreflyAdapter:
         if code == 0:
             # Clean only if confirmed by a positive module count; 0 = mis-scoped
             # includes (false-clean). files None tolerated (stderr-scraped).
-            return ResultClass.FAILED_ENV if files == 0 else ResultClass.CLEAN
+            return confirm_clean(files, tolerate_unknown=True)
         if code == 1:
             # Overloaded: parseable JSON with >=1 error -> diagnostics; otherwise a
             # fatal config/IO error reported via anyhow -> failed{env}.

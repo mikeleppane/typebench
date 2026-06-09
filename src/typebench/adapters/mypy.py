@@ -13,6 +13,7 @@ import tempfile
 from pathlib import Path  # runtime: used to build the parallel cache dir path
 from typing import TYPE_CHECKING
 
+from typebench.adapters._support import confirm_clean, probe_version
 from typebench.adapters.base import ParallelismCap
 from typebench.contracts.models import ResultClass, ThreadMode
 from typebench.engine.wrapper import universal_failure_prefix
@@ -72,12 +73,7 @@ class MypyAdapter:
     install_source = "PyPI wheel (mypyc-compiled)"
 
     def version(self) -> str:
-        # No-raise (runs during RunResult assembly even on the env-failure path).
-        try:
-            out = subprocess.run(["mypy", "--version"], capture_output=True, text=True, check=False)
-        except OSError:
-            return "unknown"
-        return out.stdout.strip() or out.stderr.strip() or "unknown"
+        return probe_version(["mypy", "--version"], runner=subprocess.run)
 
     def install(self) -> str:
         # Records the version string, which carries "(compiled: yes)" for the §9
@@ -172,7 +168,7 @@ class MypyAdapter:
             # exit 0 must come with a positive checked-files count, else the target
             # was mis-scoped (false clean). mypy text always carries the count on
             # success, so None here also means broken output -> failed{env}.
-            return ResultClass.CLEAN if files else ResultClass.FAILED_ENV
+            return confirm_clean(files, tolerate_unknown=False)
         if code == _EXIT_DIAGNOSTICS:
             return ResultClass.DIAGNOSTICS
         if code == _EXIT_OVERLOADED:

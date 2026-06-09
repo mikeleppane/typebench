@@ -9,6 +9,7 @@ import re
 import subprocess
 from typing import TYPE_CHECKING
 
+from typebench.adapters._support import confirm_clean, probe_version
 from typebench.adapters.base import ParallelismCap, coerce_count
 from typebench.contracts.models import ResultClass, ThreadMode
 from typebench.engine.wrapper import classify_with_map
@@ -36,11 +37,7 @@ class TyAdapter:
     install_source = "PyPI wheel (Rust)"
 
     def version(self) -> str:
-        try:
-            out = subprocess.run(["ty", "--version"], capture_output=True, text=True, check=False)
-        except OSError:
-            return "unknown"
-        return out.stdout.strip() or out.stderr.strip() or "unknown"
+        return probe_version(["ty", "--version"], runner=subprocess.run)
 
     def install(self) -> str:
         return self.version()
@@ -133,8 +130,7 @@ class TyAdapter:
             # ty's files count is best-effort (stderr -v). Only a CONFIRMED 0 is a
             # mis-scoped false-clean; files None is tolerated (unknowable, not broken)
             # -> stays CLEAN. (Contrast pyright/mypy, whose counts are reliable.)
-            if files == 0:
-                return ResultClass.FAILED_ENV
+            return confirm_clean(files, tolerate_unknown=True)
         return result
 
     def clear_cache(self, project: str) -> None:

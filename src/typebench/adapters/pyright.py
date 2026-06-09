@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path  # runtime: used to derive venvPath (not annotation-only)
 from typing import TYPE_CHECKING
 
+from typebench.adapters._support import confirm_clean, probe_version
 from typebench.adapters.base import ParallelismCap, coerce_count
 from typebench.contracts.models import ResultClass, ThreadMode
 from typebench.engine.wrapper import classify_with_map
@@ -58,15 +59,7 @@ class PyrightAdapter:
     install_source = "npm + Node"
 
     def version(self) -> str:
-        # No-raise: called during RunResult assembly even on the env-failure path,
-        # so a missing binary must NOT crash and drop the record (repo invariant).
-        try:
-            out = subprocess.run(
-                ["pyright", "--version"], capture_output=True, text=True, check=False
-            )
-        except OSError:
-            return "unknown"
-        return out.stdout.strip() or out.stderr.strip() or "unknown"
+        return probe_version(["pyright", "--version"], runner=subprocess.run)
 
     def install(self) -> str:
         # `pyright --version` omits Node; record both for reproducibility (the §9
@@ -165,8 +158,7 @@ class PyrightAdapter:
         # a false-clean enter the data set -> record-honesty violation (§7/§12).
         if result is ResultClass.CLEAN:
             _diags, files = self.parse(raw.stdout, raw.stderr, raw.exit_code)
-            if not files:  # 0 or None
-                return ResultClass.FAILED_ENV
+            return confirm_clean(files, tolerate_unknown=False)
         return result
 
     def clear_cache(self, project: str) -> None:
