@@ -89,3 +89,75 @@ def render_readme(envelope: ResultsEnvelope) -> str:
     )
     parts.append(_README_END)
     return "\n".join(parts)
+
+
+def _calib_median(record: RunResult) -> float | None:
+    return record.calibration.raw_median_s if record.calibration is not None else None
+
+
+def cpu_model_anchors(history: list[ResultsEnvelope]) -> dict[str, float]:
+    """Fixed per-CPU-model calibration anchor (Decision I): for each CPU model, the
+    calibration raw_median_s of the EARLIEST envelope (by generated_at) that has a
+    run on that model with a calibration. Anchors only ever add, so a published
+    point's normalized value never changes when later data arrives."""
+    anchors: dict[str, float] = {}
+    for envelope in sorted(history, key=lambda e: e.generated_at):
+        for record in envelope.runs:
+            calib = _calib_median(record)
+            if calib is None or calib <= 0:
+                continue
+            anchors.setdefault(record.env.cpu_model, calib)
+    return anchors
+
+
+def _kloc_value(record: RunResult) -> float | None:
+    if record.over_reports or record.timing is None or record.timing.median_s <= 0:
+        return None
+    loc = record.canonical_code_loc if record.loc_denominator == "code" else record.canonical_loc
+    return (loc / 1000) / record.timing.median_s if loc is not None else None
+
+
+def build_trends(history: list[ResultsEnvelope]) -> dict[str, object]:
+    """Flatten history to fully-labelled points + per-CPU-model-normalized variants.
+    The GH Pages app groups points into series and derives inter-checker ratios
+    client-side (slowest per date/project/mode/metric). Only measured-success records
+    contribute points; failures are visible in the README, not the trend lines."""
+    anchors = cpu_model_anchors(history)
+    points: list[dict[str, object]] = []
+    markers: list[dict[str, object]] = []
+    for envelope in sorted(history, key=lambda e: e.generated_at):
+        date = envelope.generated_at[:10]
+        markers.append({"date": date, "suite_version": envelope.suite_version})
+        for record in envelope.runs:
+            if not record.result_class.is_measured_success or record.timing is None:
+                continue
+            calib = _calib_median(record)
+            anchor = anchors.get(record.env.cpu_model)
+            wall = record.timing.median_s
+            wall_norm = (
+                wall * anchor / calib
+                if anchor is not None and calib is not None and calib > 0
+                else None
+            )
+            peak_mb = record.memory.peak_bytes_median / 1_000_000 if record.memory else None
+            points.append(
+                {
+                    "date": date,
+                    "suite_version": envelope.suite_version,
+                    "project": record.project,
+                    "thread_mode": record.thread_mode.value,
+                    "tool": record.tool,
+                    "cpu_model": record.env.cpu_model,
+                    "wall_median_s": wall,
+                    "wall_median_s_norm": wall_norm,
+                    "peak_mem_mb": peak_mb,
+                    "kloc_s": _kloc_value(record),
+                    "calib_median_s": calib,
+                    "calib_anchor_s": anchor,
+                }
+            )
+    return {
+        "cpu_models": sorted(anchors),
+        "points": points,
+        "corpus_markers": markers,
+    }

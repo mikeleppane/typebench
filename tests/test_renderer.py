@@ -1,5 +1,8 @@
+from typing import cast
+
 from typebench.env import EnvFingerprint
 from typebench.models import (
+    CalibrationStats,
     MemoryStats,
     ResultClass,
     ResultsEnvelope,
@@ -7,7 +10,7 @@ from typebench.models import (
     ThreadMode,
     TimingStats,
 )
-from typebench.renderer import render_readme
+from typebench.renderer import build_trends, cpu_model_anchors, render_readme
 
 
 def _env(cpu: str = "Test CPU") -> EnvFingerprint:
@@ -95,3 +98,98 @@ def test_render_readme_shows_failed_cells_as_didnt_compete() -> None:
     env = ResultsEnvelope(suite_version="v", generated_at="t", runs=[failed])
     md = render_readme(env)
     assert "failed{env}" in md
+
+
+def _record_for_trends(tool: str, wall: float, calib_med: float, cpu: str) -> RunResult:
+    return RunResult(
+        tool=tool,
+        tool_version="1.0",
+        project="httpx",
+        thread_mode=ThreadMode.ALL_CORES,
+        result_class=ResultClass.CLEAN,
+        real_exit_code=0,
+        timing=TimingStats(
+            runs=1,
+            min_s=wall,
+            median_s=wall,
+            mean_s=wall,
+            stddev_s=0.0,
+            max_s=wall,
+            times_s=[wall],
+        ),
+        memory=MemoryStats(
+            runs=1,
+            peak_bytes_min=1,
+            peak_bytes_median=200_000_000,
+            peak_bytes_max=1,
+        ),
+        canonical_code_loc=3200,
+        loc_denominator="code",
+        over_reports=False,
+        calibration=CalibrationStats(
+            workload_id="calib-pyloop-v1",
+            iterations=1,
+            runs=1,
+            raw_min_s=calib_med,
+            raw_median_s=calib_med,
+            raw_max_s=calib_med,
+        ),
+        env=_env(cpu),
+    )
+
+
+def _envelope(gen: str, *records: RunResult) -> ResultsEnvelope:
+    return ResultsEnvelope(suite_version="v", generated_at=gen, runs=list(records))
+
+
+def _trend_points(trends: dict[str, object]) -> list[dict[str, object]]:
+    return cast("list[dict[str, object]]", trends["points"])
+
+
+def _corpus_markers(trends: dict[str, object]) -> list[dict[str, object]]:
+    return cast("list[dict[str, object]]", trends["corpus_markers"])
+
+
+def _cpu_models(trends: dict[str, object]) -> list[str]:
+    return cast("list[str]", trends["cpu_models"])
+
+
+def test_cpu_model_anchors_take_earliest_per_model() -> None:
+    history = [
+        _envelope("2026-02-01", _record_for_trends("mypy", 1.0, 0.40, "CPU-A")),
+        _envelope("2026-03-01", _record_for_trends("mypy", 1.0, 0.20, "CPU-A")),
+        _envelope("2026-03-01", _record_for_trends("mypy", 1.0, 0.50, "CPU-B")),
+    ]
+    anchors = cpu_model_anchors(history)
+    assert anchors["CPU-A"] == 0.40
+    assert anchors["CPU-B"] == 0.50
+
+
+def test_build_trends_normalizes_against_anchor() -> None:
+    history = [
+        _envelope("2026-02-01", _record_for_trends("mypy", 1.0, 0.40, "CPU-A")),
+        _envelope("2026-03-01", _record_for_trends("mypy", 1.0, 0.20, "CPU-A")),
+    ]
+    trends = build_trends(history)
+    points = [p for p in _trend_points(trends) if p["date"] == "2026-03-01"]
+    assert len(points) == 1
+    p = points[0]
+    assert p["wall_median_s"] == 1.0
+    wall_norm = p["wall_median_s_norm"]
+    assert isinstance(wall_norm, float)
+    assert abs(wall_norm - 2.0) < 1e-9
+    anchor_point = next(p for p in _trend_points(trends) if p["date"] == "2026-02-01")
+    anchor_wall_norm = anchor_point["wall_median_s_norm"]
+    assert isinstance(anchor_wall_norm, float)
+    assert abs(anchor_wall_norm - 1.0) < 1e-9
+
+
+def test_build_trends_includes_kloc_and_corpus_markers() -> None:
+    history = [_envelope("2026-02-01", _record_for_trends("mypy", 2.0, 0.40, "CPU-A"))]
+    trends = build_trends(history)
+    p = _trend_points(trends)[0]
+    kloc_s = p["kloc_s"]
+    assert isinstance(kloc_s, float)
+    assert abs(kloc_s - 1.6) < 1e-9
+    assert _corpus_markers(trends)[0]["suite_version"] == "v"
+    assert "CPU-A" in _cpu_models(trends)
