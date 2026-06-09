@@ -4,6 +4,7 @@ config file / flags. Defaults are the neutral, stock-but-equal policy."""
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 
 # Excluded everywhere (spec §6): tests, vendored, generated, caches.
@@ -17,6 +18,35 @@ DEFAULT_EXCLUDES: tuple[str, ...] = (
     "**/__pycache__/**",
     "**/node_modules/**",
 )
+
+# Bump when the LOCKED §6 policy set (flags/posture) changes, so config_hash
+# distinguishes pre/post-policy runs even at identical inputs.
+NORMALIZED_POLICY_VERSION = "v1"
+
+
+def config_hash(
+    src_roots: tuple[str, ...],
+    exclude_globs: tuple[str, ...],
+    python_version: str,
+    python_platform: str,
+) -> str:
+    """Stable, machine-independent hash of the resolved normalized config (spec §6).
+
+    Callers MUST pass REPO-RELATIVE src_roots (e.g. CorpusProject.src_roots), never
+    the absolute checkout path or the venv — those are machine-specific and would
+    make the hash non-comparable across runs/VMs. Inputs are sorted so ordering is
+    irrelevant; NORMALIZED_POLICY_VERSION folds the locked policy revision in.
+    """
+    payload = "\n".join(
+        [
+            NORMALIZED_POLICY_VERSION,
+            "\x00".join(sorted(src_roots)),
+            "\x00".join(sorted(exclude_globs)),
+            python_version,
+            python_platform,
+        ]
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 @dataclass(frozen=True)
