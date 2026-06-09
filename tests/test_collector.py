@@ -214,7 +214,7 @@ def test_one_core_prepends_taskset_and_enforces(monkeypatch: pytest.MonkeyPatch)
         return _stub_raw()
 
     monkeypatch.setattr(collector, "run_command", fake_run_command)
-    monkeypatch.setattr(collector, "_taskset_available", lambda: True)
+    monkeypatch.setattr(collector, "_taskset_available", lambda _cores: True)
 
     adapter = StubAdapter(exit_code=0, diagnostics=0, files=1)
     result = run_single(
@@ -233,7 +233,7 @@ def test_one_core_prepends_taskset_and_enforces(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_one_core_without_taskset_is_not_enforced(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(collector, "_taskset_available", lambda: False)
+    monkeypatch.setattr(collector, "_taskset_available", lambda _cores: False)
     adapter = StubAdapter(exit_code=0, diagnostics=0, files=1)
     result = run_single(
         adapter,
@@ -252,7 +252,7 @@ def test_one_core_without_taskset_is_not_enforced(monkeypatch: pytest.MonkeyPatc
 
 
 def test_all_cores_no_taskset_no_enforcement(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(collector, "_taskset_available", lambda: True)
+    monkeypatch.setattr(collector, "_taskset_available", lambda _cores: True)
     captured: dict[str, list[str]] = {}
 
     def fake_run_command(
@@ -426,13 +426,13 @@ def test_taskset_unavailable_when_core0_not_in_affinity(monkeypatch: pytest.Monk
     # reads as diagnostics and fakes thread_mode_enforced. Guard on the affinity mask.
     monkeypatch.setattr(collector.shutil, "which", lambda _n: "/usr/bin/taskset")
     monkeypatch.setattr(collector.os, "sched_getaffinity", lambda _pid: {1, 2, 3})
-    assert collector._taskset_available() is False
+    assert collector._taskset_available(1) is False
 
 
 def test_taskset_available_when_core0_in_affinity(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(collector.shutil, "which", lambda _n: "/usr/bin/taskset")
     monkeypatch.setattr(collector.os, "sched_getaffinity", lambda _pid: {0, 1, 2})
-    assert collector._taskset_available() is True
+    assert collector._taskset_available(1) is True
 
 
 def test_run_single_stamps_manifest_fields() -> None:

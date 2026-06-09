@@ -115,7 +115,7 @@ def _replace_readme_block(readme_text: str, block: str) -> str:
 
 
 @app.command()
-def run(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI option, not a code smell
+def run(  # noqa: PLR0913, PLR0915 — many user-facing CLI options + linear arg-validation/manifest/run setup; one command by design
     tool: Annotated[str, typer.Option(help="Checker to run (e.g. stub).")],
     output: Annotated[Path, typer.Option(help="Where to write the results JSON.")],
     project: Annotated[
@@ -167,10 +167,24 @@ def run(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI optio
     cache_root: Annotated[
         Path, typer.Option(help="Where prepared clones/venvs are cached.")
     ] = DEFAULT_CACHE_ROOT,
+    cores: Annotated[
+        int,
+        typer.Option(
+            help=(
+                "CPU cores for the 'constrained' thread track. Default 1 = single-threaded; "
+                "multithreading is opt-in — raise it (e.g. --cores 8) to pin the checker to N "
+                "cores and let it use N worker threads, kept comparable across machines. The "
+                "'all-cores' track ignores this and uses every core."
+            )
+        ),
+    ] = 1,
 ) -> None:
     factory = _ADAPTERS.get(tool)
     if factory is None:
         typer.echo(f"Unknown tool: {tool!r}. Known: {sorted(_ADAPTERS)}", err=True)
+        raise typer.Exit(code=2)
+    if cores < 1:
+        typer.echo("--cores must be >= 1.", err=True)
         raise typer.Exit(code=2)
 
     # Fail fast on a bad --output: a single run can take many minutes, so a
@@ -231,6 +245,7 @@ def run(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI optio
         # venvPath/venv derivation. abspath makes it absolute without following the
         # symlink. (src_roots are dirs, so .resolve() above is fine for them.)
         venv_python=os.path.abspath(venv) if venv is not None else None,  # noqa: PTH100 - need non-symlink-following abspath; Path.resolve() follows symlinks
+        cores=cores,
     )
     adapter = factory()
     manifest: RunManifest | None = None
@@ -293,6 +308,17 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
     cache_root: Annotated[
         Path, typer.Option(help="Where prepared clones/venvs are cached.")
     ] = DEFAULT_CACHE_ROOT,
+    cores: Annotated[
+        int,
+        typer.Option(
+            help=(
+                "CPU cores for the 'constrained' thread track. Default 1 = single-threaded; "
+                "multithreading is opt-in — raise it (e.g. --cores 8) to pin the checker to N "
+                "cores and let it use N worker threads, kept comparable across machines. The "
+                "'all-cores' track ignores this and uses every core."
+            )
+        ),
+    ] = 1,
 ) -> None:
     """Run the (project x tool x thread-mode) matrix and write a results envelope."""
     out_dir = output.parent
@@ -301,6 +327,9 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
         raise typer.Exit(code=2)
     if mem_runs < 1 or calib_runs < 1:
         typer.echo("--mem-runs and --calib-runs must be >= 1.", err=True)
+        raise typer.Exit(code=2)
+    if cores < 1:
+        typer.echo("--cores must be >= 1.", err=True)
         raise typer.Exit(code=2)
     shard_index, shard_total = _parse_shard(shard)
     tools = tool or ["mypy", "pyright", "pyrefly", "ty"]
@@ -317,6 +346,7 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
         mem_runs=mem_runs,
         measure_enabled=measure,
         calib_runs=calib_runs,
+        cores=cores,
         shard_index=shard_index,
         shard_total=shard_total,
         lookup_entry=_lookup_project,

@@ -61,3 +61,10 @@ class NormalizedConfig:
     python_version: str = "3.12"
     python_platform: str = "linux"
     venv_python: str | None = None
+    # §5.3 CONSTRAINED-track core count: the collector pins to taskset -c 0..cores-1
+    # and each adapter caps its workers to this many. Default 1 = the single-core
+    # algorithmic floor; raise it (e.g. 8) for a reproducible multi-core run. NOT a §6
+    # policy input, so it is deliberately excluded from config_hash (the same
+    # normalized config benchmarked at different core counts is the SAME config).
+    # Ignored on the ALL_CORES track.
+    cores: int = 1

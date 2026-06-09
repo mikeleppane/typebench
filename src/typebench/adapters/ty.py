@@ -105,7 +105,8 @@ class TyAdapter:
 
         env: dict[str, str] = {}
         if thread_mode is ThreadMode.CONSTRAINED:
-            env["TY_MAX_PARALLELISM"] = "1"  # SOFT cap (ty may still spawn threads)
+            # SOFT cap to the configured core count (ty may still spawn threads).
+            env["TY_MAX_PARALLELISM"] = str(config.cores)
         return (argv, env)
 
     def parallelism_cap(self, thread_mode: ThreadMode) -> ParallelismCap:

@@ -44,31 +44,37 @@ class RunManifest:
 _resource_capable = measure.capable
 _scoped_probe = measure.scoped_probe
 
-_AFFINITY_PREFIX = ["taskset", "-c", "0"]  # uniform single-core floor (spec §5.3)
+
+def _affinity_spec(cores: int) -> str:
+    """taskset -c cpu-list for the CONSTRAINED track: '0' for a single core, else
+    '0-(N-1)' to pin to the first N cores (spec §5.3)."""
+    return "0" if cores <= 1 else f"0-{cores - 1}"
 
 
-def _taskset_available() -> bool:
-    """taskset present AND core 0 is in this process's CPU affinity mask. The mask
-    check is load-bearing: under a restrictive cpuset (containers, some CI runners)
-    core 0 may be disallowed, so `taskset -c 0 <checker>` would EXIT 1 *before the
-    checker runs* — and exit 1 reads as diagnostics/measured-success, recording a
-    bogus fast timing AND a false thread_mode_enforced for a command that never ran.
-    Only claim the pin we can actually apply (§5.3, Decision D)."""
-    if shutil.which("taskset") is None:
+def _taskset_available(cores: int) -> bool:
+    """taskset present AND cores 0..N-1 are ALL in this process's CPU affinity mask.
+    The mask check is load-bearing: under a restrictive cpuset (containers, some CI
+    runners) or on a box with fewer than N usable cores, `taskset -c 0-(N-1) <checker>`
+    would EXIT 1 *before the checker runs* — and exit 1 reads as diagnostics/measured-
+    success, recording a bogus fast timing AND a false thread_mode_enforced for a
+    command that never ran. Only claim the pin we can actually apply (§5.3, Decision D)."""
+    if cores < 1 or shutil.which("taskset") is None:
         return False
     getaffinity = getattr(os, "sched_getaffinity", None)
     if getaffinity is None:  # non-Linux without the affinity API (taskset is Linux-only anyway)
         return False
-    return 0 in getaffinity(0)
+    mask = getaffinity(0)
+    return all(core in mask for core in range(cores))
 
 
-def _apply_affinity(argv: list[str], thread_mode: ThreadMode) -> tuple[list[str], bool]:
-    """Prepend the uniform single-core affinity prefix for the CONSTRAINED track.
-    Returns (argv, enforced). ALL_CORES is unconstrained by design (not pinned).
-    enforced is True ONLY when CONSTRAINED AND taskset is actually available — the
-    honesty flag must never claim a pin we could not apply (§5.3, Decision D)."""
-    if thread_mode is ThreadMode.CONSTRAINED and _taskset_available():
-        return ([*_AFFINITY_PREFIX, *argv], True)
+def _apply_affinity(argv: list[str], thread_mode: ThreadMode, cores: int) -> tuple[list[str], bool]:
+    """Prepend the taskset affinity prefix for the CONSTRAINED track, pinning to the
+    first `cores` cores. Returns (argv, enforced). ALL_CORES is unconstrained by design
+    (not pinned). enforced is True ONLY when CONSTRAINED AND all N cores are actually
+    pinnable — the honesty flag must never claim a pin we could not apply (§5.3,
+    Decision D)."""
+    if thread_mode is ThreadMode.CONSTRAINED and _taskset_available(cores):
+        return (["taskset", "-c", _affinity_spec(cores), *argv], True)
     return (argv, False)
 
 
@@ -135,17 +141,18 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
                 over_reports=man.over_reports,
             )
 
-        # Apply the uniform 1-core affinity prefix (CONSTRAINED only) BEFORE any run,
-        # so probe + resource + timing all share the same pinned command (§5.3).
-        argv, thread_enforced = _apply_affinity(argv, thread_mode)
+        # Apply the N-core affinity prefix (CONSTRAINED only) BEFORE any run, so
+        # probe + resource + timing all share the same pinned command (§5.3).
+        argv, thread_enforced = _apply_affinity(argv, thread_mode, config.cores)
         cap = adapter.parallelism_cap(thread_mode)
         # The adapter mechanism strings bake in "cpu-affinity" (Plan 4's floor), so
-        # record the cap ONLY when affinity actually ran. On CONSTRAINED without
-        # taskset (mac/dev), or on ALL_CORES, record neither — never claim a pin we
-        # did not apply (§5.3 honesty, Decision A).
+        # record the cap + pinned core count ONLY when affinity actually ran. On
+        # CONSTRAINED without taskset (mac/dev) or on ALL_CORES, record neither —
+        # never claim a pin we did not apply (§5.3 honesty, Decision A).
         record_cap = thread_mode is ThreadMode.CONSTRAINED and thread_enforced
         hard_cap = cap.hard_cap if record_cap else None
         cap_mechanism = cap.mechanism if record_cap else None
+        cores = config.cores if record_cap else None
 
         # Phase 1: probe. When measurement is available, the probe runs UNDER a
         # transient cgroup scope (M COLD repeats) so it yields peak memory +
@@ -262,6 +269,7 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
             project=project,
             thread_mode=thread_mode,
             thread_mode_enforced=thread_enforced,
+            cores=cores,
             hard_cap=hard_cap,
             cap_mechanism=cap_mechanism,
             result_class=result_class,

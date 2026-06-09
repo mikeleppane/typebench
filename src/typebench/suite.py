@@ -101,13 +101,14 @@ def _excluded_record(
     )
 
 
-def _suite_config(prepared: PreparedProject) -> NormalizedConfig:
+def _suite_config(prepared: PreparedProject, cores: int) -> NormalizedConfig:
     return NormalizedConfig(
         src_roots=prepared.src_roots,
         exclude_globs=prepared.exclude_globs,
         python_version=prepared.python_version,
         python_platform=prepared.python_platform,
         venv_python=prepared.venv_python or None,
+        cores=cores,
     )
 
 
@@ -124,6 +125,7 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
     mem_runs: int,
     measure_enabled: bool,
     calib_runs: int,
+    cores: int = 1,
     shard_index: int = 0,
     shard_total: int = 1,
     projects: list[str] | None = None,
@@ -215,7 +217,7 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
             entry.python_version,
             entry.python_platform,
         )
-        config = _suite_config(prepared)
+        config = _suite_config(prepared, cores)
         for cell in project_cells:
             adapter = adapter_by_name[cell.tool]
             manifest = RunManifest(

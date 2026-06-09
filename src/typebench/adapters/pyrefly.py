@@ -95,7 +95,7 @@ class PyreflyAdapter:
             "--summary=full",  # emits "N modules" on stderr (the files source)
         ]
         if thread_mode is ThreadMode.CONSTRAINED:
-            argv += ["--threads", "1"]  # HARD cap (rayon pool = 1)
+            argv += ["--threads", str(config.cores)]  # HARD cap (rayon pool = N)
         return (argv, {})
 
     def parallelism_cap(self, thread_mode: ThreadMode) -> ParallelismCap:
