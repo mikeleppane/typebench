@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from datetime import UTC, datetime
 
@@ -22,9 +23,10 @@ from typebench.calibration import calibrate
 from typebench.collector import RunManifest, run_single
 from typebench.corpus import load_suite
 from typebench.envman import PrepareError, prepare_project
-from typebench.models import ThreadMode
+from typebench.models import ResultsEnvelope, ThreadMode
 from typebench.normalized_config import DEFAULT_EXCLUDES, NormalizedConfig, config_hash
 from typebench.preflight import preflight_project
+from typebench.renderer import build_trends, render_readme
 from typebench.suite import run_suite
 
 if TYPE_CHECKING:
@@ -43,6 +45,8 @@ app = typer.Typer(help="Neutral Python type-checker performance benchmark.")
 # dropped) while the other tools run. A tool-asymmetric cache location is a
 # neutrality defect, so the default is plain.
 DEFAULT_CACHE_ROOT = Path("typebench-cache")
+_README_BEGIN = "<!-- TYPEBENCH:BEGIN -->"
+_README_END = "<!-- TYPEBENCH:END -->"
 
 # Adapter registry. All four real checkers + the controllable stub.
 _ADAPTERS: dict[str, Callable[[], Adapter]] = {
@@ -99,6 +103,15 @@ def _parse_shard(spec: str) -> tuple[int, int]:
         )
         raise typer.Exit(code=2)
     return index, total
+
+
+def _replace_readme_block(readme_text: str, block: str) -> str:
+    """Swap the TYPEBENCH marker block while preserving hand-written prose."""
+    start = readme_text.find(_README_BEGIN)
+    end = readme_text.find(_README_END)
+    if start != -1 and end != -1 and end > start:
+        return readme_text[:start] + block + readme_text[end + len(_README_END) :]
+    return readme_text.rstrip() + "\n\n## Latest results\n\n" + block + "\n"
 
 
 @app.command()
@@ -313,6 +326,28 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
     output.write_text(envelope.model_dump_json(indent=2))
     measured = sum(1 for r in envelope.runs if r.result_class.is_measured_success)
     typer.echo(f"suite {shard} -> {measured}/{len(envelope.runs)} measured -> {output}")
+
+
+@app.command()
+def render(
+    results_dir: Annotated[Path, typer.Option(help="Directory of results/<date>.json envelopes.")],
+    readme: Annotated[Path, typer.Option(help="README.md to update between the markers.")],
+    trends: Annotated[Path, typer.Option(help="Where to write site/data/trends.json.")],
+) -> None:
+    """Regenerate the README table (latest envelope) and trends.json (full history)."""
+    files = sorted(results_dir.glob("*.json"))
+    if not files:
+        typer.echo(f"No results/*.json found under {results_dir}", err=True)
+        raise typer.Exit(code=1)
+    history = [ResultsEnvelope.model_validate_json(file.read_text()) for file in files]
+    history.sort(key=lambda envelope: envelope.generated_at)
+
+    block = render_readme(history[-1])
+    readme.write_text(_replace_readme_block(readme.read_text(), block))
+
+    trends.parent.mkdir(parents=True, exist_ok=True)
+    trends.write_text(json.dumps(build_trends(history), indent=2))
+    typer.echo(f"render -> {readme} (latest) + {trends} ({len(history)} envelopes)")
 
 
 @app.command()
