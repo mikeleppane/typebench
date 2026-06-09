@@ -159,6 +159,46 @@ AI/assistant attribution** in commit
 messages or PR bodies — commits read as the author's own work. See the
 `git-conventions` skill.
 
+## Executing tasks with codex
+
+`codex exec` is the per-task executor: hand it ONE well-scoped task (implement a
+plan task, or review a diff), then the orchestrating agent reviews the result and
+owns the commit. It runs in its own sandbox — treat it as a junior pair, not an
+autonomous committer.
+
+**Invocation (implementation task):**
+
+```bash
+UV_CACHE_DIR=/tmp/uv-cache codex exec -s workspace-write \
+  -c model_reasoning_effort=high "<single-task prompt>" </dev/null
+```
+
+**Invocation (review — no writes, faster):** swap `-s workspace-write` for
+`-s read-only`. Add `--skip-git-repo-check` if codex balks at the repo state.
+
+**Non-negotiable pitfalls (each one cost real time):**
+
+- **Always redirect `</dev/null`.** `codex exec` reads *additional* prompt input
+  from stdin and **hangs forever** ("Reading additional input from stdin...") when
+  stdin is an open pipe/tty with no EOF. This is the #1 way a codex run silently
+  stalls.
+- **Never pipe codex through `| tail`/`| head`.** Those buffer until EOF, so the
+  output file stays empty until codex fully exits — indistinguishable from a hang.
+  Redirect to a file (`> /tmp/codex.log 2>&1`) and read that, or let the task
+  framework capture it.
+- **codex cannot `git commit`** — the sandbox mounts `.git` read-only. codex
+  implements + (optionally) self-tests; the orchestrating agent runs the full gate
+  and commits. Never ask codex to commit.
+- **Scope to one task.** A good codex prompt states the task, the relevant context,
+  the acceptance check, and "be terse / list only real issues" for reviews. It is
+  not a planner — give it the plan.
+
+**The loop:** dispatch codex on the task → read its diff and output → run the full
+quality gate yourself (`ruff`, `pyrefly`, `pytest`) → commit. If codex flags an
+in-scope problem in its own work, fix before committing; if it raises a real issue
+the orchestrator missed (it happens — e.g. an honesty-flag mismatch the human
+reviewer passed), treat it as a finding and address it.
+
 ## Skills
 
 Engineering skills live under `.agents/skills/`. Invoke the relevant one before working:
