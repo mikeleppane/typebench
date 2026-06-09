@@ -24,7 +24,7 @@ from typebench.suite.preflight import preflight_project
 if TYPE_CHECKING:
     from typebench.adapters.base import Adapter
 
-_SUITE = Path(__file__).parent.parent / "corpus" / "suite.toml"
+_SUITE = Path(__file__).resolve().parents[2] / "corpus" / "suite.toml"
 _FIRST_PARTY_SCOPED = {"pyright", "ty", "pyrefly"}
 
 

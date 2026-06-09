@@ -4,7 +4,7 @@ import pytest
 
 from typebench.corpus.catalog import CorpusProject, SizeBucket, load_suite, load_suite_version
 
-_SUITE = Path(__file__).parent.parent / "corpus" / "suite.toml"
+_SUITE = Path(__file__).resolve().parents[2] / "corpus" / "suite.toml"
 
 
 def test_load_suite_reads_httpx_entry() -> None:

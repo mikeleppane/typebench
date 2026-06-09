@@ -10,7 +10,7 @@ from typebench.contracts.models import PreparedProject
 from typebench.corpus.envman import PrepareError
 
 runner = CliRunner()
-_SUITE = Path(__file__).parent.parent / "corpus" / "suite.toml"
+_SUITE = Path(__file__).resolve().parents[2] / "corpus" / "suite.toml"
 
 
 def _fake_prepared(fixtures_dir: Path) -> PreparedProject:
