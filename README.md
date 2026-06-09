@@ -169,9 +169,14 @@ uv run typebench run \
   --project my-lib \
   --src-root src/my_lib \
   --venv /path/to/project/.venv/bin/python \
-  --thread-mode 1-core-constrained \
+  --thread-mode constrained \
   --output results-mylib-mypy.json
 ```
+
+The `constrained` track defaults to a single core (`--cores 1`); multithreading is
+opt-in. Raise it (e.g. `--cores 8`) to pin the checker to N cores and let it use up
+to N workers — mypy ≥ 2.0 (`--num-workers`), pyrefly (`--threads`), and ty
+(`TY_MAX_PARALLELISM`) all scale; pyright stays effectively single-main-thread.
 
 ### Preflight
 
@@ -194,7 +199,8 @@ to narrow the set.
 |--------|---------|---------|
 | `--tool` | required | `mypy`, `pyright`, `pyrefly`, `ty`, or `stub`. |
 | `--output` | required | JSON output path; parent directory must be writable. |
-| `--thread-mode` | `all-cores` | `all-cores` or `1-core-constrained`. |
+| `--thread-mode` | `all-cores` | `all-cores` or `constrained`. |
+| `--cores` | `1` | Cores for the `constrained` track (default 1 = single-threaded; opt into multithreading with e.g. `--cores 8`). Ignored by `all-cores`. |
 | `--runs` | `10` | Hyperfine timed runs. |
 | `--warmup` | `3` | Hyperfine warmups. |
 | `--mem-runs` | `3` | Resource-pass repeats. |
@@ -363,10 +369,14 @@ threads as part of normal operation.
 typebench supports two tracks:
 
 - `all-cores`: real-world default behavior.
-- `1-core-constrained`: a one-core CPU affinity floor when `taskset` is available.
+- `constrained`: an N-core CPU affinity floor via `taskset -c 0..N-1` when available,
+  where N is `--cores` (default 1). Each adapter's parallelism is also capped to N
+  (mypy `--num-workers`, pyrefly `--threads`, ty `TY_MAX_PARALLELISM`; pyright is
+  effectively single-main-thread). At the default N=1 this is a single pinned core.
 
-The project does not claim a literal "one thread" mode, because that is not
-uniformly achievable across all four checkers.
+The project does not claim a literal "N threads" mode, because a core-count cap
+forces a parallel tool's threads to contend on N cores rather than truly running N
+workers — that distinction is documented, not hidden, via the `hard_cap` honesty flag.
 
 ### Normalized configuration
 

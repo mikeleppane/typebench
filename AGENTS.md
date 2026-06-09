@@ -6,10 +6,16 @@ and, later, cgroup v2 (peak memory + CPU-time). Results are versioned JSON; the
 README and GH Pages are rendered views. Design spec:
 `docs/superpowers/specs/2026-06-07-typebench-design.md`.
 
-**Status:** Plan 4 (memory · threads · calibration) — `taskset -c 0` 1-core affinity
-floor, cgroup v2 peak memory + CPU-time + OOM under a transient `systemd-run --scope`,
-and a fixed calibration baseline. Builds on Plan 3 (corpus + envman + preflight). `RunResult`
-is **v2**. Renderer Plan 5; CI/bump Plan 6.
+**Status:** Plan 5 (results envelope · suite orchestration · §9 lock-manifest
+enrichment · renderer) **done**, plus configurable cores. `ResultsEnvelope` (v1)
+wraps the sharded `(project × tool × thread-mode)` matrix; the renderer emits the
+README table + `trends.json` (per-CPU-model calibration anchor). `RunResult` is
+**v3** (lock-manifest scalars, tokei code-LOC, `cores`). `ThreadMode` is now
+`constrained` / `all-cores` (was `1-core-constrained`); the constrained track is
+parameterized by `--cores N` (default 1 = single-threaded, opt-in multithreading,
+`taskset -c 0..N-1`). mypy ≥ 2.0 cold-parallel via `--num-workers` (fresh per-run
+cache; result-equivalent to single-process). Builds on Plan 4 (memory · threads ·
+calibration) and Plan 3 (corpus + envman + preflight). CI/bump Plan 6.
 
 ## Golden rule: this is a measurement tool
 
@@ -21,13 +27,15 @@ doubt, prefer the honest, conservative, reproducible choice over the convenient 
 - `src/typebench/` — the package (src layout, hatchling):
   - `taxonomy.py` — pydantic-free on-disk enums (`ResultClass`, `ThreadMode`,
     `FailurePhase`). **Stays stdlib-only** (see Measurement fidelity).
-  - `models.py` — pydantic schemas (`RunResult`, `TimingStats`, `EnvFingerprint`),
-    `ConfigDict(extra="forbid")`.
+  - `models.py` — pydantic schemas (`RunResult` v3, `ResultsEnvelope` v1,
+    `TimingStats`, `EnvFingerprint`, `PreparedProject`), `ConfigDict(extra="forbid")`.
+  - `normalized_config.py` — `NormalizedConfig` (incl. `cores`) + `config_hash`
+    (the §9 reproducibility hash; `cores` deliberately excluded from it).
   - `env.py` — environment fingerprint.
-  - `corpus.py` — `CorpusProject`, `SizeBucket`, `load_suite` (corpus as data;
-    dir-segment exclude validation; optional checked-in constraints lock).
-  - `counting.py` — `count_first_party`, the neutral throughput denominator (§8;
-    physical-LOC, file count is the scc-independent denominator).
+  - `corpus.py` — `CorpusProject`, `SizeBucket`, `load_suite`, `load_suite_version`
+    (corpus as data; dir-segment exclude validation; optional checked-in lock).
+  - `counting.py` — `count_first_party` (physical-LOC denominator) + `count_code_loc`
+    (tokei reconciled code-LOC, the headline throughput denominator; §8).
   - `envman.py` — `prepare_project`: clone@SHA / uv venv / install (pinned to the
     constraints lock) / freeze+verify / count, behind a fingerprinted cache that
     rebuilds on stale config and cleans up partial failures. The only subprocess
@@ -38,13 +46,20 @@ doubt, prefer the honest, conservative, reproducible choice over the convenient 
   - `wrapper.py` — `RawRun`, `run_command`, `classify_default`, and the CLI used as
     hyperfine's per-run command.
   - `timing.py` — hyperfine pass + `parse_hyperfine_json`.
-  - `collector.py` — `run_single`, the probe→time pipeline that assembles one `RunResult`.
+  - `collector.py` — `run_single` + `RunManifest`, the probe→time pipeline that
+    assembles one `RunResult` (stamps lock-manifest scalars; scales the `taskset`
+    affinity pin to `config.cores`).
+  - `suite.py` — `run_suite`: the sharded `(project × tool × thread-mode)` matrix
+    behind the §12 preflight gate → `ResultsEnvelope`; excluded cells become visible
+    FAILED_ENV records ("didn't compete", never silently absent).
+  - `renderer.py` — `render_readme` (latest envelope → README table) + `build_trends`
+    (full history → `trends.json`, per-CPU-model calibration anchor).
   - `measure.py` — resource pass (spec §5.5): cgroup v2 peak memory + CPU-time +
     OOM under a transient `systemd-run --scope`. Pydantic-free (runs as a scoped
     child); capability-gated with a timing-only fallback on mac/CI.
   - `calibration.py` — fixed dep-free CPU workload (`calib-pyloop-v1`) timed per run
     for VM-to-VM trend normalization (spec §5.7). Pydantic-free import.
-  - `cli.py` — Typer app (`typebench run`).
+  - `cli.py` — Typer app (`run`, `suite`, `render`, `preflight`; `--cores`).
   - `_fake_checker.py` — in-package controllable fake checker (ships in the wheel)
     that the stub drives.
   - `adapters/base.py` — `Adapter` Protocol, `ParallelismCap`, `default_classify`,
@@ -122,15 +137,18 @@ code unless the task is that plan. The adapter Protocol is pinned to its final-i
 shape; methods not yet exercised (`install`, `parallelism_cap`) are deliberately
 deferred — don't delete them, don't build behavior behind them early.
 
-Plan 3 adds corpus/envman/preflight. Plan 4 adds the `taskset -c 0` 1-core affinity
-floor, the cgroup resource pass (`measure.py`), and the calibration baseline
-(`calibration.py`) — `RunResult` is now **v2** (MemoryStats/CalibrationStats +
-cpu_time_s/parallel_efficiency/hard_cap/cap_mechanism). The measured path
+Plan 3 adds corpus/envman/preflight. Plan 4 adds the `taskset` affinity floor, the
+cgroup resource pass (`measure.py`), and the calibration baseline (`calibration.py`).
+Plan 5 adds the results envelope (`models.ResultsEnvelope`), suite orchestration
+(`suite.py`), §9 lock-manifest enrichment, tokei code-LOC (`counting.count_code_loc`),
+and the renderer (`renderer.py`: README table + `trends.json`) — `RunResult` is now
+**v3** (lock-manifest scalars + canonical code-LOC + `cores`). Configurable cores:
+`ThreadMode` is `constrained`/`all-cores`, `--cores N` scales the affinity pin
+(`taskset -c 0..N-1`) and each adapter's cap; mypy ≥ 2.0 parallelizes via
+`--num-workers` on a fresh per-run cache (cold-equivalent). The measured path
 (`wrapper.py`, `taxonomy.py`, `measure.py`, `calibration.py`) stays pydantic-free;
-affinity is a uniform collector-level `taskset` prefix, never per-adapter. Do NOT add
-the results envelope, the renderer, or bump automation — those are Plans 5-6. Do NOT
-change `taxonomy.py` values or further enrich `RunResult`; the lock-manifest
-enrichment is Plan 5.
+affinity is a uniform collector-level `taskset` prefix, never per-adapter. CI/bump
+automation is Plan 6.
 
 ## Commits
 
