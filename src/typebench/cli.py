@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime
 
 # Runtime import (not TYPE_CHECKING): typer resolves option annotations at
 # runtime via inspect.signature(eval_str=True), so `Path` in `Annotated[Path,
@@ -24,6 +25,7 @@ from typebench.envman import PrepareError, prepare_project
 from typebench.models import ThreadMode
 from typebench.normalized_config import DEFAULT_EXCLUDES, NormalizedConfig, config_hash
 from typebench.preflight import preflight_project
+from typebench.suite import run_suite
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -80,6 +82,23 @@ def _lookup_project(corpus: Path, name: str) -> CorpusProject:
             return entry
     typer.echo(f"Unknown corpus project: {name!r} in {corpus}", err=True)
     raise typer.Exit(code=2)
+
+
+def _parse_shard(spec: str) -> tuple[int, int]:
+    """Parse 'i/n' (e.g. '0/4'); validate 0 <= i < n. typer.Exit(2) on bad input."""
+    try:
+        index_str, total_str = spec.split("/", 1)
+        index, total = int(index_str), int(total_str)
+    except ValueError:
+        typer.echo(f"--shard must be 'index/total' (e.g. 0/4), got {spec!r}", err=True)
+        raise typer.Exit(code=2) from None
+    if total < 1 or not 0 <= index < total:
+        typer.echo(
+            f"--shard out of range: {spec!r} (need 0 <= index < total, total >= 1)",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    return index, total
 
 
 @app.command()
@@ -234,6 +253,66 @@ def run(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI optio
     )
     output.write_text(result.model_dump_json(indent=2))
     typer.echo(f"{tool} / {project} -> {result.result_class.value} -> {output}")
+
+
+@app.command()
+def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI option
+    corpus: Annotated[Path, typer.Option(help="Path to suite.toml.")],
+    output: Annotated[Path, typer.Option(help="Where to write the results envelope JSON.")],
+    tool: Annotated[
+        list[str] | None,
+        typer.Option(help="Tools to run (repeatable). Default: all four real checkers."),
+    ] = None,
+    thread_mode: Annotated[
+        list[ThreadMode] | None,
+        typer.Option(help="Thread tracks (repeatable). Default: both."),
+    ] = None,
+    shard: Annotated[str, typer.Option(help="Shard selector 'index/total' (e.g. 0/4).")] = "0/1",
+    runs: Annotated[int, typer.Option(help="hyperfine timed runs.")] = 10,
+    warmup: Annotated[int, typer.Option(help="hyperfine warmup runs.")] = 3,
+    mem_runs: Annotated[int, typer.Option(help="Resource-pass repeats (>=1; >=3 official).")] = 3,
+    measure: Annotated[bool, typer.Option(help="Run the cgroup memory/CPU pass.")] = True,
+    calibrate_baseline: Annotated[
+        bool, typer.Option("--calibrate/--no-calibrate", help="Time the calibration workload.")
+    ] = True,
+    calib_runs: Annotated[int, typer.Option(help="Calibration workload repeats (>=1).")] = 5,
+    timeout: Annotated[float, typer.Option(help="Per-invocation timeout (seconds).")] = 900.0,
+    cache_root: Annotated[
+        Path, typer.Option(help="Where prepared clones/venvs are cached.")
+    ] = DEFAULT_CACHE_ROOT,
+) -> None:
+    """Run the (project x tool x thread-mode) matrix and write a results envelope."""
+    out_dir = output.parent
+    if not out_dir.exists() or not os.access(out_dir, os.W_OK):
+        typer.echo(f"Output directory not writable: {out_dir}", err=True)
+        raise typer.Exit(code=2)
+    if mem_runs < 1 or calib_runs < 1:
+        typer.echo("--mem-runs and --calib-runs must be >= 1.", err=True)
+        raise typer.Exit(code=2)
+    shard_index, shard_total = _parse_shard(shard)
+    tools = tool or ["mypy", "pyright", "pyrefly", "ty"]
+    modes = thread_mode or [ThreadMode.ALL_CORES, ThreadMode.ONE_CORE]
+    envelope = run_suite(
+        suite_path=corpus,
+        cache_root=cache_root,
+        tools=tools,
+        thread_modes=modes,
+        generated_at=datetime.now(UTC).isoformat(),
+        runs=runs,
+        warmup=warmup,
+        timeout=timeout,
+        mem_runs=mem_runs,
+        measure_enabled=measure,
+        calib_runs=calib_runs,
+        shard_index=shard_index,
+        shard_total=shard_total,
+        lookup_entry=_lookup_project,
+        adapter_factory=lambda name: _adapters_for([name])[0],
+        calibrate_fn=calibrate if calibrate_baseline else None,
+    )
+    output.write_text(envelope.model_dump_json(indent=2))
+    measured = sum(1 for r in envelope.runs if r.result_class.is_measured_success)
+    typer.echo(f"suite {shard} -> {measured}/{len(envelope.runs)} measured -> {output}")
 
 
 @app.command()
