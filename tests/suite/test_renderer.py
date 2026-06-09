@@ -1,6 +1,8 @@
 from collections.abc import Callable
 from typing import cast
 
+import pytest
+
 from typebench.contracts.models import (
     CalibrationStats,
     EnvFingerprint,
@@ -11,7 +13,13 @@ from typebench.contracts.models import (
     ThreadMode,
     TimingStats,
 )
-from typebench.suite.renderer import build_trends, cpu_model_anchors, render_readme
+from typebench.contracts.taxonomy import LocDenominator
+from typebench.suite.renderer import (
+    _code_loc_or_withheld,
+    build_trends,
+    cpu_model_anchors,
+    render_readme,
+)
 
 type EnvFactory = Callable[..., EnvFingerprint]
 
@@ -46,7 +54,7 @@ def _record(
         canonical_files=23,
         canonical_loc=4000,
         canonical_code_loc=3200,
-        loc_denominator="code",
+        loc_denominator=LocDenominator.CODE,
         over_reports=over,
         env=make_env(),
     )
@@ -126,7 +134,7 @@ def _record_for_trends(
             peak_bytes_max=1,
         ),
         canonical_code_loc=3200,
-        loc_denominator="code",
+        loc_denominator=LocDenominator.CODE,
         over_reports=False,
         calibration=CalibrationStats(
             workload_id="calib-pyloop-v1",
@@ -144,6 +152,23 @@ def _envelope(gen: str, *records: RunResult) -> ResultsEnvelope:
     return ResultsEnvelope(suite_version="v", generated_at=gen, runs=list(records))
 
 
+def _loc_record(
+    make_env: EnvFactory, denominator: LocDenominator | None, *, code_loc: int, phys_loc: int
+) -> RunResult:
+    return RunResult(
+        tool="mypy",
+        tool_version="1.0",
+        project="httpx",
+        thread_mode=ThreadMode.ALL_CORES,
+        result_class=ResultClass.CLEAN,
+        real_exit_code=0,
+        env=make_env(),
+        canonical_code_loc=code_loc,
+        canonical_loc=phys_loc,
+        loc_denominator=denominator,
+    )
+
+
 def _trend_points(trends: dict[str, object]) -> list[dict[str, object]]:
     return cast("list[dict[str, object]]", trends["points"])
 
@@ -154,6 +179,21 @@ def _corpus_markers(trends: dict[str, object]) -> list[dict[str, object]]:
 
 def _cpu_models(trends: dict[str, object]) -> list[str]:
     return cast("list[str]", trends["cpu_models"])
+
+
+@pytest.mark.parametrize(
+    ("denominator", "expected"),
+    [
+        (LocDenominator.CODE, 4000),  # only code-LOC feeds the headline column
+        (LocDenominator.PHYSICAL, None),  # physical fallback is withheld, not mislabeled
+        (None, None),  # unknown denominator is withheld
+    ],
+)
+def test_code_loc_withholds_non_code_denominators(
+    make_env: EnvFactory, denominator: LocDenominator | None, expected: int | None
+) -> None:
+    record = _loc_record(make_env, denominator, code_loc=4000, phys_loc=9000)
+    assert _code_loc_or_withheld(record) == expected
 
 
 def test_cpu_model_anchors_take_earliest_per_model(make_env: EnvFactory) -> None:

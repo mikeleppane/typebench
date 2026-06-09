@@ -8,6 +8,25 @@ startup to every timed run and bias the benchmark. Keep this module stdlib-only.
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import assert_never
+
+
+def _is_measured_success(value: ResultClass) -> bool:
+    """clean and diagnostics are successes; only real failures are excluded.
+    Exhaustive: a new ResultClass member trips assert_never at check time until
+    it is explicitly classified here."""
+    match value:
+        case ResultClass.CLEAN | ResultClass.DIAGNOSTICS:
+            return True
+        case (
+            ResultClass.FAILED_ENV
+            | ResultClass.FAILED_CRASH
+            | ResultClass.FAILED_TIMEOUT
+            | ResultClass.FAILED_OOM
+        ):
+            return False
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 class ResultClass(StrEnum):
@@ -23,7 +42,7 @@ class ResultClass(StrEnum):
     @property
     def is_measured_success(self) -> bool:
         """clean and diagnostics are successes; only real failures are excluded."""
-        return self in (ResultClass.CLEAN, ResultClass.DIAGNOSTICS)
+        return _is_measured_success(self)
 
 
 class ThreadMode(StrEnum):
@@ -31,6 +50,19 @@ class ThreadMode(StrEnum):
 
     CONSTRAINED = "constrained"
     ALL_CORES = "all-cores"
+
+
+def is_constrained(mode: ThreadMode) -> bool:
+    """Single mode->behavior chokepoint. A third ThreadMode member trips
+    assert_never here at check time, forcing every call site to be revisited
+    before this binary predicate can compile again."""
+    match mode:
+        case ThreadMode.CONSTRAINED:
+            return True
+        case ThreadMode.ALL_CORES:
+            return False
+        case _ as unreachable:
+            assert_never(unreachable)
 
 
 class FailurePhase(StrEnum):
@@ -43,3 +75,10 @@ class FailurePhase(StrEnum):
 
     PROBE = "probe"
     TIMING = "timing"
+
+
+class LocDenominator(StrEnum):
+    """Which LOC count the headline kLOC/s used. String values are stable on disk."""
+
+    CODE = "code"  # tokei reconciled code-LOC (blanks + comments excluded)
+    PHYSICAL = "physical"  # fallback physical line count

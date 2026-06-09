@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from typebench.adapters._support import confirm_clean, probe_version
 from typebench.adapters.base import ParallelismCap, coerce_count
 from typebench.contracts.models import ResultClass, ThreadMode
+from typebench.contracts.taxonomy import is_constrained
 from typebench.engine.wrapper import classify_with_map
 
 if TYPE_CHECKING:
@@ -103,7 +104,7 @@ class TyAdapter:
             argv += ["--python", config.venv_python]  # resolve third-party from venv
 
         env: dict[str, str] = {}
-        if thread_mode is ThreadMode.CONSTRAINED:
+        if is_constrained(thread_mode):
             # SOFT cap to the configured core count (ty may still spawn threads).
             env["TY_MAX_PARALLELISM"] = str(config.cores)
         return (argv, env)

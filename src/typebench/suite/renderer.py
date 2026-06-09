@@ -8,7 +8,9 @@ cross-pass (cold-cpu ÷ warm-wall), not a within-run figure.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never
+
+from typebench.contracts.taxonomy import LocDenominator
 
 if TYPE_CHECKING:
     from typebench.contracts.models import ResultsEnvelope, RunResult
@@ -23,13 +25,31 @@ def _peak_mem_mb(record: RunResult) -> str:
     return f"{record.memory.peak_bytes_median / 1_000_000:.1f}"
 
 
+def _code_loc_or_withheld(record: RunResult) -> int | None:
+    """Code-LOC for the headline kLOC/s, or None to WITHHOLD the row.
+
+    The headline column is code-LOC throughput with one denominator shared across
+    tools (the neutrality guarantee). Only the CODE denominator is comparable in
+    that column; a PHYSICAL fallback (tokei absent) or an unknown denominator is a
+    *different* denominator, so it is withheld (rendered —) rather than mislabeled
+    as code. Exhaustive: a new LocDenominator member forces a decision here."""
+    match record.loc_denominator:
+        case LocDenominator.CODE:
+            return record.canonical_code_loc
+        case LocDenominator.PHYSICAL | None:
+            return None
+        case _ as unreachable:
+            assert_never(unreachable)
+
+
 def _kloc_s(record: RunResult) -> str:
     """Headline throughput = canonical code-LOC / wall median. Withheld (—*) for
-    over-reporters (their analyzed set diverges from the canonical denominator).
-    Physical-denominator rows are footnoted by the caller via loc_denominator."""
+    over-reporters (their analyzed set diverges from the canonical denominator) and
+    (—) for physical-fallback / unknown denominators, which are not code-LOC and so
+    are not comparable in this column."""
     if record.over_reports:
         return "—*"
-    loc = record.canonical_code_loc if record.loc_denominator == "code" else record.canonical_loc
+    loc = _code_loc_or_withheld(record)
     if loc is None or record.timing is None or record.timing.median_s <= 0:
         return "—"
     return f"{(loc / 1000) / record.timing.median_s:.1f}"
@@ -115,7 +135,9 @@ def cpu_model_anchors(history: list[ResultsEnvelope]) -> dict[str, float]:
 def _kloc_value(record: RunResult) -> float | None:
     if record.over_reports or record.timing is None or record.timing.median_s <= 0:
         return None
-    loc = record.canonical_code_loc if record.loc_denominator == "code" else record.canonical_loc
+    # Withhold physical-fallback / unknown denominators from the code-LOC trend so
+    # GH Pages never mixes physical-LOC and code-LOC throughput as one metric.
+    loc = _code_loc_or_withheld(record)
     return (loc / 1000) / record.timing.median_s if loc is not None else None
 
 

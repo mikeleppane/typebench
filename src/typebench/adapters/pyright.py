@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from typebench.adapters._support import confirm_clean, probe_version
 from typebench.adapters.base import ParallelismCap, coerce_count
 from typebench.contracts.models import ResultClass, ThreadMode
+from typebench.contracts.taxonomy import is_constrained
 from typebench.engine.wrapper import classify_with_map
 
 if TYPE_CHECKING:
@@ -125,7 +126,7 @@ class PyrightAdapter:
             "--pythonplatform",
             platform,
         ]
-        if thread_mode is ThreadMode.ALL_CORES:
+        if not is_constrained(thread_mode):
             argv.append("--threads")  # bare = auto-parallelism by logical CPUs (pyright docs)
         # CONSTRAINED: omit --threads (default single main thread); affinity is uniform.
         return (argv, {})

@@ -10,7 +10,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from typebench.contracts.models import FailurePhase, MemoryStats, ResultClass, RunResult, ThreadMode
+from typebench.contracts.models import (
+    FailurePhase,
+    LocDenominator,
+    MemoryStats,
+    ResultClass,
+    RunResult,
+    ThreadMode,
+)
+from typebench.contracts.taxonomy import is_constrained
 from typebench.engine import measure
 from typebench.engine.env import detect_env
 from typebench.engine.timing import run_timing
@@ -73,7 +81,7 @@ def _apply_affinity(argv: list[str], thread_mode: ThreadMode, cores: int) -> tup
     first `cores` cores. Returns (argv, enforced). ALL_CORES is unconstrained by design
     (not pinned). enforced is True ONLY when CONSTRAINED AND all N cores are actually
     pinnable; the honesty flag must never claim a pin we could not apply."""
-    if thread_mode is ThreadMode.CONSTRAINED and _taskset_available(cores):
+    if is_constrained(thread_mode) and _taskset_available(cores):
         return (["taskset", "-c", _affinity_spec(cores), *argv], True)
     return (argv, False)
 
@@ -101,9 +109,9 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
     loc_denominator = (
         None
         if man.canonical_files is None
-        else "code"
+        else LocDenominator.CODE
         if man.canonical_code_loc is not None
-        else "physical"
+        else LocDenominator.PHYSICAL
     )
     adapter.clear_cache(project)
     # Run-scoped workdir for any adapter-generated tool config; it must outlive
@@ -149,7 +157,7 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
         # + pinned core count ONLY when affinity actually ran. On CONSTRAINED
         # without taskset (mac/dev) or on ALL_CORES, record neither; never claim a
         # pin we did not apply.
-        record_cap = thread_mode is ThreadMode.CONSTRAINED and thread_enforced
+        record_cap = is_constrained(thread_mode) and thread_enforced
         hard_cap = cap.hard_cap if record_cap else None
         cap_mechanism = cap.mechanism if record_cap else None
         cores = config.cores if record_cap else None

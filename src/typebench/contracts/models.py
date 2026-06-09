@@ -8,12 +8,13 @@ from pydantic import BaseModel, ConfigDict
 # exit-code wrapper (hyperfine's per-run command) can import them without paying
 # pydantic's import cost on every timed run. Re-exported here for the stable
 # `typebench.contracts.models` import path the rest of the package and tests use.
-from typebench.contracts.taxonomy import FailurePhase, ResultClass, ThreadMode
+from typebench.contracts.taxonomy import FailurePhase, LocDenominator, ResultClass, ThreadMode
 
 __all__ = [
     "CalibrationStats",
     "EnvFingerprint",
     "FailurePhase",
+    "LocDenominator",
     "MemoryStats",
     "PreflightReport",
     "PreparedProject",
@@ -172,7 +173,7 @@ class RunResult(BaseModel):
     canonical_files: int | None = None
     canonical_loc: int | None = None
     canonical_code_loc: int | None = None
-    loc_denominator: str | None = None  # "code" | "physical"
+    loc_denominator: LocDenominator | None = None  # "code" | "physical" on disk
     # From preflight: self-reported files > canonical -> withhold/caveat kLOC/s.
     over_reports: bool | None = None
 

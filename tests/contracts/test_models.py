@@ -8,6 +8,7 @@ from typebench.contracts.models import (
     CalibrationStats,
     EnvFingerprint,
     FailurePhase,
+    LocDenominator,
     MemoryStats,
     ResultClass,
     ResultsEnvelope,
@@ -281,10 +282,68 @@ def test_run_result_enrichment_scalars_default_none_and_round_trip(make_env: Env
         canonical_files=23,
         canonical_loc=4000,
         canonical_code_loc=3200,
-        loc_denominator="code",
+        loc_denominator=LocDenominator.CODE,
         over_reports=False,
     )
     assert RunResult.model_validate_json(rich.model_dump_json()) == rich
+
+
+@pytest.mark.parametrize(
+    ("denominator", "expected_json"),
+    [
+        (LocDenominator.CODE, "code"),
+        (LocDenominator.PHYSICAL, "physical"),
+        (None, None),
+    ],
+)
+def test_loc_denominator_serializes_to_stable_strings(
+    make_env: EnvFactory,
+    denominator: LocDenominator | None,
+    expected_json: str | None,
+) -> None:
+    rec = RunResult(
+        tool="mypy",
+        tool_version="1.0",
+        project="httpx",
+        thread_mode=ThreadMode.ALL_CORES,
+        result_class=ResultClass.CLEAN,
+        real_exit_code=0,
+        env=make_env(),
+        loc_denominator=denominator,
+    )
+    dumped = json.loads(rec.model_dump_json())
+    assert dumped["loc_denominator"] == expected_json
+    assert RunResult.model_validate_json(rec.model_dump_json()) == rec
+
+
+def test_loc_denominator_coerces_on_disk_strings(make_env: EnvFactory) -> None:
+    # The on-disk string coerces back to the enum: byte-identical contract.
+    payload = {
+        "tool": "mypy",
+        "tool_version": "1.0",
+        "project": "httpx",
+        "thread_mode": "all-cores",
+        "result_class": "clean",
+        "real_exit_code": 0,
+        "env": make_env().model_dump(),
+        "loc_denominator": "code",
+    }
+    assert RunResult.model_validate(payload).loc_denominator is LocDenominator.CODE
+
+
+def test_loc_denominator_rejects_out_of_domain(make_env: EnvFactory) -> None:
+    payload = {
+        "tool": "mypy",
+        "tool_version": "1.0",
+        "project": "httpx",
+        "thread_mode": "all-cores",
+        "result_class": "clean",
+        "real_exit_code": 0,
+        "env": make_env().model_dump(),
+        "loc_denominator": "lines",  # not code|physical
+    }
+    with pytest.raises(ValidationError):
+        RunResult.model_validate(payload)
 
 
 def test_results_envelope_wraps_records(make_env: EnvFactory) -> None:

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 from typebench.adapters._support import confirm_clean, probe_version
 from typebench.adapters.base import ParallelismCap
 from typebench.contracts.models import ResultClass, ThreadMode
+from typebench.contracts.taxonomy import is_constrained
 from typebench.engine.wrapper import universal_failure_prefix
 
 if TYPE_CHECKING:
@@ -97,9 +98,7 @@ class MypyAdapter:
         CPU. Returns the raw count; the caller only emits the flag when it is > 1
         (1 == single-process == mypy's default, so passing -n1 would only add
         parallel-runtime overhead for no benefit)."""
-        if thread_mode is ThreadMode.CONSTRAINED:
-            return cores
-        return os.cpu_count() or 1
+        return cores if is_constrained(thread_mode) else (os.cpu_count() or 1)
 
     def command(
         self,

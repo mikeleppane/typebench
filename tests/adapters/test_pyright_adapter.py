@@ -102,6 +102,14 @@ def test_command_derives_venv_path_layout(tmp_path: Path) -> None:
     assert written["venv"] == ".venv"
 
 
+def test_pyright_threads_only_on_all_cores(tmp_path: Path) -> None:
+    cfg = NormalizedConfig(src_roots=("/abs/src",))
+    constrained, _ = PyrightAdapter().command("demo", cfg, ThreadMode.CONSTRAINED, tmp_path)
+    all_cores, _ = PyrightAdapter().command("demo", cfg, ThreadMode.ALL_CORES, tmp_path)
+    assert "--threads" not in constrained
+    assert "--threads" in all_cores
+
+
 def test_command_venv_layout_does_not_follow_bin_python_symlink(tmp_path: Path) -> None:
     # Regression: a REAL venv's bin/python is a symlink to the base interpreter.
     # The adapter must derive venvPath/venv LEXICALLY (parent.parent), never via

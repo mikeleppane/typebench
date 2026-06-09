@@ -13,6 +13,7 @@ from typebench.contracts.models import (
     ThreadMode,
     TimingStats,
 )
+from typebench.contracts.taxonomy import LocDenominator
 
 type EnvFactory = Callable[..., EnvFingerprint]
 
@@ -37,7 +38,7 @@ def _envelope_file(path: Path, gen: str, make_env: EnvFactory) -> None:
             times_s=[1.0],
         ),
         canonical_code_loc=3200,
-        loc_denominator="code",
+        loc_denominator=LocDenominator.CODE,
         env=make_env(cpu_model="CPU-A"),
     )
     env = ResultsEnvelope(suite_version="2026-06-08", generated_at=gen, runs=[rec])

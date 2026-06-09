@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from typebench.adapters._support import confirm_clean, probe_version
 from typebench.adapters.base import ParallelismCap, coerce_count
 from typebench.contracts.models import ResultClass, ThreadMode
+from typebench.contracts.taxonomy import is_constrained
 from typebench.engine.wrapper import universal_failure_prefix
 
 if TYPE_CHECKING:
@@ -92,7 +93,7 @@ class PyreflyAdapter:
             "json",
             "--summary=full",  # emits "N modules" on stderr (the files source)
         ]
-        if thread_mode is ThreadMode.CONSTRAINED:
+        if is_constrained(thread_mode):
             argv += ["--threads", str(config.cores)]  # HARD cap (rayon pool = N)
         return (argv, {})
 
