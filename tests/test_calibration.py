@@ -6,7 +6,7 @@ import pytest
 
 import typebench.calibration as cal
 from typebench.calibration import ITERATIONS, WORKLOAD_ID, calibrate
-from typebench.models import CalibrationStats
+from typebench.contracts.models import CalibrationStats
 
 
 def test_calibrate_returns_stats(monkeypatch: pytest.MonkeyPatch) -> None:

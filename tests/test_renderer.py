@@ -1,7 +1,6 @@
 from typing import cast
 
-from typebench.env import EnvFingerprint
-from typebench.models import (
+from typebench.contracts.models import (
     CalibrationStats,
     MemoryStats,
     ResultClass,
@@ -10,6 +9,7 @@ from typebench.models import (
     ThreadMode,
     TimingStats,
 )
+from typebench.env import EnvFingerprint
 from typebench.renderer import build_trends, cpu_model_anchors, render_readme
 
 

@@ -10,11 +10,11 @@ from pathlib import Path  # runtime: used to derive venvPath (not annotation-onl
 from typing import TYPE_CHECKING
 
 from typebench.adapters.base import ParallelismCap, coerce_count
-from typebench.models import ResultClass, ThreadMode
+from typebench.contracts.models import ResultClass, ThreadMode
 from typebench.wrapper import classify_with_map
 
 if TYPE_CHECKING:
-    from typebench.normalized_config import NormalizedConfig
+    from typebench.contracts.config import NormalizedConfig
     from typebench.wrapper import RawRun
 
 # Exit codes (research doc): 0 clean, 1 errors, 2 fatal, 3 config, 4 bad-CLI/missing-path.

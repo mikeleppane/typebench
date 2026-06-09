@@ -4,8 +4,8 @@ import pytest
 
 from typebench.adapters.base import Adapter
 from typebench.adapters.stub import StubAdapter
-from typebench.models import ResultClass, ThreadMode
-from typebench.normalized_config import NormalizedConfig
+from typebench.contracts.config import NormalizedConfig
+from typebench.contracts.models import ResultClass, ThreadMode
 from typebench.wrapper import RawRun, classify_with_map, run_command
 
 
@@ -55,7 +55,7 @@ def test_stub_clear_cache_and_prepare_are_noops() -> None:
 
 @pytest.mark.parametrize("bad_output", ["5", "[1, 2, 3]", "null", "not json at all", ""])
 def test_stub_parse_is_graceful_on_non_object_output(bad_output: str) -> None:
-    # Valid-but-non-object JSON, unparseable text, and empty output must all
+    # Valid-but-non-object JSON, unparsable text, and empty output must all
     # degrade to (None, None) rather than raising (real checkers print arbitrary
     # trailing lines). This is the template real adapters copy.
     assert StubAdapter().parse(bad_output, "", 0) == (None, None)

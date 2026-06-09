@@ -10,15 +10,15 @@ from typebench.adapters.mypy import MypyAdapter
 from typebench.adapters.pyrefly import PyreflyAdapter
 from typebench.adapters.pyright import PyrightAdapter
 from typebench.adapters.ty import TyAdapter
-from typebench.counting import count_first_party
-from typebench.models import (
+from typebench.contracts.config import DEFAULT_EXCLUDES, NormalizedConfig
+from typebench.contracts.models import (
     PreflightReport,
     PreparedProject,
     ResultClass,
     ThreadMode,
     ToolPreflight,
 )
-from typebench.normalized_config import DEFAULT_EXCLUDES, NormalizedConfig
+from typebench.counting import count_first_party
 from typebench.preflight import preflight_project
 from typebench.wrapper import RawRun
 

@@ -12,13 +12,13 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from typebench.adapters.base import ParallelismCap, coerce_count
-from typebench.models import ResultClass, ThreadMode
+from typebench.contracts.models import ResultClass, ThreadMode
 from typebench.wrapper import universal_failure_prefix
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from typebench.normalized_config import NormalizedConfig
+    from typebench.contracts.config import NormalizedConfig
     from typebench.wrapper import RawRun
 
 _MODULES_RE = re.compile(r"(\d+) modules?")  # singular "1 module" is real output

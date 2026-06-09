@@ -7,9 +7,9 @@ import pytest
 from typebench import collector, measure
 from typebench.adapters.stub import StubAdapter
 from typebench.collector import RunManifest, run_single
+from typebench.contracts.config import NormalizedConfig
+from typebench.contracts.models import FailurePhase, ResultClass, ThreadMode, TimingStats
 from typebench.measure import MemorySummary, ResourceResult
-from typebench.models import FailurePhase, ResultClass, ThreadMode, TimingStats
-from typebench.normalized_config import NormalizedConfig
 from typebench.wrapper import RawRun
 
 

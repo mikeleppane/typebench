@@ -20,8 +20,8 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import ValidationError
 
+from typebench.contracts.models import PreparedProject
 from typebench.counting import count_code_loc, count_first_party, first_party_files
-from typebench.models import PreparedProject
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

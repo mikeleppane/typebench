@@ -10,13 +10,13 @@ import subprocess
 from typing import TYPE_CHECKING
 
 from typebench.adapters.base import ParallelismCap, coerce_count
-from typebench.models import ResultClass, ThreadMode
+from typebench.contracts.models import ResultClass, ThreadMode
 from typebench.wrapper import classify_with_map
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from typebench.normalized_config import NormalizedConfig
+    from typebench.contracts.config import NormalizedConfig
     from typebench.wrapper import RawRun
 
 _FOUND_RE = re.compile(r"Found (\d+) diagnostics?")

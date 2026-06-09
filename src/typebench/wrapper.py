@@ -11,7 +11,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 
-from typebench.taxonomy import ResultClass
+from typebench.contracts.taxonomy import ResultClass
 
 # OOM-killer signal. A bare SIGKILL is the OOM heuristic on the FALLBACK (non-
 # cgroup) probe path. The cgroup-scoped resource pass (typebench.measure, Plan 4)

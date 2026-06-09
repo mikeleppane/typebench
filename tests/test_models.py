@@ -3,7 +3,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from typebench.models import (
+from typebench.contracts.models import (
     CalibrationStats,
     EnvFingerprint,
     FailurePhase,

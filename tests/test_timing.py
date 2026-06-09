@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 
 from typebench.adapters.stub import StubAdapter
-from typebench.models import ThreadMode, TimingStats
-from typebench.normalized_config import NormalizedConfig
+from typebench.contracts.config import NormalizedConfig
+from typebench.contracts.models import ThreadMode, TimingStats
 from typebench.timing import parse_hyperfine_json, run_timing
 
 

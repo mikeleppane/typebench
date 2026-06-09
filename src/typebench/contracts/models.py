@@ -7,8 +7,8 @@ from pydantic import BaseModel, ConfigDict
 # ResultClass / ThreadMode / FailurePhase live in a pydantic-free module so the
 # exit-code wrapper (hyperfine's per-run command) can import them without paying
 # pydantic's import cost on every timed run. Re-exported here for the stable
-# `typebench.models` import path the rest of the package and tests use.
-from typebench.taxonomy import FailurePhase, ResultClass, ThreadMode
+# `typebench.contracts.models` import path the rest of the package and tests use.
+from typebench.contracts.taxonomy import FailurePhase, ResultClass, ThreadMode
 
 __all__ = [
     "CalibrationStats",

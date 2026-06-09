@@ -2,7 +2,7 @@ import dataclasses
 
 import pytest
 
-from typebench.normalized_config import NORMALIZED_POLICY_VERSION, NormalizedConfig, config_hash
+from typebench.contracts.config import NORMALIZED_POLICY_VERSION, NormalizedConfig, config_hash
 
 
 def test_defaults_are_neutral() -> None:

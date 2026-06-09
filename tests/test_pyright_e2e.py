@@ -5,7 +5,7 @@ import pytest
 from typer.testing import CliRunner
 
 from typebench.cli import app
-from typebench.models import ResultClass, RunResult
+from typebench.contracts.models import ResultClass, RunResult
 
 runner = CliRunner()
 _HAS = shutil.which("pyright") is not None and shutil.which("hyperfine") is not None

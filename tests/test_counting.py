@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 
 from typebench import counting
+from typebench.contracts.config import DEFAULT_EXCLUDES
 from typebench.counting import count_code_loc, count_first_party, first_party_files
-from typebench.normalized_config import DEFAULT_EXCLUDES
 
 
 def _write(path: Path, text: str) -> None:

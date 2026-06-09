@@ -4,8 +4,14 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from typebench.cli import app
+from typebench.contracts.models import (
+    ResultClass,
+    ResultsEnvelope,
+    RunResult,
+    ThreadMode,
+    TimingStats,
+)
 from typebench.env import EnvFingerprint
-from typebench.models import ResultClass, ResultsEnvelope, RunResult, ThreadMode, TimingStats
 
 runner = CliRunner()
 

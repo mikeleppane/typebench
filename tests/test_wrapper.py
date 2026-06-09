@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from typebench.models import ResultClass
+from typebench.contracts.models import ResultClass
 from typebench.wrapper import RawRun, classify_default, run_command, universal_failure_prefix
 
 

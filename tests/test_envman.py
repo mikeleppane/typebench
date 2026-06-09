@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from typebench import envman
+from typebench.contracts.models import PreparedProject
 from typebench.corpus import CorpusProject, SizeBucket
 from typebench.envman import (
     _SIDECAR,
@@ -21,7 +22,6 @@ from typebench.envman import (
     prepare_project,
     run_subprocess,
 )
-from typebench.models import PreparedProject
 
 
 class _FakeRunner:

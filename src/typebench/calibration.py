@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     # runtime (the import-guard test asserts this) while letting pyrefly resolve the
     # `calibrate` return type. The real construction import is lazy, inside
     # calibrate(), so the runtime import graph never pulls pydantic.
-    from typebench.models import CalibrationStats
+    from typebench.contracts.models import CalibrationStats
 
 # Locked workload identity. Bump the version suffix if the loop body or ITERATIONS
 # changes — trend continuity depends on a stable workload.
@@ -55,7 +55,7 @@ def calibrate(runs: int = 5) -> CalibrationStats:
         raise ValueError(f"calibration runs must be >= 1, got {runs}")
     # Lazy import keeps `import typebench.calibration` pydantic-free (guard test);
     # only an actual calibrate() call pays pydantic's import cost.
-    from typebench.models import CalibrationStats  # noqa: PLC0415
+    from typebench.contracts.models import CalibrationStats  # noqa: PLC0415
 
     samples: list[float] = []
     for _ in range(runs):

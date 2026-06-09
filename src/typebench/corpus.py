@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from typebench.normalized_config import DEFAULT_EXCLUDES
+from typebench.contracts.config import DEFAULT_EXCLUDES
 
 if TYPE_CHECKING:
     from pathlib import Path

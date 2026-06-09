@@ -9,8 +9,8 @@ from typebench.adapters import pyright as pyright_mod
 from typebench.adapters.base import Adapter
 from typebench.adapters.pyright import PyrightAdapter
 from typebench.collector import run_single
-from typebench.models import ResultClass, RunResult, ThreadMode
-from typebench.normalized_config import NormalizedConfig
+from typebench.contracts.config import NormalizedConfig
+from typebench.contracts.models import ResultClass, RunResult, ThreadMode
 from typebench.wrapper import RawRun, run_command
 
 # Fixtures live at the REPO ROOT (../fixtures), not tests/fixtures.
@@ -59,7 +59,7 @@ def test_classify_zero_files_on_exit0_is_env_failure() -> None:
     assert PyrightAdapter().classify(raw) == ResultClass.FAILED_ENV
 
 
-def test_classify_unparseable_output_on_exit0_is_env_failure() -> None:
+def test_classify_unparsable_output_on_exit0_is_env_failure() -> None:
     # exit 0 but --outputjson is unparsable (or dropped summary.filesAnalyzed):
     # parse() -> (None, None). A CLEAN we cannot confirm is a false-clean; promote
     # to failed{env} (record-honesty, §7/§12). Regression for the files-is-None gap.

@@ -8,8 +8,8 @@ from typebench.adapters.mypy import MypyAdapter
 from typebench.adapters.pyrefly import PyreflyAdapter
 from typebench.adapters.pyright import PyrightAdapter
 from typebench.adapters.ty import TyAdapter
-from typebench.models import ResultClass, ThreadMode
-from typebench.normalized_config import NormalizedConfig
+from typebench.contracts.config import NormalizedConfig
+from typebench.contracts.models import ResultClass, ThreadMode
 from typebench.wrapper import run_command
 
 _FIXTURES = Path(__file__).parent.parent / "fixtures"

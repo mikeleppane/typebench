@@ -3,9 +3,7 @@ from pathlib import Path
 import pytest
 
 from typebench.adapters.stub import StubAdapter
-from typebench.corpus import CorpusProject, SizeBucket
-from typebench.env import detect_env
-from typebench.models import (
+from typebench.contracts.models import (
     CalibrationStats,
     PreflightReport,
     PreparedProject,
@@ -15,6 +13,8 @@ from typebench.models import (
     ThreadMode,
     ToolPreflight,
 )
+from typebench.corpus import CorpusProject, SizeBucket
+from typebench.env import detect_env
 from typebench.suite import SuiteCell, build_matrix, run_suite, shard
 
 

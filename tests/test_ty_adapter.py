@@ -9,8 +9,8 @@ from typebench.adapters import ty as ty_mod
 from typebench.adapters.base import Adapter
 from typebench.adapters.ty import TyAdapter
 from typebench.collector import run_single
-from typebench.models import ResultClass, RunResult, ThreadMode
-from typebench.normalized_config import NormalizedConfig
+from typebench.contracts.config import NormalizedConfig
+from typebench.contracts.models import ResultClass, RunResult, ThreadMode
 from typebench.wrapper import RawRun, run_command
 
 _FIXTURES = Path(__file__).parent.parent / "fixtures"

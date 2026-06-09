@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from typebench import env
-from typebench.models import EnvFingerprint
+from typebench.contracts.models import EnvFingerprint
 
 
 def test_detect_env_returns_populated_fingerprint() -> None:

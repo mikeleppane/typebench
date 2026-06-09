@@ -13,8 +13,8 @@ from typebench.adapters.base import ParallelismCap, coerce_count, default_classi
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from typebench.models import ResultClass, ThreadMode
-    from typebench.normalized_config import NormalizedConfig
+    from typebench.contracts.config import NormalizedConfig
+    from typebench.contracts.models import ResultClass, ThreadMode
     from typebench.wrapper import RawRun
 
 

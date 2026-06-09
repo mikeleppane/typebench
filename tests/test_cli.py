@@ -6,8 +6,8 @@ from typer.testing import CliRunner, Result
 from typebench import cli
 from typebench.cli import app
 from typebench.collector import RunManifest
-from typebench.corpus import CorpusProject
-from typebench.models import (
+from typebench.contracts.config import NormalizedConfig
+from typebench.contracts.models import (
     CalibrationStats,
     EnvFingerprint,
     PreparedProject,
@@ -16,7 +16,7 @@ from typebench.models import (
     RunResult,
     ThreadMode,
 )
-from typebench.normalized_config import NormalizedConfig
+from typebench.corpus import CorpusProject
 
 runner = CliRunner()
 

@@ -7,8 +7,8 @@ from typebench.adapters import mypy as mypy_mod
 from typebench.adapters.base import Adapter
 from typebench.adapters.mypy import MypyAdapter
 from typebench.collector import run_single
-from typebench.models import ResultClass, RunResult, ThreadMode
-from typebench.normalized_config import NormalizedConfig
+from typebench.contracts.config import NormalizedConfig
+from typebench.contracts.models import ResultClass, RunResult, ThreadMode
 from typebench.wrapper import RawRun, run_command
 
 _FIXTURES = Path(__file__).parent.parent / "fixtures"

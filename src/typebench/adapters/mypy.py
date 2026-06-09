@@ -14,11 +14,11 @@ from pathlib import Path  # runtime: used to build the parallel cache dir path
 from typing import TYPE_CHECKING
 
 from typebench.adapters.base import ParallelismCap
-from typebench.models import ResultClass, ThreadMode
+from typebench.contracts.models import ResultClass, ThreadMode
 from typebench.wrapper import universal_failure_prefix
 
 if TYPE_CHECKING:
-    from typebench.normalized_config import NormalizedConfig
+    from typebench.contracts.config import NormalizedConfig
     from typebench.wrapper import RawRun
 
 # Text summaries (research doc). errors+files, and the clean form.

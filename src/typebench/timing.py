@@ -13,7 +13,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from typebench.models import TimingStats
+from typebench.contracts.models import TimingStats
 
 
 def parse_hyperfine_json(data: dict[str, Any]) -> TimingStats:

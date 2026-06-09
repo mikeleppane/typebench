@@ -7,7 +7,7 @@ import platform
 import subprocess
 from pathlib import Path
 
-from typebench.models import EnvFingerprint
+from typebench.contracts.models import EnvFingerprint
 
 _MEMINFO = Path("/proc/meminfo")
 _CGROUP_CONTROLLERS = Path("/sys/fs/cgroup/cgroup.controllers")

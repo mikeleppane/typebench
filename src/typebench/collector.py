@@ -11,15 +11,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from typebench import measure
+from typebench.contracts.models import FailurePhase, MemoryStats, ResultClass, RunResult, ThreadMode
 from typebench.env import detect_env
-from typebench.models import FailurePhase, MemoryStats, ResultClass, RunResult, ThreadMode
 from typebench.timing import run_timing
 from typebench.wrapper import run_command
 
 if TYPE_CHECKING:
     from typebench.adapters.base import Adapter
-    from typebench.models import CalibrationStats
-    from typebench.normalized_config import NormalizedConfig
+    from typebench.contracts.config import NormalizedConfig
+    from typebench.contracts.models import CalibrationStats
 
 
 @dataclass(frozen=True)

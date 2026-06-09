@@ -9,11 +9,17 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from typebench.collector import RunManifest, run_single
+from typebench.contracts.config import NormalizedConfig, config_hash
+from typebench.contracts.models import (
+    FailurePhase,
+    PreflightReport,
+    ResultClass,
+    ResultsEnvelope,
+    RunResult,
+)
 from typebench.corpus import load_suite, load_suite_version
 from typebench.env import detect_env
 from typebench.envman import prepare_project
-from typebench.models import FailurePhase, PreflightReport, ResultClass, ResultsEnvelope, RunResult
-from typebench.normalized_config import NormalizedConfig, config_hash
 from typebench.preflight import preflight_project
 
 if TYPE_CHECKING:
@@ -22,8 +28,8 @@ if TYPE_CHECKING:
 
     from typebench.adapters.base import Adapter
     from typebench.calibration import CalibrationStats
+    from typebench.contracts.models import PreparedProject, ThreadMode
     from typebench.corpus import CorpusProject
-    from typebench.models import PreparedProject, ThreadMode
 
 
 @dataclass(frozen=True)
