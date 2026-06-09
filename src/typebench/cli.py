@@ -20,11 +20,11 @@ from typebench.adapters.pyrefly import PyreflyAdapter
 from typebench.adapters.pyright import PyrightAdapter
 from typebench.adapters.stub import StubAdapter
 from typebench.adapters.ty import TyAdapter
-from typebench.calibration import calibrate
-from typebench.collector import RunManifest, run_single
 from typebench.contracts.config import DEFAULT_EXCLUDES, NormalizedConfig, config_hash
 from typebench.contracts.models import ResultsEnvelope, ThreadMode
 from typebench.corpus import load_suite
+from typebench.engine.calibration import calibrate
+from typebench.engine.collector import RunManifest, run_single
 from typebench.envman import PrepareError, prepare_project
 from typebench.preflight import preflight_project
 from typebench.renderer import build_trends, render_readme

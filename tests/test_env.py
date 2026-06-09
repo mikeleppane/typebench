@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from typebench import env
 from typebench.contracts.models import EnvFingerprint
+from typebench.engine import env
 
 
 def test_detect_env_returns_populated_fingerprint() -> None:

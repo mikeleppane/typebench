@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from typebench.contracts.config import NormalizedConfig
 from typebench.contracts.models import PreflightReport, ResultClass, ThreadMode, ToolPreflight
-from typebench.wrapper import RawRun, run_command
+from typebench.engine.wrapper import RawRun, run_command
 
 if TYPE_CHECKING:
     from typebench.adapters.base import Adapter

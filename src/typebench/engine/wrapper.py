@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from typebench.contracts.taxonomy import ResultClass
 
 # OOM-killer signal. A bare SIGKILL is the OOM heuristic on the FALLBACK (non-
-# cgroup) probe path. The cgroup-scoped resource pass (typebench.measure, Plan 4)
+# cgroup) probe path. The cgroup-scoped resource pass (typebench.engine.measure, Plan 4)
 # sets RawRun.oom authoritatively from memory.events.oom_kill when available.
 _SIGKILL = 9
 
@@ -147,11 +147,11 @@ def classify_default(raw: RawRun) -> ResultClass:
 def main(raw_args: list[str] | None = None) -> int:
     """CLI entrypoint used as hyperfine's command. Usage:
 
-        python -m typebench.wrapper --timeout SECONDS -- <argv...>
+        python -m typebench.engine.wrapper --timeout SECONDS -- <argv...>
 
     Exits 0 for measured-success (clean/diagnostics), 1 for any failure class.
     The real command's stdout/stderr are forwarded so output stays visible."""
-    parser = argparse.ArgumentParser(prog="typebench.wrapper")
+    parser = argparse.ArgumentParser(prog="typebench.engine.wrapper")
     parser.add_argument("--timeout", type=float, required=True)
     parser.add_argument("argv", nargs=argparse.REMAINDER)
     ns = parser.parse_args(raw_args)

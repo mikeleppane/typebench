@@ -11,13 +11,13 @@ from typing import TYPE_CHECKING
 
 from typebench.adapters.base import ParallelismCap, coerce_count
 from typebench.contracts.models import ResultClass, ThreadMode
-from typebench.wrapper import classify_with_map
+from typebench.engine.wrapper import classify_with_map
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from typebench.contracts.config import NormalizedConfig
-    from typebench.wrapper import RawRun
+    from typebench.engine.wrapper import RawRun
 
 _FOUND_RE = re.compile(r"Found (\d+) diagnostics?")
 _INDEXED_RE = re.compile(r"Indexed (\d+) file\(s\)")

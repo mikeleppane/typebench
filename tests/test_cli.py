@@ -5,7 +5,6 @@ from typer.testing import CliRunner, Result
 
 from typebench import cli
 from typebench.cli import app
-from typebench.collector import RunManifest
 from typebench.contracts.config import NormalizedConfig
 from typebench.contracts.models import (
     CalibrationStats,
@@ -17,6 +16,7 @@ from typebench.contracts.models import (
     ThreadMode,
 )
 from typebench.corpus import CorpusProject
+from typebench.engine.collector import RunManifest
 
 runner = CliRunner()
 

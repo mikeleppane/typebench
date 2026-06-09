@@ -8,10 +8,10 @@ import pytest
 from typebench.adapters import pyright as pyright_mod
 from typebench.adapters.base import Adapter
 from typebench.adapters.pyright import PyrightAdapter
-from typebench.collector import run_single
 from typebench.contracts.config import NormalizedConfig
 from typebench.contracts.models import ResultClass, RunResult, ThreadMode
-from typebench.wrapper import RawRun, run_command
+from typebench.engine.collector import run_single
+from typebench.engine.wrapper import RawRun, run_command
 
 # Fixtures live at the REPO ROOT (../fixtures), not tests/fixtures.
 _FIXTURES = Path(__file__).parent.parent / "fixtures"

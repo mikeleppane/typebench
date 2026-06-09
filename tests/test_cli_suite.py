@@ -6,7 +6,7 @@ from typer.testing import CliRunner
 from typebench import cli
 from typebench.cli import app
 from typebench.contracts.models import ResultClass, ResultsEnvelope, RunResult, ThreadMode
-from typebench.env import detect_env
+from typebench.engine.env import detect_env
 
 runner = CliRunner()
 

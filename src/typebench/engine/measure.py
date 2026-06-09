@@ -2,7 +2,7 @@
 cgroup v2 scope, plus real cgroup OOM detection. Deliberately pydantic-free: the
 in-scope wrapper runs as a child process and reuses the (also pydantic-free)
 exit-code wrapper; importing pydantic here would add startup cost to every scoped
-run. Stays stdlib-only + `typebench.wrapper`."""
+run. Stays stdlib-only + `typebench.engine.wrapper`."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from typebench.wrapper import RawRun, run_command, universal_failure_prefix
+from typebench.engine.wrapper import RawRun, run_command, universal_failure_prefix
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -234,7 +234,7 @@ def scoped_probe(
                     "--",
                     sys.executable,
                     "-m",
-                    "typebench.measure",
+                    "typebench.engine.measure",
                     "--out",
                     str(out_path),
                     "--timeout",
@@ -310,14 +310,14 @@ def scoped_probe(
 
 def main(raw_args: list[str] | None = None) -> int:
     """In-scope wrapper. Run as `systemd-run --user --scope -- python -m
-    typebench.measure --out FILE --timeout S -- <argv>`. Runs the checker to
+    typebench.engine.measure --out FILE --timeout S -- <argv>`. Runs the checker to
     completion, then — WHILE STILL INSIDE THE SCOPE (§5.5 read-before-teardown) —
     reads its own cgroup and writes a JSON payload (outcome + cgroup sample) to
     --out. Always exits 0 so systemd-run sees success; the real outcome is in the
     payload. The checker output is captured by run_command (bounded diagnostics
     text), and this Python process's small footprint is a ~constant per-tool
     baseline charged to the scope (Decision F)."""
-    parser = argparse.ArgumentParser(prog="typebench.measure")
+    parser = argparse.ArgumentParser(prog="typebench.engine.measure")
     parser.add_argument("--out", required=True)
     parser.add_argument("--timeout", type=float, required=True)
     parser.add_argument("argv", nargs=argparse.REMAINDER)

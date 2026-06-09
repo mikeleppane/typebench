@@ -12,14 +12,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from typebench.wrapper import classify_default
+from typebench.engine.wrapper import classify_default
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from typebench.contracts.config import NormalizedConfig
     from typebench.contracts.models import ResultClass, ThreadMode
-    from typebench.wrapper import RawRun
+    from typebench.engine.wrapper import RawRun
 
 
 @dataclass(frozen=True)

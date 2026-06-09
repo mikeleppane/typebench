@@ -6,7 +6,7 @@ import pytest
 from typebench.adapters.stub import StubAdapter
 from typebench.contracts.config import NormalizedConfig
 from typebench.contracts.models import ThreadMode, TimingStats
-from typebench.timing import parse_hyperfine_json, run_timing
+from typebench.engine.timing import parse_hyperfine_json, run_timing
 
 
 def test_parse_hyperfine_json_builds_timing_stats() -> None:

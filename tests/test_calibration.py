@@ -4,9 +4,9 @@ import time
 
 import pytest
 
-import typebench.calibration as cal
-from typebench.calibration import ITERATIONS, WORKLOAD_ID, calibrate
+import typebench.engine.calibration as cal
 from typebench.contracts.models import CalibrationStats
+from typebench.engine.calibration import ITERATIONS, WORKLOAD_ID, calibrate
 
 
 def test_calibrate_returns_stats(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -39,7 +39,7 @@ def test_calibrate_rejects_zero_runs() -> None:
 
 def test_calibration_import_does_not_pull_pydantic() -> None:
     code = (
-        "import sys, typebench.calibration\n"
+        "import sys, typebench.engine.calibration\n"
         "print(','.join(sorted(m for m in sys.modules if m.split('.')[0]=='pydantic')))\n"
     )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)

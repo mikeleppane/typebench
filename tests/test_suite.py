@@ -14,7 +14,7 @@ from typebench.contracts.models import (
     ToolPreflight,
 )
 from typebench.corpus import CorpusProject, SizeBucket
-from typebench.env import detect_env
+from typebench.engine.env import detect_env
 from typebench.suite import SuiteCell, build_matrix, run_suite, shard
 
 

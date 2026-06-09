@@ -15,11 +15,11 @@ from typing import TYPE_CHECKING
 
 from typebench.adapters.base import ParallelismCap
 from typebench.contracts.models import ResultClass, ThreadMode
-from typebench.wrapper import universal_failure_prefix
+from typebench.engine.wrapper import universal_failure_prefix
 
 if TYPE_CHECKING:
     from typebench.contracts.config import NormalizedConfig
-    from typebench.wrapper import RawRun
+    from typebench.engine.wrapper import RawRun
 
 # Text summaries (research doc). errors+files, and the clean form.
 _FOUND_RE = re.compile(r"Found (\d+) errors? in \d+ files? \(checked (\d+) source files?\)")

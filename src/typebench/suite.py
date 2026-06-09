@@ -8,7 +8,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from typebench.collector import RunManifest, run_single
 from typebench.contracts.config import NormalizedConfig, config_hash
 from typebench.contracts.models import (
     FailurePhase,
@@ -18,7 +17,8 @@ from typebench.contracts.models import (
     RunResult,
 )
 from typebench.corpus import load_suite, load_suite_version
-from typebench.env import detect_env
+from typebench.engine.collector import RunManifest, run_single
+from typebench.engine.env import detect_env
 from typebench.envman import prepare_project
 from typebench.preflight import preflight_project
 
@@ -27,9 +27,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from typebench.adapters.base import Adapter
-    from typebench.calibration import CalibrationStats
     from typebench.contracts.models import PreparedProject, ThreadMode
     from typebench.corpus import CorpusProject
+    from typebench.engine.calibration import CalibrationStats
 
 
 @dataclass(frozen=True)

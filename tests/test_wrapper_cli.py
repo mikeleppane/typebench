@@ -4,7 +4,7 @@ import sys
 
 def _run_wrapper(inner_argv: list[str], timeout: str = "10") -> int:
     return subprocess.run(
-        [sys.executable, "-m", "typebench.wrapper", "--timeout", timeout, "--", *inner_argv],
+        [sys.executable, "-m", "typebench.engine.wrapper", "--timeout", timeout, "--", *inner_argv],
         capture_output=True,
         text=True,
         check=False,

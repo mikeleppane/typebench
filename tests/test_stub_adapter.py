@@ -6,7 +6,7 @@ from typebench.adapters.base import Adapter
 from typebench.adapters.stub import StubAdapter
 from typebench.contracts.config import NormalizedConfig
 from typebench.contracts.models import ResultClass, ThreadMode
-from typebench.wrapper import RawRun, classify_with_map, run_command
+from typebench.engine.wrapper import RawRun, classify_with_map, run_command
 
 
 def _cfg() -> NormalizedConfig:

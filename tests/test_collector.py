@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from typebench import collector, measure
 from typebench.adapters.stub import StubAdapter
-from typebench.collector import RunManifest, run_single
 from typebench.contracts.config import NormalizedConfig
 from typebench.contracts.models import FailurePhase, ResultClass, ThreadMode, TimingStats
-from typebench.measure import MemorySummary, ResourceResult
-from typebench.wrapper import RawRun
+from typebench.engine import collector, measure
+from typebench.engine.collector import RunManifest, run_single
+from typebench.engine.measure import MemorySummary, ResourceResult
+from typebench.engine.wrapper import RawRun
 
 
 @pytest.fixture(autouse=True)

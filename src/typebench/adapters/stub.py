@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
     from typebench.contracts.config import NormalizedConfig
     from typebench.contracts.models import ResultClass, ThreadMode
-    from typebench.wrapper import RawRun
+    from typebench.engine.wrapper import RawRun
 
 
 class StubAdapter:

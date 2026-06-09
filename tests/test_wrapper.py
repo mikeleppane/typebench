@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from typebench.contracts.models import ResultClass
-from typebench.wrapper import RawRun, classify_default, run_command, universal_failure_prefix
+from typebench.engine.wrapper import RawRun, classify_default, run_command, universal_failure_prefix
 
 
 def test_run_command_captures_clean_exit() -> None:
@@ -96,7 +96,7 @@ def test_wrapper_import_does_not_pull_pydantic() -> None:
     # ~50ms of startup to EVERY timed run and biases the benchmark. Lock it out.
     # Run in a fresh interpreter — pytest itself already imported pydantic.
     code = (
-        "import sys, typebench.wrapper\n"
+        "import sys, typebench.engine.wrapper\n"
         "bad = sorted(m for m in sys.modules if m.split('.')[0] == 'pydantic')\n"
         "assert not bad, bad\n"
     )

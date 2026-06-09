@@ -4,9 +4,9 @@ from pathlib import Path
 import pytest
 
 from typebench.adapters.stub import StubAdapter
-from typebench.collector import run_single
 from typebench.contracts.config import NormalizedConfig
 from typebench.contracts.models import ResultClass, RunResult, ThreadMode
+from typebench.engine.collector import run_single
 
 requires_posix = pytest.mark.skipif(
     os.name != "posix", reason="signal semantics are POSIX-specific"

@@ -37,7 +37,7 @@ def _wrapped_command_string(argv: list[str], timeout: float) -> str:
     parts = [
         sys.executable,
         "-m",
-        "typebench.wrapper",
+        "typebench.engine.wrapper",
         "--timeout",
         str(timeout),
         "--",

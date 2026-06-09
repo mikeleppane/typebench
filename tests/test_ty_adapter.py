@@ -8,10 +8,10 @@ import pytest
 from typebench.adapters import ty as ty_mod
 from typebench.adapters.base import Adapter
 from typebench.adapters.ty import TyAdapter
-from typebench.collector import run_single
 from typebench.contracts.config import NormalizedConfig
 from typebench.contracts.models import ResultClass, RunResult, ThreadMode
-from typebench.wrapper import RawRun, run_command
+from typebench.engine.collector import run_single
+from typebench.engine.wrapper import RawRun, run_command
 
 _FIXTURES = Path(__file__).parent.parent / "fixtures"
 _HAS_TY = shutil.which("ty") is not None

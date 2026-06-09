@@ -16,7 +16,7 @@ import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    # Annotation-only import: keeps `import typebench.calibration` pydantic-free at
+    # Annotation-only import: keeps `import typebench.engine.calibration` pydantic-free at
     # runtime (the import-guard test asserts this) while letting pyrefly resolve the
     # `calibrate` return type. The real construction import is lazy, inside
     # calibrate(), so the runtime import graph never pulls pydantic.
@@ -53,7 +53,7 @@ def calibrate(runs: int = 5) -> CalibrationStats:
     import; the return annotation resolves via the TYPE_CHECKING import above."""
     if runs < 1:
         raise ValueError(f"calibration runs must be >= 1, got {runs}")
-    # Lazy import keeps `import typebench.calibration` pydantic-free (guard test);
+    # Lazy import keeps `import typebench.engine.calibration` pydantic-free (guard test);
     # only an actual calibrate() call pays pydantic's import cost.
     from typebench.contracts.models import CalibrationStats  # noqa: PLC0415
 
@@ -73,9 +73,9 @@ def calibrate(runs: int = 5) -> CalibrationStats:
 
 
 def main(raw_args: list[str] | None = None) -> int:
-    """CLI: `python -m typebench.calibration` prints the calibration JSON. Useful
+    """CLI: `python -m typebench.engine.calibration` prints the calibration JSON. Useful
     for a standalone calibration probe / debugging."""
-    parser = argparse.ArgumentParser(prog="typebench.calibration")
+    parser = argparse.ArgumentParser(prog="typebench.engine.calibration")
     parser.add_argument("--runs", type=int, default=5)
     ns = parser.parse_args(raw_args)
     stats = calibrate(runs=ns.runs)

@@ -11,7 +11,7 @@ from typebench.contracts.models import (
     ThreadMode,
     TimingStats,
 )
-from typebench.env import EnvFingerprint
+from typebench.engine.env import EnvFingerprint
 
 runner = CliRunner()
 

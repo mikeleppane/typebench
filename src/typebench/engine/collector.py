@@ -10,11 +10,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from typebench import measure
 from typebench.contracts.models import FailurePhase, MemoryStats, ResultClass, RunResult, ThreadMode
-from typebench.env import detect_env
-from typebench.timing import run_timing
-from typebench.wrapper import run_command
+from typebench.engine import measure
+from typebench.engine.env import detect_env
+from typebench.engine.timing import run_timing
+from typebench.engine.wrapper import run_command
 
 if TYPE_CHECKING:
     from typebench.adapters.base import Adapter

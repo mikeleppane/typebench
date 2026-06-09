@@ -11,11 +11,11 @@ from typing import TYPE_CHECKING
 
 from typebench.adapters.base import ParallelismCap, coerce_count
 from typebench.contracts.models import ResultClass, ThreadMode
-from typebench.wrapper import classify_with_map
+from typebench.engine.wrapper import classify_with_map
 
 if TYPE_CHECKING:
     from typebench.contracts.config import NormalizedConfig
-    from typebench.wrapper import RawRun
+    from typebench.engine.wrapper import RawRun
 
 # Exit codes (research doc): 0 clean, 1 errors, 2 fatal, 3 config, 4 bad-CLI/missing-path.
 _EXIT_MAP: dict[int, ResultClass] = {

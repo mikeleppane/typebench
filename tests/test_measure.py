@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from typebench import measure
-from typebench.measure import CgroupSample, ResourceResult, read_cgroup_stats, scoped_probe
+from typebench.engine import measure
+from typebench.engine.measure import CgroupSample, ResourceResult, read_cgroup_stats, scoped_probe
 
 Runner = Callable[..., _sp.CompletedProcess[str]]
 
@@ -109,9 +109,9 @@ def test_measure_main_payload_cgroup_none_when_unreadable(
 
 def test_measure_import_does_not_pull_pydantic() -> None:
     # measure runs as a child process under systemd-run; pydantic startup cost
-    # would tax every scoped run. Keep it stdlib + typebench.wrapper only.
+    # would tax every scoped run. Keep it stdlib + typebench.engine.wrapper only.
     code = (
-        "import sys, typebench.measure\n"
+        "import sys, typebench.engine.measure\n"
         "bad = sorted(m for m in sys.modules if m.split('.')[0] == 'pydantic')\n"
         "print(','.join(bad))\n"
     )

@@ -19,8 +19,8 @@ from typebench.contracts.models import (
     ToolPreflight,
 )
 from typebench.counting import count_first_party
+from typebench.engine.wrapper import RawRun
 from typebench.preflight import preflight_project
-from typebench.wrapper import RawRun
 
 _FIXTURES = Path(__file__).parent.parent / "fixtures"
 
