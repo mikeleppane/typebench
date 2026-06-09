@@ -9,6 +9,7 @@ from typebench.models import (
     FailurePhase,
     MemoryStats,
     ResultClass,
+    ResultsEnvelope,
     RunResult,
     ThreadMode,
     TimingStats,
@@ -64,7 +65,7 @@ def test_run_result_round_trips_through_json() -> None:
     blob = result.model_dump_json()
     restored = RunResult.model_validate_json(blob)
     assert restored == result
-    assert restored.schema_version == 2
+    assert restored.schema_version == 3
     assert restored.thread_mode_enforced is False  # default; Plan 4 sets it true
     assert json.loads(blob)["result_class"] == "diagnostics"
 
@@ -194,7 +195,7 @@ def test_run_result_v2_carries_memory_cpu_calibration() -> None:
         calibration=calib,
         env=_env(),
     )
-    assert r.schema_version == 2
+    assert r.schema_version == 3
     assert r.memory is not None and r.memory.peak_bytes_median == 110
     assert r.cpu_time_s == 0.42
     assert r.parallel_efficiency == 0.95
@@ -214,7 +215,7 @@ def test_run_result_v2_defaults_are_none() -> None:
         real_exit_code=0,
         env=_env(),
     )
-    assert r.schema_version == 2
+    assert r.schema_version == 3
     assert r.memory is None
     assert r.cpu_time_s is None
     assert r.parallel_efficiency is None
@@ -222,3 +223,100 @@ def test_run_result_v2_defaults_are_none() -> None:
     assert r.hard_cap is None
     assert r.cap_mechanism is None
     assert r.thread_mode_enforced is False
+
+
+def test_env_fingerprint_expands_with_optional_runtime_fields() -> None:
+    # New §9 fields default so existing hand-built fingerprints stay valid.
+    base = EnvFingerprint(
+        os="Linux", kernel="6.6", cpu_model="x", core_count=8, python_version="3.12.0"
+    )
+    assert base.node_version is None
+    assert base.npm_version is None
+    assert base.uv_version is None
+    assert base.mem_total_bytes is None
+    assert base.cgroup_v2 is False
+    full = EnvFingerprint(
+        os="Linux",
+        kernel="6.6",
+        cpu_model="x",
+        core_count=8,
+        python_version="3.12.0",
+        node_version="v20.1.0",
+        npm_version="10.2.0",
+        uv_version="uv 0.4.0",
+        mem_total_bytes=16_000_000_000,
+        cgroup_v2=True,
+    )
+    assert EnvFingerprint.model_validate_json(full.model_dump_json()) == full
+
+
+def test_run_result_enrichment_scalars_default_none_and_round_trip() -> None:
+    base = RunResult(
+        tool="mypy",
+        tool_version="1.0",
+        project="httpx",
+        thread_mode=ThreadMode.ALL_CORES,
+        result_class=ResultClass.CLEAN,
+        real_exit_code=0,
+        env=_env(),
+    )
+    assert base.schema_version == 3
+    for field in (
+        base.project_sha,
+        base.lock_hash,
+        base.config_hash,
+        base.tool_install_source,
+        base.canonical_files,
+        base.canonical_loc,
+        base.canonical_code_loc,
+        base.loc_denominator,
+        base.over_reports,
+    ):
+        assert field is None
+    rich = RunResult(
+        tool="mypy",
+        tool_version="1.0",
+        project="httpx",
+        thread_mode=ThreadMode.ALL_CORES,
+        result_class=ResultClass.CLEAN,
+        real_exit_code=0,
+        env=_env(),
+        project_sha="80960fa",
+        lock_hash="abc123",
+        config_hash="def456",
+        tool_install_source="PyPI wheel (mypyc-compiled)",
+        canonical_files=23,
+        canonical_loc=4000,
+        canonical_code_loc=3200,
+        loc_denominator="code",
+        over_reports=False,
+    )
+    assert RunResult.model_validate_json(rich.model_dump_json()) == rich
+
+
+def test_results_envelope_wraps_records() -> None:
+    rec = RunResult(
+        tool="stub",
+        tool_version="0",
+        project="demo",
+        thread_mode=ThreadMode.ALL_CORES,
+        result_class=ResultClass.CLEAN,
+        real_exit_code=0,
+        env=_env(),
+    )
+    env = ResultsEnvelope(
+        suite_version="2026-06-08",
+        generated_at="2026-06-08T00:00:00Z",
+        runs=[rec],
+    )
+    assert env.schema_version == 1
+    restored = ResultsEnvelope.model_validate_json(env.model_dump_json())
+    assert restored == env
+    assert len(restored.runs) == 1
+
+
+def test_results_envelope_rejects_unknown_fields() -> None:
+    with pytest.raises(ValidationError):
+        ResultsEnvelope.model_validate(
+            {"suite_version": "v", "generated_at": "t", "runs": [], "bogus": 1}
+        )

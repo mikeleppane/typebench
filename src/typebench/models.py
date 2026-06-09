@@ -18,6 +18,7 @@ __all__ = [
     "PreflightReport",
     "PreparedProject",
     "ResultClass",
+    "ResultsEnvelope",
     "RunResult",
     "ThreadMode",
     "TimingStats",
@@ -83,7 +84,9 @@ class CalibrationStats(BaseModel):
 
 
 class EnvFingerprint(BaseModel):
-    """Minimal environment stamp (spec §9 — expanded in later plans)."""
+    """Minimal environment stamp (spec §9). Runtime versions + memory + cgroup
+    availability added in Plan 5 for full reproducibility + CPU-model trend
+    segmentation. New fields are optional so a non-Linux/CI fingerprint stays valid."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -92,19 +95,24 @@ class EnvFingerprint(BaseModel):
     cpu_model: str
     core_count: int
     python_version: str
+    node_version: str | None = None  # pyright's Node runtime (spec §9)
+    npm_version: str | None = None
+    uv_version: str | None = None
+    mem_total_bytes: int | None = None  # /proc/meminfo MemTotal
+    cgroup_v2: bool = False  # whether the memory pass could run here (spec §5.5/§15)
 
 
 class RunResult(BaseModel):
     """One (project x tool x thread-mode) measurement record.
 
-    Plan 1 writes ONE record per file. The eventual results file (Plan 5)
-    wraps many records in an envelope ({schema_version, runs: [...]}); the
-    per-record schema_version below versions the record shape until then.
+    `typebench run` writes ONE self-contained record. `typebench suite` wraps
+    many records in ResultsEnvelope; the per-record schema_version versions this
+    record shape independently of the envelope.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: int = 2
+    schema_version: int = 3
     tool: str
     tool_version: str
     project: str
@@ -141,6 +149,36 @@ class RunResult(BaseModel):
     parallel_efficiency: float | None = None  # cpu_time_s / wall median (~1 single-thread)
     calibration: CalibrationStats | None = None
     env: EnvFingerprint
+    # --- Lock manifest (spec §9), Plan 5. Lean per-record scalars: the frozen dep
+    # CONTENTS live in the committed corpus/locks/*.txt, pinned by lock_hash; only
+    # the hashes + identifying versions are duplicated here. All None in manual
+    # `typebench run` (no corpus); stamped by the suite orchestrator / corpus-mode run.
+    project_sha: str | None = None
+    lock_hash: str | None = None
+    config_hash: str | None = None  # machine-independent logical-config hash (§6)
+    tool_install_source: str | None = None  # "PyPI wheel (mypyc)", "npm + Node", ...
+    # Canonical analyzed-set denominator (§8), identical across tools. canonical_code_loc
+    # is tokei code-LOC (blanks+comments excluded); loc_denominator records which the
+    # headline kLOC/s used ("code" when tokei reconciled, else "physical").
+    canonical_files: int | None = None
+    canonical_loc: int | None = None
+    canonical_code_loc: int | None = None
+    loc_denominator: str | None = None  # "code" | "physical"
+    # From preflight (§12): self-reported files > canonical -> withhold/caveat kLOC/s.
+    over_reports: bool | None = None
+
+
+class ResultsEnvelope(BaseModel):
+    """The committed results file (spec §7/§11): many records + suite metadata.
+    `typebench run` writes ONE self-contained RunResult; `typebench suite` writes
+    this envelope as results/<date>.json (git history = the time-series)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: int = 1
+    suite_version: str
+    generated_at: str  # ISO-8601 UTC, stamped by the CLI
+    runs: list[RunResult]
 
 
 class PreparedProject(BaseModel):
@@ -160,6 +198,7 @@ class PreparedProject(BaseModel):
     frozen: tuple[str, ...]
     canonical_files: int
     canonical_loc: int
+    canonical_code_loc: int | None = None  # tokei code-LOC; None when tokei unavailable
     fingerprint: str
 
 
