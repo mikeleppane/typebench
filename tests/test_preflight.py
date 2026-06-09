@@ -22,8 +22,6 @@ from typebench.corpus.counting import count_first_party
 from typebench.engine.wrapper import RawRun
 from typebench.suite.preflight import preflight_project
 
-_FIXTURES = Path(__file__).parent.parent / "fixtures"
-
 
 def _prepared() -> PreparedProject:
     return PreparedProject(
@@ -272,12 +270,12 @@ def test_preflight_records_command_construction_failure(tmp_path: Path) -> None:
     assert "cannot write config" in (tool_preflight.error_detail or "")
 
 
-def test_preflight_real_tools_on_clean_fixture(tmp_path: Path) -> None:
-    src = _FIXTURES / "pkg_project" / "pkg"
+def test_preflight_real_tools_on_clean_fixture(tmp_path: Path, fixtures_dir: Path) -> None:
+    src = fixtures_dir / "pkg_project" / "pkg"
     fc = count_first_party([src], DEFAULT_EXCLUDES)
     prepared = PreparedProject(
         name="pkg",
-        checkout=str(_FIXTURES / "pkg_project"),
+        checkout=str(fixtures_dir / "pkg_project"),
         venv_python="",
         src_roots=(str(src),),
         exclude_globs=("**/tests/**",),

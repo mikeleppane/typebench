@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,8 @@ from typebench.contracts.models import (
 from typebench.corpus.catalog import CorpusProject
 from typebench.engine.collector import RunManifest
 
+type EnvFactory = Callable[..., EnvFingerprint]
+
 runner = CliRunner()
 
 
@@ -25,7 +28,7 @@ def _invoke_run(args: list[str]) -> Result:
     return runner.invoke(app, ["run", *args])
 
 
-def _fake_result() -> RunResult:
+def _fake_result(env: EnvFactory) -> RunResult:
     # Fixed values keep the fake type-safe under pyrefly strict (kwargs are typed
     # `object`); the tests assert against `captured`, not this record's fields.
     return RunResult(
@@ -35,13 +38,7 @@ def _fake_result() -> RunResult:
         thread_mode=ThreadMode.ALL_CORES,
         result_class=ResultClass.CLEAN,
         real_exit_code=0,
-        env=EnvFingerprint(
-            os="Linux",
-            kernel="x",
-            cpu_model="x",
-            core_count=1,
-            python_version="3.12.0",
-        ),
+        env=env(),
     )
 
 
@@ -93,7 +90,7 @@ def test_cli_run_rejects_unwritable_output_dir(tmp_path: Path) -> None:
 
 
 def test_run_passes_measure_and_calibration_flags(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, make_env: EnvFactory
 ) -> None:
     # Capture what run_single receives so we assert the flags + calibration wire
     # through, without invoking real systemd / hyperfine.
@@ -101,7 +98,7 @@ def test_run_passes_measure_and_calibration_flags(
 
     def fake_run_single(adapter: object, **kwargs: object) -> RunResult:
         captured.update(kwargs)
-        return _fake_result()
+        return _fake_result(make_env)
 
     monkeypatch.setattr(cli, "run_single", fake_run_single)
 
@@ -138,12 +135,14 @@ def test_run_passes_measure_and_calibration_flags(
     assert captured["calibration"] is None
 
 
-def test_run_calibrates_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_run_calibrates_by_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, make_env: EnvFactory
+) -> None:
     captured: dict[str, object] = {}
 
     def fake_run_single(adapter: object, **kwargs: object) -> RunResult:
         captured.update(kwargs)
-        return _fake_result()
+        return _fake_result(make_env)
 
     monkeypatch.setattr(cli, "run_single", fake_run_single)
     sentinel = CalibrationStats(
@@ -174,7 +173,9 @@ def test_run_rejects_zero_mem_runs(tmp_path: Path) -> None:
     assert result.exit_code == 2
 
 
-def test_run_corpus_mode_builds_manifest(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_run_corpus_mode_builds_manifest(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, make_env: EnvFactory
+) -> None:
     entry = CorpusProject(
         name="httpx",
         repo_url="https://x",
@@ -215,7 +216,7 @@ def test_run_corpus_mode_builds_manifest(monkeypatch: pytest.MonkeyPatch, tmp_pa
 
     def fake_run_single(adapter: object, **kwargs: object) -> RunResult:
         captured.update(kwargs)
-        return _fake_result()
+        return _fake_result(make_env)
 
     monkeypatch.setattr(cli, "run_single", fake_run_single)
     out = tmp_path / "r.json"
@@ -246,7 +247,7 @@ def test_run_corpus_mode_builds_manifest(monkeypatch: pytest.MonkeyPatch, tmp_pa
 
 
 def test_run_threads_cores_into_normalized_config(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, make_env: EnvFactory
 ) -> None:
     # --cores N must reach the NormalizedConfig the collector runs under.
     # Pin available cores high so the clamp never interferes on a small CI host.
@@ -255,7 +256,7 @@ def test_run_threads_cores_into_normalized_config(
 
     def fake_run_single(adapter: object, **kwargs: object) -> RunResult:
         captured.update(kwargs)
-        return _fake_result()
+        return _fake_result(make_env)
 
     monkeypatch.setattr(cli, "run_single", fake_run_single)
     out = tmp_path / "r.json"
@@ -322,7 +323,9 @@ def test_suite_rejects_cores_below_one(tmp_path: Path) -> None:
     assert "--cores must be >= 1" in result.output
 
 
-def test_run_clamps_cores_above_available(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_run_clamps_cores_above_available(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, make_env: EnvFactory
+) -> None:
     # --cores above the usable core count clamps down (no checker self-crash from an
     # absurd worker count) and records the clamped value honestly.
     monkeypatch.setattr(cli, "_available_cores", lambda: 4)
@@ -330,7 +333,7 @@ def test_run_clamps_cores_above_available(monkeypatch: pytest.MonkeyPatch, tmp_p
 
     def fake_run_single(adapter: object, **kwargs: object) -> RunResult:
         captured.update(kwargs)
-        return _fake_result()
+        return _fake_result(make_env)
 
     monkeypatch.setattr(cli, "run_single", fake_run_single)
     out = tmp_path / "r.json"

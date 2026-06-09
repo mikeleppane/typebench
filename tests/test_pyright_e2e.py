@@ -9,12 +9,10 @@ from typebench.contracts.models import ResultClass, RunResult
 
 runner = CliRunner()
 _HAS = shutil.which("pyright") is not None and shutil.which("hyperfine") is not None
-# Repo-root fixtures (see Task 4) — NOT tests/fixtures, which the **/tests/** exclude would hide.
-_FIXTURES = Path(__file__).parent.parent / "fixtures"
 
 
 @pytest.mark.skipif(not _HAS, reason="needs pyright + hyperfine")
-def test_cli_pyright_on_error_fixture(tmp_path: Path) -> None:
+def test_cli_pyright_on_error_fixture(tmp_path: Path, fixtures_dir: Path) -> None:
     out = tmp_path / "r.json"
     res = runner.invoke(
         app,
@@ -25,7 +23,7 @@ def test_cli_pyright_on_error_fixture(tmp_path: Path) -> None:
             "--project",
             "error_project",
             "--src-root",
-            str(_FIXTURES / "error_project"),
+            str(fixtures_dir / "error_project"),
             "--runs",
             "2",
             "--warmup",

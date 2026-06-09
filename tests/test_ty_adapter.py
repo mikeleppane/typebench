@@ -13,7 +13,6 @@ from typebench.contracts.models import ResultClass, RunResult, ThreadMode
 from typebench.engine.collector import run_single
 from typebench.engine.wrapper import RawRun, run_command
 
-_FIXTURES = Path(__file__).parent.parent / "fixtures"
 _HAS_TY = shutil.which("ty") is not None
 
 
@@ -141,8 +140,8 @@ def test_missing_ty_yields_schema_valid_failed_env(monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.skipif(not _HAS_TY, reason="ty not installed")
-def test_live_clean_project(tmp_path: Path) -> None:
-    cfg = NormalizedConfig(src_roots=(str(_FIXTURES / "clean_project"),))
+def test_live_clean_project(tmp_path: Path, fixtures_dir: Path) -> None:
+    cfg = NormalizedConfig(src_roots=(str(fixtures_dir / "clean_project"),))
     argv, env = TyAdapter().command("clean", cfg, ThreadMode.CONSTRAINED, tmp_path)
     raw = run_command(argv, timeout=120, env=env)
     assert TyAdapter().classify(raw) == ResultClass.CLEAN
@@ -151,8 +150,8 @@ def test_live_clean_project(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(not _HAS_TY, reason="ty not installed")
-def test_live_error_project(tmp_path: Path) -> None:
-    cfg = NormalizedConfig(src_roots=(str(_FIXTURES / "error_project"),))
+def test_live_error_project(tmp_path: Path, fixtures_dir: Path) -> None:
+    cfg = NormalizedConfig(src_roots=(str(fixtures_dir / "error_project"),))
     argv, env = TyAdapter().command("err", cfg, ThreadMode.CONSTRAINED, tmp_path)
     raw = run_command(argv, timeout=120, env=env)
     assert TyAdapter().classify(raw) == ResultClass.DIAGNOSTICS

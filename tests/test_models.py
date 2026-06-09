@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 
 import pytest
 from pydantic import ValidationError
@@ -14,6 +15,8 @@ from typebench.contracts.models import (
     ThreadMode,
     TimingStats,
 )
+
+type EnvFactory = Callable[..., EnvFingerprint]
 
 
 def test_result_class_measured_success() -> None:
@@ -31,17 +34,7 @@ def test_result_class_values_match_taxonomy() -> None:
     assert ResultClass.FAILED_TIMEOUT.value == "failed{timeout}"
 
 
-def _env() -> EnvFingerprint:
-    return EnvFingerprint(
-        os="Linux",
-        kernel="6.6.0",
-        cpu_model="Test CPU",
-        core_count=8,
-        python_version="3.12.0",
-    )
-
-
-def test_run_result_round_trips_through_json() -> None:
+def test_run_result_round_trips_through_json(make_env: EnvFactory) -> None:
     result = RunResult(
         tool="stub",
         tool_version="1.0",
@@ -60,7 +53,7 @@ def test_run_result_round_trips_through_json() -> None:
             max_s=0.14,
             times_s=[0.10, 0.11, 0.14],
         ),
-        env=_env(),
+        env=make_env(),
     )
     blob = result.model_dump_json()
     restored = RunResult.model_validate_json(blob)
@@ -70,7 +63,7 @@ def test_run_result_round_trips_through_json() -> None:
     assert json.loads(blob)["result_class"] == "diagnostics"
 
 
-def test_timing_is_optional_for_failures() -> None:
+def test_timing_is_optional_for_failures(make_env: EnvFactory) -> None:
     result = RunResult(
         tool="stub",
         tool_version="1.0",
@@ -78,13 +71,13 @@ def test_timing_is_optional_for_failures() -> None:
         thread_mode=ThreadMode.ALL_CORES,
         result_class=ResultClass.FAILED_CRASH,
         real_exit_code=139,
-        env=_env(),
+        env=make_env(),
     )
     assert result.timing is None
     assert result.diagnostics is None
 
 
-def test_run_result_rejects_unknown_fields() -> None:
+def test_run_result_rejects_unknown_fields(make_env: EnvFactory) -> None:
     with pytest.raises(ValidationError):
         RunResult.model_validate(
             {
@@ -94,13 +87,13 @@ def test_run_result_rejects_unknown_fields() -> None:
                 "thread_mode": "all-cores",
                 "result_class": "clean",
                 "real_exit_code": 0,
-                "env": _env().model_dump(),
+                "env": make_env().model_dump(),
                 "bogus": True,
             }
         )
 
 
-def test_thread_mode_enforced_defaults_false() -> None:
+def test_thread_mode_enforced_defaults_false(make_env: EnvFactory) -> None:
     # Plan 1 records the requested thread_mode but applies no CPU affinity, so
     # the JSON must never claim a methodology that was not enforced (spec §5.3).
     result = RunResult(
@@ -110,12 +103,12 @@ def test_thread_mode_enforced_defaults_false() -> None:
         thread_mode=ThreadMode.CONSTRAINED,
         result_class=ResultClass.CLEAN,
         real_exit_code=0,
-        env=_env(),
+        env=make_env(),
     )
     assert result.thread_mode_enforced is False
 
 
-def test_failure_metadata_round_trips() -> None:
+def test_failure_metadata_round_trips(make_env: EnvFactory) -> None:
     # Enough detail to audit failed{env} vs failed{crash} after the fact (spec §5.1).
     result = RunResult(
         tool="stub",
@@ -128,7 +121,7 @@ def test_failure_metadata_round_trips() -> None:
         timed_out=False,
         oom=False,
         error_detail="No such file or directory: 'typebench-nonexistent-checker'",
-        env=_env(),
+        env=make_env(),
     )
     restored = RunResult.model_validate_json(result.model_dump_json())
     assert restored == result
@@ -136,7 +129,7 @@ def test_failure_metadata_round_trips() -> None:
     assert restored.timing is None
 
 
-def test_failure_phase_defaults_none_and_round_trips() -> None:
+def test_failure_phase_defaults_none_and_round_trips(make_env: EnvFactory) -> None:
     # Measured-success carries no failure phase; a timing-phase failure records
     # FailurePhase.TIMING so real_exit_code (the clean probe's) is unambiguous.
     clean = RunResult(
@@ -146,7 +139,7 @@ def test_failure_phase_defaults_none_and_round_trips() -> None:
         thread_mode=ThreadMode.ALL_CORES,
         result_class=ResultClass.CLEAN,
         real_exit_code=0,
-        env=_env(),
+        env=make_env(),
     )
     assert clean.failure_phase is None
     crashed = RunResult(
@@ -157,13 +150,13 @@ def test_failure_phase_defaults_none_and_round_trips() -> None:
         result_class=ResultClass.FAILED_CRASH,
         real_exit_code=0,
         failure_phase=FailurePhase.TIMING,
-        env=_env(),
+        env=make_env(),
     )
     restored = RunResult.model_validate_json(crashed.model_dump_json())
     assert restored.failure_phase == FailurePhase.TIMING
 
 
-def test_run_result_v2_carries_memory_cpu_calibration() -> None:
+def test_run_result_v2_carries_memory_cpu_calibration(make_env: EnvFactory) -> None:
     mem = MemoryStats(
         runs=3,
         peak_bytes_min=100,
@@ -193,7 +186,7 @@ def test_run_result_v2_carries_memory_cpu_calibration() -> None:
         cpu_time_s=0.42,
         parallel_efficiency=0.95,
         calibration=calib,
-        env=_env(),
+        env=make_env(),
     )
     assert r.schema_version == 3
     assert r.memory is not None and r.memory.peak_bytes_median == 110
@@ -203,7 +196,7 @@ def test_run_result_v2_carries_memory_cpu_calibration() -> None:
     assert r.hard_cap is True
 
 
-def test_run_result_v2_defaults_are_none() -> None:
+def test_run_result_v2_defaults_are_none(make_env: EnvFactory) -> None:
     # A capability-gated engine on a non-cgroup host produces a record with the new
     # fields absent — they must default to None, not break the schema.
     r = RunResult(
@@ -213,7 +206,7 @@ def test_run_result_v2_defaults_are_none() -> None:
         thread_mode=ThreadMode.ALL_CORES,
         result_class=ResultClass.CLEAN,
         real_exit_code=0,
-        env=_env(),
+        env=make_env(),
     )
     assert r.schema_version == 3
     assert r.memory is None
@@ -250,7 +243,7 @@ def test_env_fingerprint_expands_with_optional_runtime_fields() -> None:
     assert EnvFingerprint.model_validate_json(full.model_dump_json()) == full
 
 
-def test_run_result_enrichment_scalars_default_none_and_round_trip() -> None:
+def test_run_result_enrichment_scalars_default_none_and_round_trip(make_env: EnvFactory) -> None:
     base = RunResult(
         tool="mypy",
         tool_version="1.0",
@@ -258,7 +251,7 @@ def test_run_result_enrichment_scalars_default_none_and_round_trip() -> None:
         thread_mode=ThreadMode.ALL_CORES,
         result_class=ResultClass.CLEAN,
         real_exit_code=0,
-        env=_env(),
+        env=make_env(),
     )
     assert base.schema_version == 3
     for field in (
@@ -280,7 +273,7 @@ def test_run_result_enrichment_scalars_default_none_and_round_trip() -> None:
         thread_mode=ThreadMode.ALL_CORES,
         result_class=ResultClass.CLEAN,
         real_exit_code=0,
-        env=_env(),
+        env=make_env(),
         project_sha="80960fa",
         lock_hash="abc123",
         config_hash="def456",
@@ -294,7 +287,7 @@ def test_run_result_enrichment_scalars_default_none_and_round_trip() -> None:
     assert RunResult.model_validate_json(rich.model_dump_json()) == rich
 
 
-def test_results_envelope_wraps_records() -> None:
+def test_results_envelope_wraps_records(make_env: EnvFactory) -> None:
     rec = RunResult(
         tool="stub",
         tool_version="0",
@@ -302,7 +295,7 @@ def test_results_envelope_wraps_records() -> None:
         thread_mode=ThreadMode.ALL_CORES,
         result_class=ResultClass.CLEAN,
         real_exit_code=0,
-        env=_env(),
+        env=make_env(),
     )
     env = ResultsEnvelope(
         suite_version="2026-06-08",

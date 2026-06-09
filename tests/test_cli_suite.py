@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -5,13 +6,22 @@ from typer.testing import CliRunner
 
 from typebench import cli
 from typebench.cli import app
-from typebench.contracts.models import ResultClass, ResultsEnvelope, RunResult, ThreadMode
-from typebench.engine.env import detect_env
+from typebench.contracts.models import (
+    EnvFingerprint,
+    ResultClass,
+    ResultsEnvelope,
+    RunResult,
+    ThreadMode,
+)
+
+type EnvFactory = Callable[..., EnvFingerprint]
 
 runner = CliRunner()
 
 
-def test_suite_writes_envelope(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_suite_writes_envelope(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, make_env: EnvFactory
+) -> None:
     # Stub run_suite so the CLI is tested for wiring + file write, not orchestration.
     def fake_run_suite(**kwargs: object) -> ResultsEnvelope:
         rec = RunResult(
@@ -21,7 +31,7 @@ def test_suite_writes_envelope(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
             thread_mode=ThreadMode.ALL_CORES,
             result_class=ResultClass.CLEAN,
             real_exit_code=0,
-            env=detect_env(),
+            env=make_env(),
         )
         return ResultsEnvelope(
             suite_version="v", generated_at=str(kwargs["generated_at"]), runs=[rec]

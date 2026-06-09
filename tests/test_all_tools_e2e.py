@@ -8,11 +8,10 @@ from typebench.cli import app
 from typebench.contracts.models import ResultClass, RunResult
 
 runner = CliRunner()
-_FIXTURES = Path(__file__).parent.parent / "fixtures"
 _REAL_TOOLS = ["mypy", "pyright", "ty", "pyrefly"]
 
 
-def _run(tool: str, fixture: str, out: Path) -> RunResult:
+def _run(tool: str, fixture: str, out: Path, fixtures_dir: Path) -> RunResult:
     res = runner.invoke(
         app,
         [
@@ -22,7 +21,11 @@ def _run(tool: str, fixture: str, out: Path) -> RunResult:
             "--project",
             fixture,
             "--src-root",
-            str(_FIXTURES / fixture),
+            str(fixtures_dir / fixture),
+            "--thread-mode",
+            "constrained",
+            "--cores",
+            "1",
             "--runs",
             "2",
             "--warmup",
@@ -37,10 +40,10 @@ def _run(tool: str, fixture: str, out: Path) -> RunResult:
 
 @pytest.mark.skipif(shutil.which("hyperfine") is None, reason="needs hyperfine")
 @pytest.mark.parametrize("tool", _REAL_TOOLS)
-def test_tool_flags_error_fixture(tool: str, tmp_path: Path) -> None:
+def test_tool_flags_error_fixture(tool: str, tmp_path: Path, fixtures_dir: Path) -> None:
     if shutil.which(tool) is None:
         pytest.skip(f"{tool} not installed")
-    rr = _run(tool, "error_project", tmp_path / "r.json")
+    rr = _run(tool, "error_project", tmp_path / "r.json", fixtures_dir)
     assert rr.tool == tool
     assert rr.result_class == ResultClass.DIAGNOSTICS
     assert rr.diagnostics is not None and rr.diagnostics > 0
@@ -49,10 +52,10 @@ def test_tool_flags_error_fixture(tool: str, tmp_path: Path) -> None:
 
 @pytest.mark.skipif(shutil.which("hyperfine") is None, reason="needs hyperfine")
 @pytest.mark.parametrize("tool", _REAL_TOOLS)
-def test_tool_passes_clean_fixture(tool: str, tmp_path: Path) -> None:
+def test_tool_passes_clean_fixture(tool: str, tmp_path: Path, fixtures_dir: Path) -> None:
     if shutil.which(tool) is None:
         pytest.skip(f"{tool} not installed")
-    rr = _run(tool, "clean_project", tmp_path / "r.json")
+    rr = _run(tool, "clean_project", tmp_path / "r.json", fixtures_dir)
     assert rr.tool == tool
     assert rr.result_class == ResultClass.CLEAN
     assert rr.diagnostics == 0

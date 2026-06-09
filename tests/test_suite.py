@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -5,6 +6,7 @@ import pytest
 from typebench.adapters.stub import StubAdapter
 from typebench.contracts.models import (
     CalibrationStats,
+    EnvFingerprint,
     PreflightReport,
     PreparedProject,
     ResultClass,
@@ -14,8 +16,9 @@ from typebench.contracts.models import (
     ToolPreflight,
 )
 from typebench.corpus.catalog import CorpusProject, SizeBucket
-from typebench.engine.env import detect_env
 from typebench.suite.runner import SuiteCell, build_matrix, run_suite, shard
+
+type EnvFactory = Callable[..., EnvFingerprint]
 
 
 def test_build_matrix_is_project_major() -> None:
@@ -115,7 +118,7 @@ def _calib() -> CalibrationStats:
     )
 
 
-def test_run_suite_runs_ready_cells_and_builds_envelope() -> None:
+def test_run_suite_runs_ready_cells_and_builds_envelope(make_env: EnvFactory) -> None:
     captured: list[object] = []
 
     def fake_run_one(adapter: object, **kwargs: object) -> RunResult:
@@ -130,7 +133,7 @@ def test_run_suite_runs_ready_cells_and_builds_envelope() -> None:
             else kwargs["thread_mode"],
             result_class=ResultClass.CLEAN,
             real_exit_code=0,
-            env=detect_env(),
+            env=make_env(),
         )
 
     envelope = run_suite(

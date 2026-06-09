@@ -13,7 +13,6 @@ from typebench.contracts.models import ResultClass, RunResult, ThreadMode
 from typebench.engine.collector import run_single
 from typebench.engine.wrapper import RawRun, run_command
 
-_FIXTURES = Path(__file__).parent.parent / "fixtures"
 _HAS_PYREFLY = shutil.which("pyrefly") is not None
 
 
@@ -146,8 +145,8 @@ def test_missing_pyrefly_yields_schema_valid_failed_env(monkeypatch: pytest.Monk
 
 
 @pytest.mark.skipif(not _HAS_PYREFLY, reason="pyrefly not installed")
-def test_live_clean_project(tmp_path: Path) -> None:
-    cfg = NormalizedConfig(src_roots=(str(_FIXTURES / "clean_project"),))
+def test_live_clean_project(tmp_path: Path, fixtures_dir: Path) -> None:
+    cfg = NormalizedConfig(src_roots=(str(fixtures_dir / "clean_project"),))
     argv, env = PyreflyAdapter().command("clean", cfg, ThreadMode.CONSTRAINED, tmp_path)
     raw = run_command(argv, timeout=120, env=env)
     assert PyreflyAdapter().classify(raw) == ResultClass.CLEAN
@@ -159,8 +158,8 @@ def test_live_clean_project(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(not _HAS_PYREFLY, reason="pyrefly not installed")
-def test_live_error_project(tmp_path: Path) -> None:
-    cfg = NormalizedConfig(src_roots=(str(_FIXTURES / "error_project"),))
+def test_live_error_project(tmp_path: Path, fixtures_dir: Path) -> None:
+    cfg = NormalizedConfig(src_roots=(str(fixtures_dir / "error_project"),))
     argv, env = PyreflyAdapter().command("err", cfg, ThreadMode.CONSTRAINED, tmp_path)
     raw = run_command(argv, timeout=120, env=env)
     assert PyreflyAdapter().classify(raw) == ResultClass.DIAGNOSTICS
@@ -181,13 +180,15 @@ def test_command_sets_search_path_to_src_roots(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(not _HAS_PYREFLY, reason="pyrefly not installed")
-def test_live_resolves_first_party_imports_in_src_layout(tmp_path: Path) -> None:
+def test_live_resolves_first_party_imports_in_src_layout(
+    tmp_path: Path, fixtures_dir: Path
+) -> None:
     # pkg_project is a clean src-layout package whose pkg/b.py does
     # `from pkg.a import X`. With search-path pinned to the src root this resolves
     # and the project is CLEAN; without the fix pyrefly reports `missing-import`
     # (DIAGNOSTICS) purely because the config sits in a temp dir. Live guard for
     # the import-root neutrality fix.
-    cfg = NormalizedConfig(src_roots=(str(_FIXTURES / "pkg_project"),))
+    cfg = NormalizedConfig(src_roots=(str(fixtures_dir / "pkg_project"),))
     argv, env = PyreflyAdapter().command("pkg", cfg, ThreadMode.CONSTRAINED, tmp_path)
     raw = run_command(argv, timeout=120, env=env)
     assert PyreflyAdapter().classify(raw) == ResultClass.CLEAN, raw.stdout + raw.stderr

@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -9,15 +10,14 @@ from typebench.contracts.models import PreparedProject
 from typebench.corpus.envman import PrepareError
 
 runner = CliRunner()
-_FIXTURES = Path(__file__).parent.parent / "fixtures"
 _SUITE = Path(__file__).parent.parent / "corpus" / "suite.toml"
 
 
-def _fake_prepared() -> PreparedProject:
-    src = _FIXTURES / "pkg_project" / "pkg"
+def _fake_prepared(fixtures_dir: Path) -> PreparedProject:
+    src = fixtures_dir / "pkg_project" / "pkg"
     return PreparedProject(
         name="httpx",
-        checkout=str(_FIXTURES / "pkg_project"),
+        checkout=str(fixtures_dir / "pkg_project"),
         venv_python="",
         src_roots=(str(src),),
         exclude_globs=("**/tests/**",),
@@ -32,14 +32,17 @@ def _fake_prepared() -> PreparedProject:
     )
 
 
-def _fake_prepare(_entry: object, _cache_root: object) -> PreparedProject:
-    return _fake_prepared()
+def _fake_prepare_factory(fixtures_dir: Path) -> Callable[[object, object], PreparedProject]:
+    def fake_prepare(_entry: object, _cache_root: object) -> PreparedProject:
+        return _fake_prepared(fixtures_dir)
+
+    return fake_prepare
 
 
 def test_preflight_writes_report_for_known_project(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fixtures_dir: Path
 ) -> None:
-    monkeypatch.setattr(cli, "prepare_project", _fake_prepare)
+    monkeypatch.setattr(cli, "prepare_project", _fake_prepare_factory(fixtures_dir))
     out = tmp_path / "report.json"
     result = runner.invoke(
         cli.app,
@@ -79,8 +82,10 @@ def test_preflight_unknown_project_exits_2(monkeypatch: pytest.MonkeyPatch, tmp_
     assert "nope" in result.output
 
 
-def test_run_corpus_mode_derives_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(cli, "prepare_project", _fake_prepare)
+def test_run_corpus_mode_derives_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fixtures_dir: Path
+) -> None:
+    monkeypatch.setattr(cli, "prepare_project", _fake_prepare_factory(fixtures_dir))
     out = tmp_path / "r.json"
     result = runner.invoke(
         cli.app,

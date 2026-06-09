@@ -1,22 +1,25 @@
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 from typer.testing import CliRunner
 
 from typebench.cli import app
 from typebench.contracts.models import (
+    EnvFingerprint,
     ResultClass,
     ResultsEnvelope,
     RunResult,
     ThreadMode,
     TimingStats,
 )
-from typebench.engine.env import EnvFingerprint
+
+type EnvFactory = Callable[..., EnvFingerprint]
 
 runner = CliRunner()
 
 
-def _envelope_file(path: Path, gen: str) -> None:
+def _envelope_file(path: Path, gen: str, make_env: EnvFactory) -> None:
     rec = RunResult(
         tool="mypy",
         tool_version="1.0",
@@ -35,22 +38,18 @@ def _envelope_file(path: Path, gen: str) -> None:
         ),
         canonical_code_loc=3200,
         loc_denominator="code",
-        env=EnvFingerprint(
-            os="Linux",
-            kernel="6.6",
-            cpu_model="CPU-A",
-            core_count=8,
-            python_version="3.12.0",
-        ),
+        env=make_env(cpu_model="CPU-A"),
     )
     env = ResultsEnvelope(suite_version="2026-06-08", generated_at=gen, runs=[rec])
     path.write_text(env.model_dump_json())
 
 
-def test_render_updates_readme_markers_and_writes_trends(tmp_path: Path) -> None:
+def test_render_updates_readme_markers_and_writes_trends(
+    tmp_path: Path, make_env: EnvFactory
+) -> None:
     results = tmp_path / "results"
     results.mkdir()
-    _envelope_file(results / "2026-06-08.json", "2026-06-08T00:00:00Z")
+    _envelope_file(results / "2026-06-08.json", "2026-06-08T00:00:00Z", make_env)
     readme = tmp_path / "README.md"
     readme.write_text(
         "# typebench\n\nIntro prose.\n\n<!-- TYPEBENCH:BEGIN -->\n"

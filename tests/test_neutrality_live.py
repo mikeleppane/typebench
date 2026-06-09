@@ -12,8 +12,6 @@ from typebench.contracts.config import NormalizedConfig
 from typebench.contracts.models import ResultClass, ThreadMode
 from typebench.engine.wrapper import run_command
 
-_FIXTURES = Path(__file__).parent.parent / "fixtures"
-
 # (name, adapter, discovered-config filename, body that WOULD hide all diagnostics
 # if the tool honored the project's own config instead of our generated one).
 _CASES: list[tuple[str, Adapter, str, str]] = [
@@ -34,7 +32,12 @@ def _classify(adapter: Adapter, src_root: Path, workdir: Path) -> ResultClass:
 
 @pytest.mark.parametrize(("name", "adapter", "_fn", "_body"), _CASES, ids=_IDS)
 def test_excludes_drop_nested_tests_dir(
-    name: str, adapter: Adapter, _fn: str, _body: str, tmp_path: Path
+    name: str,
+    adapter: Adapter,
+    _fn: str,
+    _body: str,
+    tmp_path: Path,
+    fixtures_dir: Path,
 ) -> None:
     if shutil.which(name) is None:
         pytest.skip(f"{name} not installed")
@@ -42,7 +45,7 @@ def test_excludes_drop_nested_tests_dir(
     # MUST drop **/tests/** so the error never surfaces -> CLEAN. A broken exclusion
     # (e.g. ty without --force-exclude) checks tests/broken.py -> DIAGNOSTICS, which
     # fails here. This is the live regression guard for the exclude contract.
-    result = _classify(adapter, _FIXTURES / "exclude_project", tmp_path)
+    result = _classify(adapter, fixtures_dir / "exclude_project", tmp_path)
     assert result == ResultClass.CLEAN, f"{name} did not exclude tests/ (got {result})"
 
 
