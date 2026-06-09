@@ -18,11 +18,11 @@ from typebench.adapters.pyright import PyrightAdapter
 from typebench.adapters.stub import StubAdapter
 from typebench.adapters.ty import TyAdapter
 from typebench.calibration import calibrate
-from typebench.collector import run_single
+from typebench.collector import RunManifest, run_single
 from typebench.corpus import load_suite
 from typebench.envman import PrepareError, prepare_project
 from typebench.models import ThreadMode
-from typebench.normalized_config import DEFAULT_EXCLUDES, NormalizedConfig
+from typebench.normalized_config import DEFAULT_EXCLUDES, NormalizedConfig, config_hash
 from typebench.preflight import preflight_project
 
 if TYPE_CHECKING:
@@ -156,6 +156,7 @@ def run(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI optio
         raise typer.Exit(code=2)
 
     prepared: PreparedProject | None = None
+    entry: CorpusProject | None = None
     if corpus_project is not None:
         if corpus is None:
             typer.echo("--corpus-project requires --corpus.", err=True)
@@ -200,6 +201,23 @@ def run(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI optio
         venv_python=os.path.abspath(venv) if venv is not None else None,  # noqa: PTH100 - need non-symlink-following abspath; Path.resolve() follows symlinks
     )
     adapter = factory()
+    manifest: RunManifest | None = None
+    if prepared is not None and corpus_project is not None and entry is not None:
+        manifest = RunManifest(
+            project_sha=prepared.sha,
+            lock_hash=prepared.lock_hash,
+            config_hash=config_hash(
+                entry.src_roots,
+                entry.effective_excludes(),
+                entry.python_version,
+                entry.python_platform,
+            ),
+            canonical_files=prepared.canonical_files,
+            canonical_loc=prepared.canonical_loc,
+            canonical_code_loc=prepared.canonical_code_loc,
+            tool_install_source=adapter.install_source,
+            over_reports=None,
+        )
     calibration = calibrate(runs=calib_runs) if calibrate_baseline else None
     result = run_single(
         adapter,
@@ -212,6 +230,7 @@ def run(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI optio
         mem_runs=mem_runs,
         measure_enabled=measure,
         calibration=calibration,
+        manifest=manifest,
     )
     output.write_text(result.model_dump_json(indent=2))
     typer.echo(f"{tool} / {project} -> {result.result_class.value} -> {output}")
