@@ -108,6 +108,34 @@ Runtime dependencies:
 
 Development dependencies are pinned through `uv.lock`.
 
+### Quick start with mise
+
+typebench pins its external CLI toolchain (`hyperfine`, `tokei`, `node`, `uv`)
+with [`mise`](https://mise.jdx.dev) so runs are reproducible across machines. New
+to mise? Start with the [getting-started guide](https://mise.jdx.dev/getting-started.html).
+
+**1. Install mise** (skip if already installed; full options at the
+[mise installation docs](https://mise.jdx.dev/installing-mise.html)):
+
+```bash
+curl https://mise.run | sh                       # official installer
+echo 'eval "$(mise activate zsh)"' >> ~/.zshrc   # activate (bash: zsh -> bash, ~/.bashrc)
+exec $SHELL                                      # reload the shell so shims land on PATH
+```
+
+**2. Provision the toolchain and verify:**
+
+```bash
+mise install              # installs hyperfine, tokei, node, uv at the pinned versions
+uv sync                   # installs the type checkers (mypy/pyright/pyrefly/ty) from uv.lock
+uv run typebench doctor   # confirm every external tool resolves at the expected version
+```
+
+`mise install` alone is not enough: the pinned `node`/`tokei` only bind once mise
+is **activated** (the `mise activate` line above puts the shims on PATH).
+`typebench doctor` reports the resolved versions, so a mis-activated shell is
+visible immediately.
+
 ### External tools
 
 | Tool | Role | Required? | If absent |
@@ -120,6 +148,10 @@ Development dependencies are pinned through `uv.lock`.
 | `node` | Runtime required by pyright | Required for pyright only | pyright cannot run; other checkers are unaffected. |
 
 macOS runs are timing-only because cgroup v2 is Linux-specific.
+
+> `mise install` provisions `hyperfine`, `tokei`, `node`, and `uv`; `uv sync`
+> provisions the four type checkers. `git` and the cgroup/systemd-run capability
+> stay system-provided.
 
 ---
 

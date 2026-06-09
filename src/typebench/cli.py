@@ -26,6 +26,7 @@ from typebench.corpus.catalog import load_suite
 from typebench.corpus.envman import PrepareError, prepare_project
 from typebench.engine.calibration import calibrate
 from typebench.engine.collector import RunManifest, run_single
+from typebench.engine.doctor import Tier, run_doctor
 from typebench.suite.preflight import preflight_project
 from typebench.suite.renderer import build_trends, render_readme
 from typebench.suite.runner import run_suite
@@ -444,6 +445,47 @@ def preflight(
     status = "ready" if report.ready else "NOT READY"
     typer.echo(f"preflight {project} -> {status} ({report.canonical_files} files) -> {output}")
     if not report.ready:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def doctor(
+    check: Annotated[
+        bool,
+        typer.Option(help="Exit nonzero if a REQUIRED-tier tool is missing (CI gate)."),
+    ] = False,
+) -> None:
+    """Report external-tool availability, versions, roles, and consequence-if-absent.
+
+    Default exits 0 (pure report, matching the graceful-degradation design). With
+    --check, a missing REQUIRED tool (uv/git) exits 1; PER_TOOL/OPTIONAL misses
+    only warn.
+    """
+    checks = run_doctor()
+    # Two-space separators GUARANTEE a gap even when a field overruns its width
+    # (e.g. tokei's --version is a full sentence); a bare `{x:<N}` pads short but
+    # never truncates, so long versions would otherwise collide with the next column.
+    typer.echo(f"{'tool':<12}  {'status':<26}  {'role':<24}  if absent")
+    for c in checks:
+        if not c.present:
+            status = "MISSING"
+        elif c.healthy:
+            status = f"ok {c.version}" if c.version else "ok"
+        else:
+            status = f"DEGRADED {c.version}" if c.version else "DEGRADED"
+        typer.echo(f"{c.name:<12}  {status:<26}  {c.role:<24}  {c.if_absent}")
+
+    # Remediation: a doctor that says MISSING but not how to fix it is half a tool.
+    unhealthy = [c for c in checks if not c.healthy]
+    if unhealthy:
+        typer.echo("\nto fix:")
+        for c in unhealthy:
+            typer.echo(f"  {c.name:<12}  {c.install_hint}")
+
+    unhealthy_required = [c.name for c in checks if c.tier is Tier.REQUIRED and not c.healthy]
+    if unhealthy_required:
+        typer.echo(f"\nmissing/unhealthy required: {', '.join(unhealthy_required)}", err=True)
+    if check and unhealthy_required:
         raise typer.Exit(code=1)
 
 

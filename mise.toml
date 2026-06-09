@@ -1,0 +1,12 @@
+# Pinned external CLI toolchain. `mise install` provisions these; the four type
+# checkers (mypy/pyright/pyrefly/ty) are uv-managed (uv.lock), not mise-managed.
+# git stays system. systemd-run/taskset/cgroup-v2 are OS capabilities.
+#
+# The node pin only governs pyright's runtime when mise is ACTIVATED (shims on
+# PATH), not merely installed; see README bootstrap. `typebench doctor` reports
+# the actually-resolved versions, surfacing a mis-activated environment.
+[tools]
+hyperfine = "1.20.0"
+tokei     = "14.0.0"    # major bump from 12.x: re-run corpus LOC counts after pinning
+node      = "24.16.0"   # latest LTS "Krypton"; runtime required by pyright
+uv        = "0.11.19"

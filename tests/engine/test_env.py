@@ -1,9 +1,11 @@
+import sys
 from pathlib import Path
 
 import pytest
 
 from typebench.contracts.models import EnvFingerprint
 from typebench.engine import env
+from typebench.engine.env import cmd_version
 
 
 def test_detect_env_returns_populated_fingerprint() -> None:
@@ -17,7 +19,7 @@ def test_detect_env_returns_populated_fingerprint() -> None:
 
 def test_detect_env_populates_runtime_and_memory(monkeypatch: pytest.MonkeyPatch) -> None:
     # Stub the seams so the test is hermetic (no real node/npm/uv required).
-    monkeypatch.setattr(env, "_cmd_version", lambda argv: f"{argv[0]}-9.9", raising=True)
+    monkeypatch.setattr(env, "cmd_version", lambda argv: f"{argv[0]}-9.9", raising=True)
     monkeypatch.setattr(env, "_mem_total_bytes", lambda: 16_000_000_000, raising=True)
     monkeypatch.setattr(env, "_cgroup_v2", lambda: True, raising=True)
     fp = env.detect_env()
@@ -33,3 +35,13 @@ def test_mem_total_bytes_parses_meminfo(tmp_path: Path, monkeypatch: pytest.Monk
     meminfo.write_text("MemTotal:       16384000 kB\nMemFree: 100 kB\n")
     monkeypatch.setattr(env, "_MEMINFO", meminfo, raising=True)
     assert env._mem_total_bytes() == 16384000 * 1024
+
+
+def test_cmd_version_returns_first_line_for_present_tool() -> None:
+    out = cmd_version([sys.executable, "--version"])
+    assert out is not None
+    assert out.startswith("Python ")
+
+
+def test_cmd_version_returns_none_for_missing_tool() -> None:
+    assert cmd_version(["typebench-no-such-binary-zzz", "--version"]) is None
