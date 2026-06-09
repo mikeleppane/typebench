@@ -2,20 +2,16 @@
 
 typebench is a neutral, reproducible benchmark of Python type-checker performance
 (mypy, pyright, pyrefly, ty). Measurement is delegated to `hyperfine` (wall-time)
-and, later, cgroup v2 (peak memory + CPU-time). Results are versioned JSON; the
-README and GH Pages are rendered views. Design spec:
-`docs/superpowers/specs/2026-06-07-typebench-design.md`.
+and cgroup v2 (peak memory + CPU-time). Results are versioned JSON; the README and
+GH Pages are rendered views.
 
-**Status:** Plan 5 (results envelope · suite orchestration · §9 lock-manifest
-enrichment · renderer) **done**, plus configurable cores. `ResultsEnvelope` (v1)
-wraps the sharded `(project × tool × thread-mode)` matrix; the renderer emits the
-README table + `trends.json` (per-CPU-model calibration anchor). `RunResult` is
-**v3** (lock-manifest scalars, tokei code-LOC, `cores`). `ThreadMode` is now
-`constrained` / `all-cores` (was `1-core-constrained`); the constrained track is
-parameterized by `--cores N` (default 1 = single-threaded, opt-in multithreading,
+`ResultsEnvelope` wraps the sharded `(project × tool × thread-mode)` matrix; the
+renderer emits the README table + `trends.json` (per-CPU-model calibration anchor).
+`RunResult` records lock-manifest scalars, tokei code-LOC, and `cores`. `ThreadMode`
+is `constrained` / `all-cores`; the constrained track is parameterized by
+`--cores N` (default 1 = single-threaded, opt-in multithreading,
 `taskset -c 0..N-1`). mypy ≥ 2.0 cold-parallel via `--num-workers` (fresh per-run
-cache; result-equivalent to single-process). Builds on Plan 4 (memory · threads ·
-calibration) and Plan 3 (corpus + envman + preflight). CI/bump Plan 6.
+cache; result-equivalent to single-process).
 
 ## Golden rule: this is a measurement tool
 
@@ -25,48 +21,60 @@ doubt, prefer the honest, conservative, reproducible choice over the convenient 
 ## Layout
 
 - `src/typebench/` — the package (src layout, hatchling):
-  - `taxonomy.py` — pydantic-free on-disk enums (`ResultClass`, `ThreadMode`,
-    `FailurePhase`). **Stays stdlib-only** (see Measurement fidelity).
-  - `models.py` — pydantic schemas (`RunResult` v3, `ResultsEnvelope` v1,
-    `TimingStats`, `EnvFingerprint`, `PreparedProject`), `ConfigDict(extra="forbid")`.
-  - `normalized_config.py` — `NormalizedConfig` (incl. `cores`) + `config_hash`
-    (the §9 reproducibility hash; `cores` deliberately excluded from it).
-  - `env.py` — environment fingerprint.
-  - `corpus.py` — `CorpusProject`, `SizeBucket`, `load_suite`, `load_suite_version`
-    (corpus as data; dir-segment exclude validation; optional checked-in lock).
-  - `counting.py` — `count_first_party` (physical-LOC denominator) + `count_code_loc`
-    (tokei reconciled code-LOC, the headline throughput denominator; §8).
-  - `envman.py` — `prepare_project`: clone@SHA / uv venv / install (pinned to the
-    constraints lock) / freeze+verify / count, behind a fingerprinted cache that
-    rebuilds on stale config and cleans up partial failures. The only subprocess
-    surface besides the wrapper.
-  - `preflight.py` — `preflight_project`: probes the four tools, records the
-    self-reported-vs-canonical divergence, and gates readiness on mis-scope
-    (self < canonical) while flagging over-report for the renderer (§8/§12/§191).
-  - `wrapper.py` — `RawRun`, `run_command`, `classify_default`, and the CLI used as
-    hyperfine's per-run command.
-  - `timing.py` — hyperfine pass + `parse_hyperfine_json`.
-  - `collector.py` — `run_single` + `RunManifest`, the probe→time pipeline that
-    assembles one `RunResult` (stamps lock-manifest scalars; scales the `taskset`
-    affinity pin to `config.cores`).
-  - `suite.py` — `run_suite`: the sharded `(project × tool × thread-mode)` matrix
-    behind the §12 preflight gate → `ResultsEnvelope`; excluded cells become visible
-    FAILED_ENV records ("didn't compete", never silently absent).
-  - `renderer.py` — `render_readme` (latest envelope → README table) + `build_trends`
-    (full history → `trends.json`, per-CPU-model calibration anchor).
-  - `measure.py` — resource pass (spec §5.5): cgroup v2 peak memory + CPU-time +
-    OOM under a transient `systemd-run --scope`. Pydantic-free (runs as a scoped
-    child); capability-gated with a timing-only fallback on mac/CI.
-  - `calibration.py` — fixed dep-free CPU workload (`calib-pyloop-v1`) timed per run
-    for VM-to-VM trend normalization (spec §5.7). Pydantic-free import.
   - `cli.py` — Typer app (`run`, `suite`, `render`, `preflight`; `--cores`).
-  - `_fake_checker.py` — in-package controllable fake checker (ships in the wheel)
-    that the stub drives.
-  - `adapters/base.py` — `Adapter` Protocol, `ParallelismCap`, `default_classify`,
-    `coerce_count`.
-  - `adapters/stub.py` — `StubAdapter`.
+  - `contracts/` — shared vocabulary, no internal deps.
+    - `contracts/models` — pydantic schemas (`RunResult`, `ResultsEnvelope`,
+      `TimingStats`, `EnvFingerprint`, `PreparedProject`), `ConfigDict(extra="forbid")`.
+    - `contracts/taxonomy` — pydantic-free on-disk enums (`ResultClass`, `ThreadMode`,
+      `FailurePhase`). **Stays stdlib-only** (see Measurement fidelity).
+    - `contracts/config` — `NormalizedConfig` (incl. `cores`) + `config_hash` (the
+      reproducibility hash; `cores` deliberately excluded from it).
+  - `engine/` — produces one `RunResult`.
+    - `engine/wrapper` — `RawRun`, `run_command`, `classify_default`,
+      `classify_with_map`, `universal_failure_prefix`, and the CLI used as
+      hyperfine's per-run command via `python -m typebench.engine.wrapper`.
+    - `engine/timing` — hyperfine pass + `parse_hyperfine_json`.
+    - `engine/measure` — cgroup v2 resource pass: peak memory + CPU-time + OOM under a
+      transient `systemd-run --scope`. Pydantic-free (runs as a scoped child);
+      capability-gated with a timing-only fallback on mac/CI. Invoked as
+      `python -m typebench.engine.measure`.
+    - `engine/calibration` — fixed dep-free CPU workload (`calib-pyloop-v1`) timed per
+      run for VM-to-VM trend normalization. Pydantic-free import.
+    - `engine/env` — environment fingerprint.
+    - `engine/collector` — `run_single` + `RunManifest`, the probe→time pipeline that
+      assembles one `RunResult` (stamps lock-manifest scalars; scales the `taskset`
+      affinity pin to `config.cores`).
+  - `adapters/` — the only checker-specific surface.
+    - `adapters/base` — `Adapter` Protocol, `ParallelismCap`, `default_classify`,
+      `coerce_count`.
+    - `adapters/_support` — `probe_version` + `confirm_clean` shared adapter helpers.
+    - `adapters/mypy`, `adapters/pyright`, `adapters/pyrefly`, `adapters/ty`,
+      `adapters/stub` — checker adapters and `StubAdapter`.
+  - `corpus/` — what gets benchmarked.
+    - `corpus/catalog` — `CorpusProject`, `SizeBucket`, `load_suite`,
+      `load_suite_version` (corpus as data; dir-segment exclude validation; optional
+      checked-in lock).
+    - `corpus/counting` — `count_first_party` (physical-LOC denominator) +
+      `count_code_loc` (tokei reconciled code-LOC, the headline throughput
+      denominator).
+    - `corpus/envman` — `prepare_project`: clone@SHA / uv venv / install (pinned to
+      the constraints lock) / freeze+verify / count, behind a fingerprinted cache that
+      rebuilds on stale config and cleans up partial failures. The only subprocess
+      surface besides the measured wrapper.
+  - `suite/` — orchestration, gating, rendering.
+    - `suite/runner` — `run_suite` + `SuiteCell`, the sharded
+      `(project × tool × thread-mode)` matrix → `ResultsEnvelope`; excluded cells
+      become visible FAILED_ENV records ("didn't compete", never silently absent).
+    - `suite/preflight` — `preflight_project`: probes the four tools, records the
+      self-reported-vs-canonical divergence, and gates readiness on mis-scope
+      (self < canonical) while flagging over-report for the renderer.
+    - `suite/renderer` — `render_readme` (latest envelope → README table) +
+      `build_trends` (full history → `trends.json`, per-CPU-model calibration anchor).
+  - `_internal/` — private support code.
+    - `_internal/fake_checker` — in-package controllable fake checker (ships in the
+      wheel) that the stub drives via `python -m typebench._internal.fake_checker`.
+  - Dependency layering: `contracts <- engine <- {adapters, corpus} <- suite <- cli`.
 - `tests/` — pytest.
-- `docs/superpowers/{specs,plans}/` — design spec and phase plans.
 
 ## Quality gates — the floor before "done"
 
@@ -104,16 +112,17 @@ uv run pytest
 
 - **Honesty by construction.** The schema must never claim a methodology that wasn't
   run. `thread_mode_enforced` stays `False` until CPU affinity is actually applied
-  (Plan 4). `failure_phase` records whether a failure came from the probe or a flaky
-  timed run so `real_exit_code` can't be misread.
+  by the collector. `failure_phase` records whether a failure came from the probe or
+  a flaky timed run so `real_exit_code` can't be misread.
 - **Record every failure, never drop one.** The failure taxonomy (`clean`,
-  `diagnostics`, `failed{env|crash|timeout|oom}`) is the contract (spec §7). A dropped
-  failure silently biases the benchmark. `run_command` never raises — timeout, signal
-  death, and missing-binary all become a recorded `RawRun`.
+  `diagnostics`, `failed{env|crash|timeout|oom}`) is the contract. A dropped failure
+  silently biases the benchmark. `run_command` never raises — timeout, signal death,
+  and missing-binary all become a recorded `RawRun`.
 - **Measurement fidelity.** The wrapper is hyperfine's per-run command, so everything
-  it imports runs on every timed measurement. Keep the wrapper (and `taxonomy.py`)
-  free of heavy imports — pydantic on the measured path adds constant overhead that
-  biases comparative ratios. Import enums from `taxonomy`, not `models`.
+  it imports runs on every timed measurement. Keep `typebench.engine.wrapper` (and
+  `typebench.contracts.taxonomy`) pydantic-free and otherwise free of heavy imports —
+  pydantic on the measured path adds constant overhead that biases comparative ratios.
+  Import enums from `contracts.taxonomy`, not `contracts.models`.
 - **Benchmark isolation.** On timeout, kill the whole process group
   (`start_new_session` + `killpg`), not just the direct child, or stragglers
   contaminate later runs.
@@ -126,36 +135,22 @@ uv run pytest
   `@pytest.mark.skipif(os.name != "posix", ...)` (signals / process groups).
 - Test the Typer CLI with `typer.testing.CliRunner`; stub boundaries (`run_timing`,
   `shutil.which`) with `monkeypatch.setattr`.
-- Drive every taxonomy class deterministically through `StubAdapter` + `_fake_checker`
-  — no real checker required.
+- Drive every taxonomy class deterministically through `StubAdapter` +
+  `python -m typebench._internal.fake_checker` — no real checker required.
 - Round-trip pydantic models through JSON and assert `extra="forbid"`.
 
-## Scope discipline by plan
+## Scope discipline
 
-Plan 1 is the engine spine. Do **not** add real-checker, cgroup, corpus, or renderer
-code unless the task is that plan. The adapter Protocol is pinned to its final-ish
-shape; methods not yet exercised (`install`, `parallelism_cap`) are deliberately
-deferred — don't delete them, don't build behavior behind them early.
-
-Plan 3 adds corpus/envman/preflight. Plan 4 adds the `taskset` affinity floor, the
-cgroup resource pass (`measure.py`), and the calibration baseline (`calibration.py`).
-Plan 5 adds the results envelope (`models.ResultsEnvelope`), suite orchestration
-(`suite.py`), §9 lock-manifest enrichment, tokei code-LOC (`counting.count_code_loc`),
-and the renderer (`renderer.py`: README table + `trends.json`) — `RunResult` is now
-**v3** (lock-manifest scalars + canonical code-LOC + `cores`). Configurable cores:
-`ThreadMode` is `constrained`/`all-cores`, `--cores N` scales the affinity pin
-(`taskset -c 0..N-1`) and each adapter's cap; mypy ≥ 2.0 parallelizes via
-`--num-workers` on a fresh per-run cache (cold-equivalent). The measured path
-(`wrapper.py`, `taxonomy.py`, `measure.py`, `calibration.py`) stays pydantic-free;
-affinity is a uniform collector-level `taskset` prefix, never per-adapter. CI/bump
-automation is Plan 6.
+The adapter Protocol is pinned to its final-ish shape; methods not yet exercised
+(`install`, `parallelism_cap`) are deliberately deferred — don't delete them, don't
+build behavior behind them early.
 
 ## Commits
 
 Conventional Commits, **required scope**, atomic, body explains the *why*. Scopes in
-use: `scaffold, models, taxonomy, env, wrapper, timing, adapters, collector, cli,
-e2e, ruff, plan, spec, docs, engine, corpus, envman, preflight, counting`. **No
-AI/assistant attribution** in commit
+use: `scaffold, contracts, models, taxonomy, config, engine, wrapper, timing, measure,
+calibration, env, collector, adapters, corpus, catalog, counting, envman, suite,
+preflight, renderer, cli, docs, skills, ci, ruff`. **No AI/assistant attribution** in commit
 messages or PR bodies — commits read as the author's own work. See the
 `git-conventions` skill.
 
@@ -207,6 +202,7 @@ Engineering skills live under `.agents/skills/`. Invoke the relevant one before 
   security, module boundaries).
 - **test-driven-development** — failing test first; Prove-It for bugs.
 - **code-review-and-quality** — five-axis review before merge.
+- **improve-architecture** — architecture-friction review and refactor plan documents.
 - **git-conventions** — commit, branch, and PR conventions.
 
 ## Ask first
@@ -216,4 +212,4 @@ Engineering skills live under `.agents/skills/`. Invoke the relevant one before 
 - Changing the on-disk schema (`RunResult` fields, taxonomy string values) — it's a
   stability contract.
 - Adding a runtime dependency.
-- Anything that puts a heavy import on the measured (wrapper) path.
+- Anything that puts a heavy import on the measured wrapper path.
