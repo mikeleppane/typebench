@@ -12,3 +12,7 @@ __pycache__/
 # discovery, so a hidden cache would hide the corpus from pyrefly alone.
 typebench-cache/
 .typebench-cache/
+
+# Local-only planning artifacts — never committed (hard rule).
+docs/plans/
+docs/superpowers/
