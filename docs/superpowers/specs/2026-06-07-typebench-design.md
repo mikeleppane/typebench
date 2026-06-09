@@ -105,15 +105,16 @@ Type checkers **exit nonzero when they find diagnostics** — that is normal suc
 
 ### 5.3 Thread / core semantics (honesty about asymmetry)
 The four tools do not parallelize equally, and a literal uniform "1 thread" is **not achievable**:
-- **mypy** — no multicore type checking; single-threaded by nature.
-- **pyright** — single main analysis thread.
-- **pyrefly** — Rust, parallel by design; no documented hard thread cap (adapter must verify).
+- **mypy** — single-process historically, but **mypy ≥ 2.0 adds experimental parallel type-checking** (`--num-workers N` / `-nN`; `0` disables, the default). The adapter version-guards: ≥ 2.0 sets `--num-workers` to the configured core count, < 2.0 stays single-process. `--num-workers` is a **hard** process cap.
+- **pyright** — single main analysis thread (`--threads` is a hint, not an OS cap).
+- **pyrefly** — Rust, parallel by design; `--threads N` is a hard rayon-pool cap.
 - **ty** — Rust, parallel by design; `TY_MAX_PARALLELISM` caps *concurrent tasks* but is **explicitly not a thread limit** (ty may still spawn background threads).
 
-Therefore:
-- **Track A — "1-core constrained":** uniform mechanism is **CPU affinity to a single core** (`taskset`/cpuset) for all tools, *plus* each adapter's best-effort parallelism cap (pyright `--threads 1`, ty `TY_MAX_PARALLELISM=1`, pyrefly per `parallelism_cap()`). Affinity-to-one-core is the apples-to-apples floor; the per-tool cap is reported with a `hard_cap: true|false` honesty flag. **This is named "1-core constrained," not "1 thread,"** precisely because a single-core cap forces a parallel tool's threads to contend on one core rather than truly running one worker — that distinction is documented, not hidden.
-- **Track B — "all-cores" (default):** real-world UX. Note up front, **in the entrants' favor**, that mypy and pyright are single-threaded by nature, so Track B varies only pyrefly/ty — this is not a strawman against the single-threaded tools.
-- **Parallel efficiency** = CPU-time (user+sys, from the cgroup, §5.5) ÷ wall-time (from hyperfine). ~1 for single-threaded tools.
+The constrained track is parameterized by a configurable **core count N** (`--cores N`, default **1** = single-threaded; multithreading is opt-in). Therefore:
+
+- **Track A — "constrained":** uniform mechanism is **CPU affinity to the first N cores** (`taskset -c 0..N-1`) for all tools, *plus* each adapter's parallelism cap scaled to N (mypy `--num-workers N` when ≥ 2.0, pyright single main thread, ty `TY_MAX_PARALLELISM=N`, pyrefly `--threads N`). Affinity-to-N-cores is the apples-to-apples floor; the per-tool cap is reported with a `hard_cap: true|false` honesty flag. **This is named "constrained," not "N threads,"** precisely because a core-count cap forces a parallel tool's threads to contend on N cores rather than truly running N workers — that distinction is documented, not hidden. At the default N=1 this reduces to a single pinned core.
+- **Track B — "all-cores" (default):** real-world UX. mypy (≥ 2.0) and pyright/pyrefly/ty all use the available cores here; pyright remains effectively single-main-thread, so it benefits least. Reported in the entrants' favor — not a strawman against the less-parallel tools.
+- **Parallel efficiency** = CPU-time (user+sys, from the cgroup, §5.5) ÷ wall-time (from hyperfine). ~1 for single-threaded runs (pyright, and mypy at N=1 / pre-2.0); > 1 when a tool actually parallelizes.
 
 ### 5.4 Timing pass
 `hyperfine --warmup W --runs N --prepare "<clear-cache>"` (wrapped per §5.1) → min/median/mean/stddev wall time. Cache cleared before **every** run. `min` is retained as the noise-robust comparator (§5.6).
@@ -213,7 +214,7 @@ This makes any historical run re-creatable and lets trends be segmented (e.g. by
 
 ## 10. Cost & Scheduling Budget
 
-The combinatorial load must fit GitHub's job limits, or the weekly cadence is fiction. Load = projects × 4 tools × 2 thread-modes × N runs × 2 passes (+ warmups + calibration). A giant >500k-LOC project under single-threaded mypy can take minutes per invocation; the budget section must specify:
+The combinatorial load must fit GitHub's job limits, or the weekly cadence is fiction. Load = projects × 4 tools × 2 thread-modes × N runs × 2 passes (+ warmups + calibration). A giant >500k-LOC project under single-process mypy (N=1 / pre-2.0) can take minutes per invocation; the budget section must specify:
 - Target **N** (and memory-pass M), with the statistics/cost tradeoff stated.
 - Per-bucket wall-time estimates and the total CI minutes/cost per weekly run.
 - **Sharding** strategy across jobs (e.g. one job per size bucket or per tool) to stay under the 6-hour job limit.

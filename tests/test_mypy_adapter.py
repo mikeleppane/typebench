@@ -94,6 +94,93 @@ def test_command_no_venv_omits_python_executable(tmp_path: Path) -> None:
     assert "--python-executable" not in argv
 
 
+def _pin_version(monkeypatch: pytest.MonkeyPatch, version: str) -> None:
+    monkeypatch.setattr(MypyAdapter, "version", lambda _self: version)
+
+
+def test_constrained_default_cores_omits_num_workers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # cores=1 (default) must stay single-process: no -n flag, no cache, byte-identical
+    # to the pre-parallel command even on a parallel-capable mypy.
+    _pin_version(monkeypatch, "mypy 2.1.0 (compiled: yes)")
+    cfg = NormalizedConfig(src_roots=("/abs/src",))  # cores defaults to 1
+    argv, _env = MypyAdapter().command("demo", cfg, ThreadMode.CONSTRAINED, tmp_path)
+    assert "--num-workers" not in argv
+    assert "--no-incremental" in argv
+    assert "--cache-dir=/dev/null" in argv
+
+
+def test_constrained_multi_core_sets_num_workers_and_cache(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Parallel mode REQUIRES a real cache: -n N present, /dev/null + --no-incremental
+    # gone, a writable --cache-dir present (mypy errors "Cache must be enabled in
+    # parallel mode" otherwise).
+    _pin_version(monkeypatch, "mypy 2.1.0 (compiled: yes)")
+    cfg = NormalizedConfig(src_roots=("/abs/src",), cores=4)
+    argv, _env = MypyAdapter().command("demo", cfg, ThreadMode.CONSTRAINED, tmp_path)
+    idx = argv.index("--num-workers")
+    assert argv[idx + 1] == "4"
+    assert "--no-incremental" not in argv
+    assert "--cache-dir=/dev/null" not in argv
+    cache_idx = argv.index("--cache-dir")
+    assert argv[cache_idx + 1] == mypy_mod._cache_dir("demo")
+
+
+def test_clear_cache_wipes_parallel_cache_dir(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[str] = []
+    monkeypatch.setattr(mypy_mod.shutil, "rmtree", lambda p, **_kw: captured.append(p))
+    MypyAdapter().clear_cache("demo")
+    assert captured == [mypy_mod._cache_dir("demo")]
+
+
+def test_prepare_command_wipes_parallel_cache_dir() -> None:
+    cmd = MypyAdapter().prepare_command("demo")
+    assert cmd is not None
+    assert mypy_mod._cache_dir("demo") in cmd
+    assert cmd.startswith("rm -rf ")
+
+
+def test_all_cores_uses_cpu_count(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _pin_version(monkeypatch, "mypy 2.1.0 (compiled: yes)")
+    monkeypatch.setattr(mypy_mod.os, "cpu_count", lambda: 6)
+    cfg = NormalizedConfig(src_roots=("/abs/src",))  # cores irrelevant for ALL_CORES
+    argv, _env = MypyAdapter().command("demo", cfg, ThreadMode.ALL_CORES, tmp_path)
+    idx = argv.index("--num-workers")
+    assert argv[idx + 1] == "6"
+
+
+def test_pre_2_0_mypy_never_passes_num_workers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # --num-workers does not exist before 2.0; passing it would hard-fail the run.
+    _pin_version(monkeypatch, "mypy 1.13.0 (compiled: yes)")
+    cfg = NormalizedConfig(src_roots=("/abs/src",), cores=4)
+    argv, _env = MypyAdapter().command("demo", cfg, ThreadMode.ALL_CORES, tmp_path)
+    assert "--num-workers" not in argv
+
+
+def test_unparsable_version_disables_parallel(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _pin_version(monkeypatch, "unknown")
+    cfg = NormalizedConfig(src_roots=("/abs/src",), cores=4)
+    argv, _env = MypyAdapter().command("demo", cfg, ThreadMode.ALL_CORES, tmp_path)
+    assert "--num-workers" not in argv
+
+
+def test_parallelism_cap_mechanism_is_version_aware(monkeypatch: pytest.MonkeyPatch) -> None:
+    _pin_version(monkeypatch, "mypy 2.1.0 (compiled: yes)")
+    cap = MypyAdapter().parallelism_cap(ThreadMode.CONSTRAINED)
+    assert cap.hard_cap is True
+    assert "--num-workers" in cap.mechanism
+    _pin_version(monkeypatch, "mypy 1.13.0 (compiled: yes)")
+    cap_old = MypyAdapter().parallelism_cap(ThreadMode.CONSTRAINED)
+    assert cap_old.hard_cap is True
+    assert "single-process" in cap_old.mechanism
+
+
 def test_version_is_no_raise_when_binary_absent(monkeypatch: pytest.MonkeyPatch) -> None:
     def _boom(*_a: object, **_k: object) -> object:
         raise FileNotFoundError("mypy")
