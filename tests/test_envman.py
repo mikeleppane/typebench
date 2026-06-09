@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from typebench import envman
 from typebench.corpus import CorpusProject, SizeBucket
 from typebench.envman import (
     _SIDECAR,
@@ -178,15 +179,23 @@ class _CloningRunner(_FakeRunner):
         return out
 
 
-def test_prepare_project_assembles_prepared_with_canonical_count(tmp_path: Path) -> None:
+def test_prepare_project_assembles_prepared_with_canonical_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     cache = tmp_path / "cache"
     run = _CloningRunner({("uv", "pip"): RunOut(0, "idna==3.0\nhttpcore==1.0.0\n", "")})
+
+    def fake_count_code_loc(_files: list[Path]) -> int:
+        return 1234
+
+    monkeypatch.setattr(envman, "count_code_loc", fake_count_code_loc)
     prepared = prepare_project(_httpx_entry(), cache, run=run)
 
     assert prepared.name == "demo"
     assert prepared.python_platform == "linux"
     assert prepared.canonical_files == 2  # tests/t.py excluded
     assert prepared.canonical_loc == 2
+    assert prepared.canonical_code_loc == 1234
     assert prepared.frozen == ("httpcore==1.0.0", "idna==3.0")
     assert prepared.venv_python.endswith("/venv/bin/python")
     assert prepared.src_roots[0].endswith("/repo/pkg")
@@ -262,7 +271,7 @@ def test_normalize_locked_freeze_matches_pep503_normalized_name() -> None:
     # pinned version (else the file: line survives -> drift check always fails).
     entry = _httpx_entry(name="typing_extensions")
     constraints = "idna==3.0\ntyping-extensions==4.9.0\n"
-    frozen = ("idna==3.0", "typing-extensions @ file:///tmp/te")
+    frozen = ("idna==3.0", "typing-extensions @ file:///tmp/pkg")
     assert _normalize_locked_freeze(entry, frozen, constraints) == (
         "idna==3.0",
         "typing-extensions==4.9.0",

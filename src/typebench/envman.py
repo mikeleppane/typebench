@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import ValidationError
 
-from typebench.counting import count_first_party
+from typebench.counting import count_code_loc, count_first_party, first_party_files
 from typebench.models import PreparedProject
 
 if TYPE_CHECKING:
@@ -298,6 +298,7 @@ def prepare_project(
         if counted.files == 0:
             msg = f"no first-party Python files counted under src_roots={entry.src_roots}"
             raise PrepareError(msg)
+        code_loc = count_code_loc(first_party_files(roots, excludes))
 
         prepared = PreparedProject(
             name=entry.name,
@@ -312,6 +313,7 @@ def prepare_project(
             frozen=frozen,
             canonical_files=counted.files,
             canonical_loc=counted.loc,
+            canonical_code_loc=code_loc,
             fingerprint=fingerprint,
         )
         sidecar.write_text(prepared.model_dump_json(indent=2), encoding="utf-8")
