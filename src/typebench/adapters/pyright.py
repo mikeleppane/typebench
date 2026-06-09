@@ -55,6 +55,7 @@ def _node_version() -> str:
 
 class PyrightAdapter:
     name = "pyright"
+    install_source = "npm + Node"
 
     def version(self) -> str:
         # No-raise: called during RunResult assembly even on the env-failure path,
@@ -158,7 +159,7 @@ class PyrightAdapter:
         result = classify_with_map(raw, _EXIT_MAP)
         # Parse-sanity (research doc): a CLEAN verdict is only honest if we can
         # confirm a positive file count. Promote to failed{env} when files is 0
-        # (mis-scoped include) OR None (exit 0 but --outputjson was unparseable /
+        # (mis-scoped include) OR None (exit 0 but --outputjson was unparsable /
         # dropped summary.filesAnalyzed). Recording an unverifiable clean would let
         # a false-clean enter the data set -> record-honesty violation (§7/§12).
         if result is ResultClass.CLEAN:

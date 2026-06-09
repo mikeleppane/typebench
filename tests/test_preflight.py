@@ -125,6 +125,8 @@ def test_tool_preflight_captures_failure_diagnostics() -> None:
 class _CannedAdapter:
     """Fully annotated Adapter double for report assembly tests."""
 
+    install_source = "fake"
+
     def __init__(self, name: str, result_class: ResultClass, files: int | None) -> None:
         self.name = name
         self._rc = result_class

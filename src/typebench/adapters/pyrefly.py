@@ -34,6 +34,7 @@ def _toml_str_list(values: tuple[str, ...]) -> str:
 
 class PyreflyAdapter:
     name = "pyrefly"
+    install_source = "PyPI wheel (Rust)"
 
     def version(self) -> str:
         try:

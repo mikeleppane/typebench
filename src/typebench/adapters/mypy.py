@@ -39,6 +39,7 @@ def _globs_to_exclude_regex(globs: tuple[str, ...]) -> str:
 
 class MypyAdapter:
     name = "mypy"
+    install_source = "PyPI wheel (mypyc-compiled)"
 
     def version(self) -> str:
         # No-raise (runs during RunResult assembly even on the env-failure path).

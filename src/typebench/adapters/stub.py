@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 class StubAdapter:
     name = "stub"
+    install_source = "builtin"
 
     def __init__(
         self,

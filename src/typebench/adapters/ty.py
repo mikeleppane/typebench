@@ -33,6 +33,7 @@ _EXIT_MAP: dict[int, ResultClass] = {
 
 class TyAdapter:
     name = "ty"
+    install_source = "PyPI wheel (Rust)"
 
     def version(self) -> str:
         try:

@@ -34,6 +34,7 @@ class ParallelismCap:
 @runtime_checkable
 class Adapter(Protocol):
     name: str
+    install_source: str  # §9 manifest: "PyPI wheel (mypyc)", "npm + Node", ...
 
     def version(self) -> str:
         """Resolved checker version string."""
