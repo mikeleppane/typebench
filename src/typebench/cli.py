@@ -37,8 +37,9 @@ app = typer.Typer(help="Neutral Python type-checker performance benchmark.")
 # Default location for prepared clones/venvs. MUST be a non-hidden directory:
 # pyrefly skips dot-directories during file discovery, so a hidden cache (e.g.
 # `.typebench-cache`) makes the corpus invisible to pyrefly ALONE — it would see
-# 0 files, fail{env}, and be silently excluded while the other tools run. A
-# tool-asymmetric cache location is a neutrality defect, so the default is plain.
+# 0 files, fail{env}, and be excluded from headline aggregates (recorded, not
+# dropped) while the other tools run. A tool-asymmetric cache location is a
+# neutrality defect, so the default is plain.
 DEFAULT_CACHE_ROOT = Path("typebench-cache")
 
 # Adapter registry. All four real checkers + the controllable stub.
