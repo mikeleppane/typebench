@@ -232,6 +232,50 @@ def test_one_core_prepends_taskset_and_enforces(monkeypatch: pytest.MonkeyPatch)
     assert result.cap_mechanism == "cpu-affinity"
 
 
+def test_multi_core_pins_range_and_records_cores(monkeypatch: pytest.MonkeyPatch) -> None:
+    # --cores 4 (constrained) pins the first four cores and records cores=4.
+    captured: dict[str, list[str]] = {}
+
+    def fake_run_command(
+        argv: list[str], timeout: float, env: dict[str, str] | None = None
+    ) -> RawRun:
+        captured["argv"] = argv
+        return _stub_raw()
+
+    monkeypatch.setattr(collector, "run_command", fake_run_command)
+    monkeypatch.setattr(collector, "_taskset_available", lambda _cores: True)
+
+    adapter = StubAdapter(exit_code=0, diagnostics=0, files=1)
+    result = run_single(
+        adapter,
+        project="demo",
+        config=NormalizedConfig(cores=4),
+        thread_mode=ThreadMode.CONSTRAINED,
+        warmup=1,
+        runs=2,
+        timeout=10,
+    )
+    assert captured["argv"][:3] == ["taskset", "-c", "0-3"]
+    assert result.thread_mode_enforced is True
+    assert result.cores == 4
+
+
+def test_affinity_spec_maps_cores_to_cpu_list() -> None:
+    assert collector._affinity_spec(1) == "0"
+    assert collector._affinity_spec(4) == "0-3"
+    assert collector._affinity_spec(0) == "0"  # degenerate, clamped to a single core
+
+
+def test_taskset_multi_core_requires_full_mask(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(collector.shutil, "which", lambda _n: "/usr/bin/taskset")
+    # cores 0-3 all present -> pinnable.
+    monkeypatch.setattr(collector.os, "sched_getaffinity", lambda _pid: {0, 1, 2, 3, 4})
+    assert collector._taskset_available(4) is True
+    # core 3 missing from the mask -> taskset -c 0-3 would exit 1 -> not pinnable.
+    monkeypatch.setattr(collector.os, "sched_getaffinity", lambda _pid: {0, 1, 2})
+    assert collector._taskset_available(4) is False
+
+
 def test_one_core_without_taskset_is_not_enforced(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(collector, "_taskset_available", lambda _cores: False)
     adapter = StubAdapter(exit_code=0, diagnostics=0, files=1)

@@ -98,8 +98,15 @@ def test_command_writes_ty_toml_and_builds_argv(tmp_path: Path) -> None:
     assert "--color" in argv and "never" in argv
 
 
+def test_command_constrained_scales_cap_to_cores(tmp_path: Path) -> None:
+    # The constrained soft cap tracks --cores N, not a hardcoded 1.
+    cfg = NormalizedConfig(src_roots=("/abs/src",), cores=4)
+    _argv, env = TyAdapter().command("demo", cfg, ThreadMode.CONSTRAINED, tmp_path)
+    assert env == {"TY_MAX_PARALLELISM": "4"}
+
+
 def test_command_all_cores_omits_parallelism_cap(tmp_path: Path) -> None:
-    cfg = NormalizedConfig(src_roots=("/abs/src",))
+    cfg = NormalizedConfig(src_roots=("/abs/src",), cores=4)  # cores ignored for ALL_CORES
     _argv, env = TyAdapter().command("demo", cfg, ThreadMode.ALL_CORES, tmp_path)
     assert "TY_MAX_PARALLELISM" not in env  # all cores -> no cap
 

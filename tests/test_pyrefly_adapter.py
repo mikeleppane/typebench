@@ -103,8 +103,16 @@ def test_command_writes_pyrefly_toml_with_default_preset(tmp_path: Path) -> None
     assert "--check-all" not in argv and "-a" not in argv  # would report deps too
 
 
+def test_command_constrained_scales_threads_to_cores(tmp_path: Path) -> None:
+    # The rayon hard cap tracks --cores N, not a hardcoded 1.
+    cfg = NormalizedConfig(src_roots=("/abs/src",), cores=4)
+    argv, _env = PyreflyAdapter().command("demo", cfg, ThreadMode.CONSTRAINED, tmp_path)
+    idx = argv.index("--threads")
+    assert argv[idx + 1] == "4"
+
+
 def test_command_all_cores_omits_threads(tmp_path: Path) -> None:
-    cfg = NormalizedConfig(src_roots=("/abs/src",))
+    cfg = NormalizedConfig(src_roots=("/abs/src",), cores=4)  # cores ignored for ALL_CORES
     argv, _env = PyreflyAdapter().command("demo", cfg, ThreadMode.ALL_CORES, tmp_path)
     assert "--threads" not in argv
 

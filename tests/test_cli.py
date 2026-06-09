@@ -12,9 +12,11 @@ from typebench.models import (
     EnvFingerprint,
     PreparedProject,
     ResultClass,
+    ResultsEnvelope,
     RunResult,
     ThreadMode,
 )
+from typebench.normalized_config import NormalizedConfig
 
 runner = CliRunner()
 
@@ -241,3 +243,77 @@ def test_run_corpus_mode_builds_manifest(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert man.canonical_code_loc == 3200
     assert man.tool_install_source == "PyPI wheel (mypyc-compiled)"
     assert man.config_hash is not None and len(man.config_hash) == 64
+
+
+def test_run_threads_cores_into_normalized_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # --cores N must reach the NormalizedConfig the collector runs under.
+    captured: dict[str, object] = {}
+
+    def fake_run_single(adapter: object, **kwargs: object) -> RunResult:
+        captured.update(kwargs)
+        return _fake_result()
+
+    monkeypatch.setattr(cli, "run_single", fake_run_single)
+    out = tmp_path / "r.json"
+    args = ["--tool", "stub", "--project", "demo", "--output", str(out)]
+    result = _invoke_run([*args, "--no-calibrate", "--cores", "8"])
+    assert result.exit_code == 0, result.output
+    cfg = captured["config"]
+    assert isinstance(cfg, NormalizedConfig)
+    assert cfg.cores == 8
+
+
+def test_run_rejects_cores_below_one(tmp_path: Path) -> None:
+    out = tmp_path / "r.json"
+    result = _invoke_run(
+        ["--tool", "stub", "--project", "demo", "--output", str(out), "--cores", "0"]
+    )
+    assert result.exit_code == 2
+    assert "--cores must be >= 1" in result.output
+
+
+def test_suite_threads_cores_into_run_suite(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run_suite(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return ResultsEnvelope(suite_version="v", generated_at="t", runs=[])
+
+    monkeypatch.setattr(cli, "run_suite", fake_run_suite)
+    out = tmp_path / "r.json"
+    suite = tmp_path / "suite.toml"
+    suite.write_text("")
+    result = runner.invoke(
+        app,
+        [
+            "suite",
+            "--tool",
+            "stub",
+            "--corpus",
+            str(suite),
+            "--output",
+            str(out),
+            "--no-calibrate",
+            "--no-measure",
+            "--cores",
+            "8",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["cores"] == 8
+
+
+def test_suite_rejects_cores_below_one(tmp_path: Path) -> None:
+    out = tmp_path / "r.json"
+    suite = tmp_path / "suite.toml"
+    suite.write_text("")
+    result = runner.invoke(
+        app,
+        ["suite", "--corpus", str(suite), "--output", str(out), "--cores", "0"],
+    )
+    assert result.exit_code == 2
+    assert "--cores must be >= 1" in result.output
