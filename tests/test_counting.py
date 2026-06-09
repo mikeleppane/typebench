@@ -1,6 +1,10 @@
+import shutil
 from pathlib import Path
 
-from typebench.counting import count_first_party
+import pytest
+
+from typebench import counting
+from typebench.counting import count_code_loc, count_first_party, first_party_files
 from typebench.normalized_config import DEFAULT_EXCLUDES
 
 
@@ -39,3 +43,31 @@ def test_multiple_roots_are_summed(tmp_path: Path) -> None:
     _write(tmp_path / "two" / "b.py", "b = 2\n")
     fc = count_first_party([tmp_path / "one", tmp_path / "two"], DEFAULT_EXCLUDES)
     assert fc.files == 2
+
+
+def test_first_party_files_returns_the_canonical_set(tmp_path: Path) -> None:
+    pkg = tmp_path / "pkg"
+    _write(pkg / "a.py", "x = 1\n")
+    _write(pkg / "tests" / "t.py", "assert True\n")
+    files = first_party_files([pkg], DEFAULT_EXCLUDES)
+    assert [f.name for f in files] == ["a.py"]
+
+
+@pytest.mark.skipif(shutil.which("tokei") is None, reason="tokei not installed")
+def test_count_code_loc_excludes_comments_and_blanks(tmp_path: Path) -> None:
+    f = tmp_path / "m.py"
+    f.write_text("# comment\n\nx = 1\ny = 2\n", encoding="utf-8")
+    assert count_code_loc([f]) == 2
+
+
+def test_count_code_loc_returns_none_without_tokei(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    f = tmp_path / "m.py"
+    f.write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.setattr(counting.shutil, "which", lambda _name: None, raising=True)
+    assert count_code_loc([f]) is None
+
+
+def test_count_code_loc_none_on_empty_input(tmp_path: Path) -> None:
+    assert count_code_loc([]) is None
