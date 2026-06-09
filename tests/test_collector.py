@@ -6,7 +6,7 @@ import pytest
 
 from typebench import collector, measure
 from typebench.adapters.stub import StubAdapter
-from typebench.collector import run_single
+from typebench.collector import RunManifest, run_single
 from typebench.measure import MemorySummary, ResourceResult
 from typebench.models import FailurePhase, ResultClass, ThreadMode, TimingStats
 from typebench.normalized_config import NormalizedConfig
@@ -433,3 +433,65 @@ def test_taskset_available_when_core0_in_affinity(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(collector.shutil, "which", lambda _n: "/usr/bin/taskset")
     monkeypatch.setattr(collector.os, "sched_getaffinity", lambda _pid: {0, 1, 2})
     assert collector._taskset_available() is True
+
+
+def test_run_single_stamps_manifest_fields() -> None:
+    adapter = StubAdapter(exit_code=0, diagnostics=0, files=1)
+    manifest = RunManifest(
+        project_sha="80960fa",
+        lock_hash="lh",
+        config_hash="ch",
+        canonical_files=23,
+        canonical_loc=4000,
+        canonical_code_loc=3200,
+        tool_install_source="builtin",
+        over_reports=False,
+    )
+    result = run_single(
+        adapter,
+        project="httpx",
+        config=NormalizedConfig(),
+        thread_mode=ThreadMode.ALL_CORES,
+        warmup=1,
+        runs=1,
+        timeout=10,
+        manifest=manifest,
+    )
+    assert result.project_sha == "80960fa"
+    assert result.lock_hash == "lh"
+    assert result.config_hash == "ch"
+    assert result.tool_install_source == "builtin"
+    assert result.canonical_files == 23
+    assert result.canonical_code_loc == 3200
+    assert result.loc_denominator == "code"
+    assert result.over_reports is False
+
+
+def test_run_single_loc_denominator_physical_when_no_code_loc() -> None:
+    manifest = RunManifest(canonical_files=10, canonical_loc=500, canonical_code_loc=None)
+    result = run_single(
+        StubAdapter(exit_code=0, files=1),
+        project="demo",
+        config=NormalizedConfig(),
+        thread_mode=ThreadMode.ALL_CORES,
+        warmup=1,
+        runs=1,
+        timeout=10,
+        manifest=manifest,
+    )
+    assert result.loc_denominator == "physical"
+    assert result.canonical_code_loc is None
+
+
+def test_run_single_no_manifest_leaves_scalars_none() -> None:
+    result = run_single(
+        StubAdapter(exit_code=0, files=1),
+        project="demo",
+        config=NormalizedConfig(),
+        thread_mode=ThreadMode.ALL_CORES,
+        warmup=1,
+        runs=1,
+        timeout=10,
+    )
+    assert result.project_sha is None
+    assert result.loc_denominator is None

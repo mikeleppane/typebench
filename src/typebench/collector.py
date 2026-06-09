@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,6 +20,24 @@ if TYPE_CHECKING:
     from typebench.adapters.base import Adapter
     from typebench.models import CalibrationStats
     from typebench.normalized_config import NormalizedConfig
+
+
+@dataclass(frozen=True)
+class RunManifest:
+    """Per-cell reproducibility data the collector stamps onto a RunResult (spec §9).
+
+    Built by the suite orchestrator and corpus-mode `typebench run`; None in manual
+    mode. Carries scalars only; frozen dep contents stay in the committed lockfile.
+    """
+
+    project_sha: str | None = None
+    lock_hash: str | None = None
+    config_hash: str | None = None
+    canonical_files: int | None = None
+    canonical_loc: int | None = None
+    canonical_code_loc: int | None = None
+    tool_install_source: str | None = None
+    over_reports: bool | None = None
 
 
 # Module seams (overridable in tests + by capability):
@@ -64,9 +83,22 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
     mem_runs: int = 3,
     measure_enabled: bool = True,
     calibration: CalibrationStats | None = None,
+    manifest: RunManifest | None = None,
 ) -> RunResult:
     if mem_runs < 1:
         raise ValueError(f"mem_runs must be >= 1, got {mem_runs}")
+    # Lock-manifest stamp (spec §9). loc_denominator records which throughput
+    # denominator the headline kLOC/s should use: "code" when tokei produced a
+    # reconciled code-LOC, else "physical". None when no canonical denominator
+    # is known at all (manual run without a corpus project).
+    man = manifest or RunManifest()
+    loc_denominator = (
+        None
+        if man.canonical_files is None
+        else "code"
+        if man.canonical_code_loc is not None
+        else "physical"
+    )
     adapter.clear_cache(project)
     # Run-scoped workdir for any adapter-generated tool config; it must outlive
     # both the probe and every timed run, so it wraps the whole body (§6). The
@@ -92,6 +124,15 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
                 real_exit_code=-1,
                 error_detail=f"command construction failed: {exc}".strip()[-500:],
                 env=detect_env(),
+                project_sha=man.project_sha,
+                lock_hash=man.lock_hash,
+                config_hash=man.config_hash,
+                tool_install_source=man.tool_install_source,
+                canonical_files=man.canonical_files,
+                canonical_loc=man.canonical_loc,
+                canonical_code_loc=man.canonical_code_loc,
+                loc_denominator=loc_denominator,
+                over_reports=man.over_reports,
             )
 
         # Apply the uniform 1-core affinity prefix (ONE_CORE only) BEFORE any run,
@@ -238,4 +279,13 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
             parallel_efficiency=parallel_efficiency,
             calibration=calibration,
             env=detect_env(),
+            project_sha=man.project_sha,
+            lock_hash=man.lock_hash,
+            config_hash=man.config_hash,
+            tool_install_source=man.tool_install_source,
+            canonical_files=man.canonical_files,
+            canonical_loc=man.canonical_loc,
+            canonical_code_loc=man.canonical_code_loc,
+            loc_denominator=loc_denominator,
+            over_reports=man.over_reports,
         )
