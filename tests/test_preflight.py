@@ -147,7 +147,7 @@ class _CannedAdapter:
     ) -> tuple[list[str], dict[str, str]]:
         return (["true"], {})
 
-    def parallelism_cap(self, thread_mode: ThreadMode) -> ParallelismCap:
+    def parallelism_cap(self, thread_mode: ThreadMode, cores: int) -> ParallelismCap:
         return ParallelismCap(mechanism="x", hard_cap=False)
 
     def parse(self, stdout: str, stderr: str, exit_code: int) -> tuple[int | None, int | None]:

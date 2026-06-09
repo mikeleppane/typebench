@@ -91,14 +91,14 @@ class MypyAdapter:
         major = _major_version(self.version())
         return major is not None and major >= _MIN_PARALLEL_MAJOR
 
-    def _num_workers(self, config: NormalizedConfig, thread_mode: ThreadMode) -> int:
+    def _num_workers(self, cores: int, thread_mode: ThreadMode) -> int:
         """Worker count for --num-workers. CONSTRAINED uses the configured core
         count (taskset pins those same cores on top); ALL_CORES uses every logical
         CPU. Returns the raw count; the caller only emits the flag when it is > 1
         (1 == single-process == mypy's default, so passing -n1 would only add
         parallel-runtime overhead for no benefit)."""
         if thread_mode is ThreadMode.CONSTRAINED:
-            return config.cores
+            return cores
         return os.cpu_count() or 1
 
     def command(
@@ -122,7 +122,7 @@ class MypyAdapter:
         # every logical CPU. Only parallelize when workers > 1: -n1 is single-
         # process like the default but pays parallel-runtime overhead, and the
         # cores=1 default must stay byte-identical to the pre-parallel command.
-        workers = self._num_workers(config, thread_mode) if self._supports_parallel() else 1
+        workers = self._num_workers(config.cores, thread_mode) if self._supports_parallel() else 1
         if workers > 1:
             # mypy parallel mode REQUIRES the cache ("Cache must be enabled in
             # parallel mode") — incompatible with --no-incremental / --cache-dir=
@@ -142,11 +142,14 @@ class MypyAdapter:
         argv += list(config.src_roots)
         return (argv, {})
 
-    def parallelism_cap(self, thread_mode: ThreadMode) -> ParallelismCap:
-        # mypy >= 2.0: --num-workers is a HARD process cap (we set the exact worker
-        # count; affinity pins those cores on top). Pre-2.0 mypy has no parallel
-        # mode, so it is single-process — also a hard cap. Either way hard_cap=True.
-        if self._supports_parallel():
+    def parallelism_cap(self, thread_mode: ThreadMode, cores: int) -> ParallelismCap:
+        # Report the mechanism actually applied for this (thread_mode, cores) — the
+        # honesty contract. command() emits --num-workers ONLY when workers > 1, so
+        # mypy >= 2.0 with workers > 1 is the "--num-workers" hard cap; otherwise
+        # (cores=1, or pre-2.0) it runs single-process — also a hard cap. Mirrors
+        # the exact predicate in command() so the recorded mechanism never claims a
+        # worker cap that was not passed (e.g. the default constrained N=1 headline).
+        if self._supports_parallel() and self._num_workers(cores, thread_mode) > 1:
             return ParallelismCap(mechanism="--num-workers + cpu-affinity", hard_cap=True)
         return ParallelismCap(mechanism="single-process + cpu-affinity", hard_cap=True)
 

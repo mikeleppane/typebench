@@ -118,7 +118,7 @@ def test_command_all_cores_omits_threads(tmp_path: Path) -> None:
 
 
 def test_parallelism_cap_is_hard() -> None:
-    assert PyreflyAdapter().parallelism_cap(ThreadMode.CONSTRAINED).hard_cap is True
+    assert PyreflyAdapter().parallelism_cap(ThreadMode.CONSTRAINED, 1).hard_cap is True
 
 
 def test_version_is_no_raise_when_binary_absent(monkeypatch: pytest.MonkeyPatch) -> None:

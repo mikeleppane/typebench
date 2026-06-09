@@ -98,9 +98,10 @@ class PyreflyAdapter:
             argv += ["--threads", str(config.cores)]  # HARD cap (rayon pool = N)
         return (argv, {})
 
-    def parallelism_cap(self, thread_mode: ThreadMode) -> ParallelismCap:
-        # --threads 1 is a HARD cap (rayon num_threads(1)); RAYON_NUM_THREADS is
-        # NOT honored. Affinity (Plan 4) pins the core on top.
+    def parallelism_cap(self, thread_mode: ThreadMode, cores: int) -> ParallelismCap:
+        # --threads N is a HARD cap (rayon num_threads(N)); RAYON_NUM_THREADS is
+        # NOT honored. Always set in CONSTRAINED (incl. cores=1), so the mechanism
+        # is cores-independent. Affinity pins the cores on top.
         return ParallelismCap(mechanism="--threads (rayon) + cpu-affinity", hard_cap=True)
 
     def _files(self, stderr: str) -> int | None:

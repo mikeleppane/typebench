@@ -112,7 +112,7 @@ def test_command_all_cores_omits_parallelism_cap(tmp_path: Path) -> None:
 
 
 def test_parallelism_cap_is_soft() -> None:
-    cap = TyAdapter().parallelism_cap(ThreadMode.CONSTRAINED)
+    cap = TyAdapter().parallelism_cap(ThreadMode.CONSTRAINED, 1)
     assert cap.hard_cap is False
 
 

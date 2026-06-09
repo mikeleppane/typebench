@@ -151,6 +151,18 @@ def test_all_cores_uses_cpu_count(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
     assert argv[idx + 1] == "6"
 
 
+def test_all_cores_cpu_count_none_falls_back_to_single_process(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # os.cpu_count() can return None; `or 1` collapses to single-process (no -n).
+    _pin_version(monkeypatch, "mypy 2.1.0 (compiled: yes)")
+    monkeypatch.setattr(mypy_mod.os, "cpu_count", lambda: None)
+    cfg = NormalizedConfig(src_roots=("/abs/src",))
+    argv, _env = MypyAdapter().command("demo", cfg, ThreadMode.ALL_CORES, tmp_path)
+    assert "--num-workers" not in argv
+    assert "--cache-dir=/dev/null" in argv
+
+
 def test_pre_2_0_mypy_never_passes_num_workers(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -170,13 +182,27 @@ def test_unparsable_version_disables_parallel(
     assert "--num-workers" not in argv
 
 
-def test_parallelism_cap_mechanism_is_version_aware(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_parallelism_cap_reports_num_workers_only_when_parallel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Honesty: the reported mechanism must match what command() actually applies.
+    # mypy >= 2.0 emits --num-workers ONLY when workers > 1, so the cap must say
+    # --num-workers at cores>1 and single-process at the default cores=1 (where
+    # command() omits the flag). Mismatch = claiming a cap that never ran (§5.3).
     _pin_version(monkeypatch, "mypy 2.1.0 (compiled: yes)")
-    cap = MypyAdapter().parallelism_cap(ThreadMode.CONSTRAINED)
-    assert cap.hard_cap is True
-    assert "--num-workers" in cap.mechanism
+    a = MypyAdapter()
+    cap_multi = a.parallelism_cap(ThreadMode.CONSTRAINED, 4)
+    assert cap_multi.hard_cap is True
+    assert "--num-workers" in cap_multi.mechanism
+    cap_one = a.parallelism_cap(ThreadMode.CONSTRAINED, 1)
+    assert cap_one.hard_cap is True
+    assert "single-process" in cap_one.mechanism  # NOT --num-workers at N=1
+    assert "--num-workers" not in cap_one.mechanism
+
+
+def test_parallelism_cap_pre_2_0_is_single_process(monkeypatch: pytest.MonkeyPatch) -> None:
     _pin_version(monkeypatch, "mypy 1.13.0 (compiled: yes)")
-    cap_old = MypyAdapter().parallelism_cap(ThreadMode.CONSTRAINED)
+    cap_old = MypyAdapter().parallelism_cap(ThreadMode.CONSTRAINED, 8)
     assert cap_old.hard_cap is True
     assert "single-process" in cap_old.mechanism
 

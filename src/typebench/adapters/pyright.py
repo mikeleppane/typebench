@@ -135,8 +135,9 @@ class PyrightAdapter:
         # CONSTRAINED: omit --threads (default single main thread); affinity in Plan 4.
         return (argv, {})
 
-    def parallelism_cap(self, thread_mode: ThreadMode) -> ParallelismCap:
-        # pyright --threads is a hint, not an OS cap; affinity (Plan 4) makes it hard.
+    def parallelism_cap(self, thread_mode: ThreadMode, cores: int) -> ParallelismCap:
+        # pyright stays single-main-thread in CONSTRAINED regardless of cores;
+        # affinity makes the cap hard. cores-independent mechanism.
         return ParallelismCap(mechanism="cpu-affinity + single-thread", hard_cap=False)
 
     def parse(self, stdout: str, stderr: str, exit_code: int) -> tuple[int | None, int | None]:

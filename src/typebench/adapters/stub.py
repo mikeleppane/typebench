@@ -83,7 +83,7 @@ class StubAdapter:
             argv += ["--signal", str(self._signal)]
         return (argv, {})
 
-    def parallelism_cap(self, thread_mode: ThreadMode) -> ParallelismCap:
+    def parallelism_cap(self, thread_mode: ThreadMode, cores: int) -> ParallelismCap:
         # Single process: CPU affinity is the only lever and is a true cap.
         return ParallelismCap(mechanism="cpu-affinity", hard_cap=True)
 

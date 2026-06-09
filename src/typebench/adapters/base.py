@@ -59,8 +59,11 @@ class Adapter(Protocol):
         TY_MAX_PARALLELISM (§5.3)."""
         ...
 
-    def parallelism_cap(self, thread_mode: ThreadMode) -> ParallelismCap:
-        """Declare how this tool is constrained in the 1-core track (§5.3)."""
+    def parallelism_cap(self, thread_mode: ThreadMode, cores: int) -> ParallelismCap:
+        """Declare how this tool is constrained in the `constrained` track (§5.3).
+        `cores` is the configured core count so a tool whose cap MECHANISM depends
+        on it (e.g. mypy: `--num-workers` only when cores > 1, else single-process)
+        can report honestly — never claiming a cap it did not apply."""
         ...
 
     def parse(self, stdout: str, stderr: str, exit_code: int) -> tuple[int | None, int | None]:

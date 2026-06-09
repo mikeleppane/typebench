@@ -109,8 +109,9 @@ class TyAdapter:
             env["TY_MAX_PARALLELISM"] = str(config.cores)
         return (argv, env)
 
-    def parallelism_cap(self, thread_mode: ThreadMode) -> ParallelismCap:
-        # TY_MAX_PARALLELISM is a soft task cap, not a hard thread cap.
+    def parallelism_cap(self, thread_mode: ThreadMode, cores: int) -> ParallelismCap:
+        # TY_MAX_PARALLELISM is a soft task cap, not a hard thread cap. Always set in
+        # CONSTRAINED (incl. cores=1), so the mechanism is cores-independent.
         return ParallelismCap(mechanism="TY_MAX_PARALLELISM + cpu-affinity", hard_cap=False)
 
     def parse(self, stdout: str, stderr: str, exit_code: int) -> tuple[int | None, int | None]:

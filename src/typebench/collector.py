@@ -144,7 +144,7 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
         # Apply the N-core affinity prefix (CONSTRAINED only) BEFORE any run, so
         # probe + resource + timing all share the same pinned command (§5.3).
         argv, thread_enforced = _apply_affinity(argv, thread_mode, config.cores)
-        cap = adapter.parallelism_cap(thread_mode)
+        cap = adapter.parallelism_cap(thread_mode, config.cores)
         # The adapter mechanism strings bake in "cpu-affinity" (Plan 4's floor), so
         # record the cap + pinned core count ONLY when affinity actually ran. On
         # CONSTRAINED without taskset (mac/dev) or on ALL_CORES, record neither —
