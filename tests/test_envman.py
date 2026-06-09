@@ -10,6 +10,7 @@ from typebench.envman import (
     _SIDECAR,
     PrepareError,
     RunOut,
+    _backfill_code_loc,
     _clone,
     _fingerprint,
     _freeze,
@@ -20,6 +21,7 @@ from typebench.envman import (
     prepare_project,
     run_subprocess,
 )
+from typebench.models import PreparedProject
 
 
 class _FakeRunner:
@@ -316,3 +318,56 @@ def test_prepare_project_rebuilds_on_corrupt_sidecar(tmp_path: Path) -> None:
         _httpx_entry(), cache, run=_CloningRunner({("uv", "pip"): RunOut(0, "idna==3.0\n", "")})
     )
     assert second.canonical_files == first.canonical_files == 2
+
+
+def _prepared_stub(code_loc: int | None) -> PreparedProject:
+    return PreparedProject(
+        name="x",
+        checkout="/c",
+        venv_python="/v/bin/python",
+        src_roots=("/c/pkg",),
+        exclude_globs=("**/tests/**",),
+        python_version="3.12",
+        python_platform="linux",
+        sha="S",
+        lock_hash="L",
+        frozen=(),
+        canonical_files=10,
+        canonical_loc=100,
+        canonical_code_loc=code_loc,
+        fingerprint="fp",
+    )
+
+
+def test_backfill_code_loc_refreshes_missing_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A cache built before tokei integration has canonical_code_loc=None; on a cache
+    # hit the cheap derived count is recomputed without re-cloning, and the sidecar
+    # is rewritten so later runs see it.
+    sidecar = tmp_path / _SIDECAR
+    cached = _prepared_stub(None)
+    sidecar.write_text(cached.model_dump_json())
+    monkeypatch.setattr(envman.shutil, "which", lambda _name: "/usr/bin/tokei", raising=True)
+    monkeypatch.setattr(envman, "count_code_loc", lambda _files: 88, raising=True)
+    refreshed = _backfill_code_loc(cached, sidecar)
+    assert refreshed.canonical_code_loc == 88
+    assert PreparedProject.model_validate_json(sidecar.read_text()).canonical_code_loc == 88
+
+
+def test_backfill_code_loc_noop_when_already_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Already-populated count is left untouched and tokei is never invoked.
+    def _boom(_files: object) -> int:
+        raise AssertionError("count_code_loc must not be called when code_loc is present")
+
+    monkeypatch.setattr(envman, "count_code_loc", _boom, raising=True)
+    cached = _prepared_stub(500)
+    assert _backfill_code_loc(cached, tmp_path / _SIDECAR).canonical_code_loc == 500
+
+
+def test_backfill_code_loc_stays_none_without_tokei(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(envman.shutil, "which", lambda _name: None, raising=True)
+    cached = _prepared_stub(None)
+    assert _backfill_code_loc(cached, Path("/nonexistent/prepared.json")).canonical_code_loc is None

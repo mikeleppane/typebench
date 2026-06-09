@@ -246,6 +246,23 @@ def _normalize_locked_freeze(
     return tuple(sorted(replacement if _is_local_project(line) else line for line in frozen))
 
 
+def _backfill_code_loc(cached: PreparedProject, sidecar: Path) -> PreparedProject:
+    """Recompute tokei code-LOC on a cache hit when it is missing (a cache built
+    before tokei integration, or before tokei was installed). The clone + venv are
+    still valid, so only the cheap derived count is refreshed — not the whole
+    clone/install. Stays None (physical fallback) if tokei is still unavailable or
+    the file-set reconciliation fails."""
+    if cached.canonical_code_loc is not None or shutil.which("tokei") is None:
+        return cached
+    roots = [Path(root) for root in cached.src_roots]
+    code_loc = count_code_loc(first_party_files(roots, cached.exclude_globs))
+    if code_loc is None:
+        return cached
+    refreshed = cached.model_copy(update={"canonical_code_loc": code_loc})
+    sidecar.write_text(refreshed.model_dump_json(indent=2), encoding="utf-8")
+    return refreshed
+
+
 def prepare_project(
     entry: CorpusProject,
     cache_root: Path,
@@ -272,7 +289,7 @@ def prepare_project(
             shutil.rmtree(dest, ignore_errors=True)
         else:
             if _cache_valid(cached, fingerprint):
-                return cached
+                return _backfill_code_loc(cached, sidecar)
             shutil.rmtree(dest, ignore_errors=True)
 
     repo = dest / "repo"
