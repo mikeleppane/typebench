@@ -27,7 +27,7 @@ _IDS = [c[0] for c in _CASES]
 
 def _classify(adapter: Adapter, src_root: Path, workdir: Path) -> ResultClass:
     cfg = NormalizedConfig(src_roots=(str(src_root),))
-    argv, env = adapter.command("neutral", cfg, ThreadMode.ONE_CORE, workdir)
+    argv, env = adapter.command("neutral", cfg, ThreadMode.CONSTRAINED, workdir)
     raw = run_command(argv, timeout=120, env=env)
     return adapter.classify(raw)
 

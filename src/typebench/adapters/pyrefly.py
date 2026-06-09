@@ -94,7 +94,7 @@ class PyreflyAdapter:
             "json",
             "--summary=full",  # emits "N modules" on stderr (the files source)
         ]
-        if thread_mode is ThreadMode.ONE_CORE:
+        if thread_mode is ThreadMode.CONSTRAINED:
             argv += ["--threads", "1"]  # HARD cap (rayon pool = 1)
         return (argv, {})
 

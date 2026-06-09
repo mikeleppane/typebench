@@ -19,7 +19,7 @@ from typebench.suite import SuiteCell, build_matrix, run_suite, shard
 
 
 def test_build_matrix_is_project_major() -> None:
-    cells = build_matrix(["a", "b"], ["mypy", "ty"], [ThreadMode.ALL_CORES, ThreadMode.ONE_CORE])
+    cells = build_matrix(["a", "b"], ["mypy", "ty"], [ThreadMode.ALL_CORES, ThreadMode.CONSTRAINED])
     assert len(cells) == 8
     assert cells[0] == SuiteCell("a", "mypy", ThreadMode.ALL_CORES)
     assert all(isinstance(c, SuiteCell) for c in cells)
@@ -137,7 +137,7 @@ def test_run_suite_runs_ready_cells_and_builds_envelope() -> None:
         suite_path=Path("/x/suite.toml"),
         cache_root=Path("/x/cache"),
         tools=["stub"],
-        thread_modes=[ThreadMode.ALL_CORES, ThreadMode.ONE_CORE],
+        thread_modes=[ThreadMode.ALL_CORES, ThreadMode.CONSTRAINED],
         generated_at="2026-06-08T00:00:00Z",
         runs=1,
         warmup=1,

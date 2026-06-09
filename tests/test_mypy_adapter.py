@@ -71,7 +71,7 @@ def test_command_builds_first_party_only_argv(tmp_path: Path) -> None:
     cfg = NormalizedConfig(
         src_roots=("/abs/src",), python_version="3.11", venv_python="/v/bin/python"
     )
-    argv, env = MypyAdapter().command("demo", cfg, ThreadMode.ONE_CORE, tmp_path)
+    argv, env = MypyAdapter().command("demo", cfg, ThreadMode.CONSTRAINED, tmp_path)
     assert env == {}
     assert argv[0] == "mypy"
     assert "--config-file=" in argv  # suppress project config
@@ -90,7 +90,7 @@ def test_command_builds_first_party_only_argv(tmp_path: Path) -> None:
 
 def test_command_no_venv_omits_python_executable(tmp_path: Path) -> None:
     cfg = NormalizedConfig(src_roots=("/abs/src",))
-    argv, _env = MypyAdapter().command("demo", cfg, ThreadMode.ONE_CORE, tmp_path)
+    argv, _env = MypyAdapter().command("demo", cfg, ThreadMode.CONSTRAINED, tmp_path)
     assert "--python-executable" not in argv
 
 
@@ -109,7 +109,7 @@ def test_missing_mypy_yields_schema_valid_failed_env(monkeypatch: pytest.MonkeyP
         MypyAdapter(),
         project="demo",
         config=cfg,
-        thread_mode=ThreadMode.ONE_CORE,
+        thread_mode=ThreadMode.CONSTRAINED,
         warmup=1,
         runs=2,
         timeout=10,
@@ -122,7 +122,7 @@ def test_missing_mypy_yields_schema_valid_failed_env(monkeypatch: pytest.MonkeyP
 @pytest.mark.skipif(not _HAS_MYPY, reason="mypy not installed")
 def test_live_clean_project(tmp_path: Path) -> None:
     cfg = NormalizedConfig(src_roots=(str(_FIXTURES / "clean_project"),))
-    argv, env = MypyAdapter().command("clean", cfg, ThreadMode.ONE_CORE, tmp_path)
+    argv, env = MypyAdapter().command("clean", cfg, ThreadMode.CONSTRAINED, tmp_path)
     raw = run_command(argv, timeout=120, env=env)
     assert MypyAdapter().classify(raw) == ResultClass.CLEAN
     diags, files = MypyAdapter().parse(raw.stdout, raw.stderr, raw.exit_code)
@@ -133,7 +133,7 @@ def test_live_clean_project(tmp_path: Path) -> None:
 @pytest.mark.skipif(not _HAS_MYPY, reason="mypy not installed")
 def test_live_error_project(tmp_path: Path) -> None:
     cfg = NormalizedConfig(src_roots=(str(_FIXTURES / "error_project"),))
-    argv, env = MypyAdapter().command("err", cfg, ThreadMode.ONE_CORE, tmp_path)
+    argv, env = MypyAdapter().command("err", cfg, ThreadMode.CONSTRAINED, tmp_path)
     raw = run_command(argv, timeout=120, env=env)
     assert MypyAdapter().classify(raw) == ResultClass.DIAGNOSTICS
     diags, _ = MypyAdapter().parse(raw.stdout, raw.stderr, raw.exit_code)

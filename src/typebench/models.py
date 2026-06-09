@@ -117,15 +117,19 @@ class RunResult(BaseModel):
     tool_version: str
     project: str
     thread_mode: ThreadMode
-    # Honesty flag (spec §5.3), ONE_CORE-specific: True only when the 1-core
-    # taskset affinity floor was actually applied. ALL_CORES is unconstrained by
+    # Honesty flag (spec §5.3), CONSTRAINED-specific: True only when the N-core
+    # taskset affinity pin was actually applied. ALL_CORES is unconstrained by
     # design and leaves this False (it claims no pinning, so False is honest).
     # The record must never imply a methodology the engine did not run.
     thread_mode_enforced: bool = False
+    # The CONSTRAINED track's pinned core count (taskset -c 0..cores-1) + the per-tool
+    # worker cap (spec §5.3). None on ALL_CORES (unconstrained) and when affinity did
+    # not actually run, so the record never claims a pin width it did not apply.
+    cores: int | None = None
     # Per-tool worker-cap honesty (spec §5.3), from Adapter.parallelism_cap():
-    # hard_cap True = a real worker cap (pyrefly --threads 1, single-process mypy),
-    # False = best-effort (ty's soft TY_MAX_PARALLELISM, pyright --threads hint).
-    # Recorded only for the constrained ONE_CORE track; None for ALL_CORES.
+    # hard_cap True = a real worker cap (pyrefly/ty/mypy worker count), False =
+    # best-effort (ty's soft TY_MAX_PARALLELISM, pyright --threads hint).
+    # Recorded only for the CONSTRAINED track; None for ALL_CORES.
     hard_cap: bool | None = None
     cap_mechanism: str | None = None
     result_class: ResultClass

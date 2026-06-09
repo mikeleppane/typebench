@@ -132,7 +132,7 @@ class PyrightAdapter:
         ]
         if thread_mode is ThreadMode.ALL_CORES:
             argv.append("--threads")  # bare = auto-parallelism by logical CPUs (pyright docs)
-        # ONE_CORE: omit --threads (default single main thread); affinity in Plan 4.
+        # CONSTRAINED: omit --threads (default single main thread); affinity in Plan 4.
         return (argv, {})
 
     def parallelism_cap(self, thread_mode: ThreadMode) -> ParallelismCap:

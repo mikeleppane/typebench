@@ -304,7 +304,7 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
         raise typer.Exit(code=2)
     shard_index, shard_total = _parse_shard(shard)
     tools = tool or ["mypy", "pyright", "pyrefly", "ty"]
-    modes = thread_mode or [ThreadMode.ALL_CORES, ThreadMode.ONE_CORE]
+    modes = thread_mode or [ThreadMode.ALL_CORES, ThreadMode.CONSTRAINED]
     envelope = run_suite(
         suite_path=corpus,
         cache_root=cache_root,

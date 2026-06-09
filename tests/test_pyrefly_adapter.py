@@ -86,7 +86,7 @@ def test_command_writes_pyrefly_toml_with_default_preset(tmp_path: Path) -> None
     cfg = NormalizedConfig(
         src_roots=("/abs/src",), python_version="3.11", venv_python="/v/bin/python"
     )
-    argv, env = PyreflyAdapter().command("demo", cfg, ThreadMode.ONE_CORE, tmp_path)
+    argv, env = PyreflyAdapter().command("demo", cfg, ThreadMode.CONSTRAINED, tmp_path)
     assert env == {}
     cfg_path = tmp_path / "pyrefly.toml"
     assert "--config" in argv and str(cfg_path) in argv
@@ -110,7 +110,7 @@ def test_command_all_cores_omits_threads(tmp_path: Path) -> None:
 
 
 def test_parallelism_cap_is_hard() -> None:
-    assert PyreflyAdapter().parallelism_cap(ThreadMode.ONE_CORE).hard_cap is True
+    assert PyreflyAdapter().parallelism_cap(ThreadMode.CONSTRAINED).hard_cap is True
 
 
 def test_version_is_no_raise_when_binary_absent(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -128,7 +128,7 @@ def test_missing_pyrefly_yields_schema_valid_failed_env(monkeypatch: pytest.Monk
         PyreflyAdapter(),
         project="demo",
         config=cfg,
-        thread_mode=ThreadMode.ONE_CORE,
+        thread_mode=ThreadMode.CONSTRAINED,
         warmup=1,
         runs=2,
         timeout=10,
@@ -140,7 +140,7 @@ def test_missing_pyrefly_yields_schema_valid_failed_env(monkeypatch: pytest.Monk
 @pytest.mark.skipif(not _HAS_PYREFLY, reason="pyrefly not installed")
 def test_live_clean_project(tmp_path: Path) -> None:
     cfg = NormalizedConfig(src_roots=(str(_FIXTURES / "clean_project"),))
-    argv, env = PyreflyAdapter().command("clean", cfg, ThreadMode.ONE_CORE, tmp_path)
+    argv, env = PyreflyAdapter().command("clean", cfg, ThreadMode.CONSTRAINED, tmp_path)
     raw = run_command(argv, timeout=120, env=env)
     assert PyreflyAdapter().classify(raw) == ResultClass.CLEAN
     diags, files = PyreflyAdapter().parse(raw.stdout, raw.stderr, raw.exit_code)
@@ -153,7 +153,7 @@ def test_live_clean_project(tmp_path: Path) -> None:
 @pytest.mark.skipif(not _HAS_PYREFLY, reason="pyrefly not installed")
 def test_live_error_project(tmp_path: Path) -> None:
     cfg = NormalizedConfig(src_roots=(str(_FIXTURES / "error_project"),))
-    argv, env = PyreflyAdapter().command("err", cfg, ThreadMode.ONE_CORE, tmp_path)
+    argv, env = PyreflyAdapter().command("err", cfg, ThreadMode.CONSTRAINED, tmp_path)
     raw = run_command(argv, timeout=120, env=env)
     assert PyreflyAdapter().classify(raw) == ResultClass.DIAGNOSTICS
     diags, files = PyreflyAdapter().parse(raw.stdout, raw.stderr, raw.exit_code)
@@ -167,7 +167,7 @@ def test_command_sets_search_path_to_src_roots(tmp_path: Path) -> None:
     # src-layout project's first-party imports become spurious `missing-import`
     # diagnostics (neutrality leak). search-path must be pinned to the src roots.
     cfg = NormalizedConfig(src_roots=("/abs/src",))
-    PyreflyAdapter().command("demo", cfg, ThreadMode.ONE_CORE, tmp_path)
+    PyreflyAdapter().command("demo", cfg, ThreadMode.CONSTRAINED, tmp_path)
     written = tomllib.loads((tmp_path / "pyrefly.toml").read_text())
     assert written["search-path"] == ["/abs/src"]
 
@@ -180,6 +180,6 @@ def test_live_resolves_first_party_imports_in_src_layout(tmp_path: Path) -> None
     # (DIAGNOSTICS) purely because the config sits in a temp dir. Live guard for
     # the import-root neutrality fix.
     cfg = NormalizedConfig(src_roots=(str(_FIXTURES / "pkg_project"),))
-    argv, env = PyreflyAdapter().command("pkg", cfg, ThreadMode.ONE_CORE, tmp_path)
+    argv, env = PyreflyAdapter().command("pkg", cfg, ThreadMode.CONSTRAINED, tmp_path)
     raw = run_command(argv, timeout=120, env=env)
     assert PyreflyAdapter().classify(raw) == ResultClass.CLEAN, raw.stdout + raw.stderr

@@ -63,11 +63,11 @@ def _taskset_available() -> bool:
 
 
 def _apply_affinity(argv: list[str], thread_mode: ThreadMode) -> tuple[list[str], bool]:
-    """Prepend the uniform single-core affinity prefix for the ONE_CORE track.
+    """Prepend the uniform single-core affinity prefix for the CONSTRAINED track.
     Returns (argv, enforced). ALL_CORES is unconstrained by design (not pinned).
-    enforced is True ONLY when ONE_CORE AND taskset is actually available — the
+    enforced is True ONLY when CONSTRAINED AND taskset is actually available — the
     honesty flag must never claim a pin we could not apply (§5.3, Decision D)."""
-    if thread_mode is ThreadMode.ONE_CORE and _taskset_available():
+    if thread_mode is ThreadMode.CONSTRAINED and _taskset_available():
         return ([*_AFFINITY_PREFIX, *argv], True)
     return (argv, False)
 
@@ -135,15 +135,15 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
                 over_reports=man.over_reports,
             )
 
-        # Apply the uniform 1-core affinity prefix (ONE_CORE only) BEFORE any run,
+        # Apply the uniform 1-core affinity prefix (CONSTRAINED only) BEFORE any run,
         # so probe + resource + timing all share the same pinned command (§5.3).
         argv, thread_enforced = _apply_affinity(argv, thread_mode)
         cap = adapter.parallelism_cap(thread_mode)
         # The adapter mechanism strings bake in "cpu-affinity" (Plan 4's floor), so
-        # record the cap ONLY when affinity actually ran. On ONE_CORE without
+        # record the cap ONLY when affinity actually ran. On CONSTRAINED without
         # taskset (mac/dev), or on ALL_CORES, record neither — never claim a pin we
         # did not apply (§5.3 honesty, Decision A).
-        record_cap = thread_mode is ThreadMode.ONE_CORE and thread_enforced
+        record_cap = thread_mode is ThreadMode.CONSTRAINED and thread_enforced
         hard_cap = cap.hard_cap if record_cap else None
         cap_mechanism = cap.mechanism if record_cap else None
 

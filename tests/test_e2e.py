@@ -45,7 +45,7 @@ def test_pipeline_classes_round_trip_to_json(
     assert result.result_class == expected
     # ALL_CORES is unconstrained by design, so the 1-core affinity floor is never
     # applied -> thread_mode_enforced stays False on every host (§5.3, Decision D).
-    # ONE_CORE enforcement (taskset-dependent) is covered in test_collector.py.
+    # CONSTRAINED enforcement (taskset-dependent) is covered in test_collector.py.
     assert result.thread_mode_enforced is False
     restored = _round_trip(result, tmp_path)
     # Failures must be visible, never silently dropped (spec §12).

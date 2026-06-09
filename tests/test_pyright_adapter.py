@@ -60,7 +60,7 @@ def test_classify_zero_files_on_exit0_is_env_failure() -> None:
 
 
 def test_classify_unparseable_output_on_exit0_is_env_failure() -> None:
-    # exit 0 but --outputjson is unparseable (or dropped summary.filesAnalyzed):
+    # exit 0 but --outputjson is unparsable (or dropped summary.filesAnalyzed):
     # parse() -> (None, None). A CLEAN we cannot confirm is a false-clean; promote
     # to failed{env} (record-honesty, §7/§12). Regression for the files-is-None gap.
     assert PyrightAdapter().classify(RawRun(0, None, False, False, "not json", "")) == (
@@ -74,7 +74,7 @@ def test_classify_unparseable_output_on_exit0_is_env_failure() -> None:
 
 def test_command_writes_pyrightconfig_and_targets_project(tmp_path: Path) -> None:
     cfg = NormalizedConfig(src_roots=("/abs/src",), python_version="3.11")
-    argv, env = PyrightAdapter().command("demo", cfg, ThreadMode.ONE_CORE, tmp_path)
+    argv, env = PyrightAdapter().command("demo", cfg, ThreadMode.CONSTRAINED, tmp_path)
     assert env == {}
     written = json.loads((tmp_path / "pyrightconfig.json").read_text())
     # pyright drops absolute include entries, so the adapter renders src_roots
@@ -90,7 +90,7 @@ def test_command_writes_pyrightconfig_and_targets_project(tmp_path: Path) -> Non
 
 def test_command_maps_python_platform(tmp_path: Path) -> None:
     cfg = NormalizedConfig(src_roots=("/abs/src",), python_platform="darwin")
-    argv, _env = PyrightAdapter().command("demo", cfg, ThreadMode.ONE_CORE, tmp_path)
+    argv, _env = PyrightAdapter().command("demo", cfg, ThreadMode.CONSTRAINED, tmp_path)
     written = json.loads((tmp_path / "pyrightconfig.json").read_text())
     assert written["pythonPlatform"] == "Darwin"
     assert "Darwin" in argv
@@ -98,7 +98,7 @@ def test_command_maps_python_platform(tmp_path: Path) -> None:
 
 def test_command_derives_venv_path_layout(tmp_path: Path) -> None:
     cfg = NormalizedConfig(src_roots=("/abs/src",), venv_python="/proj/.venv/bin/python")
-    PyrightAdapter().command("demo", cfg, ThreadMode.ONE_CORE, tmp_path)
+    PyrightAdapter().command("demo", cfg, ThreadMode.CONSTRAINED, tmp_path)
     written = json.loads((tmp_path / "pyrightconfig.json").read_text())
     assert written["venvPath"] == "/proj"
     assert written["venv"] == ".venv"
@@ -120,7 +120,7 @@ def test_command_venv_layout_does_not_follow_bin_python_symlink(tmp_path: Path) 
     workdir = tmp_path / "wd"
     workdir.mkdir()
     cfg = NormalizedConfig(src_roots=("/abs/src",), venv_python=str(venv_python))
-    PyrightAdapter().command("demo", cfg, ThreadMode.ONE_CORE, workdir)
+    PyrightAdapter().command("demo", cfg, ThreadMode.CONSTRAINED, workdir)
     written = json.loads((workdir / "pyrightconfig.json").read_text())
     assert written["venvPath"] == str(tmp_path)
     assert written["venv"] == "myenv"  # the venv dir, NOT "system"/"usr"
@@ -141,7 +141,7 @@ def test_missing_pyright_yields_schema_valid_failed_env(monkeypatch: pytest.Monk
         PyrightAdapter(),
         project="demo",
         config=cfg,
-        thread_mode=ThreadMode.ONE_CORE,
+        thread_mode=ThreadMode.CONSTRAINED,
         warmup=1,
         runs=2,
         timeout=10,
@@ -154,7 +154,7 @@ def test_missing_pyright_yields_schema_valid_failed_env(monkeypatch: pytest.Monk
 @pytest.mark.skipif(not _HAS_PYRIGHT, reason="pyright not installed")
 def test_live_clean_project(tmp_path: Path) -> None:
     cfg = NormalizedConfig(src_roots=(str(_FIXTURES / "clean_project"),))
-    argv, env = PyrightAdapter().command("clean", cfg, ThreadMode.ONE_CORE, tmp_path)
+    argv, env = PyrightAdapter().command("clean", cfg, ThreadMode.CONSTRAINED, tmp_path)
     raw = run_command(argv, timeout=120, env=env)
     assert PyrightAdapter().classify(raw) == ResultClass.CLEAN
     diags, files = PyrightAdapter().parse(raw.stdout, raw.stderr, raw.exit_code)
@@ -165,7 +165,7 @@ def test_live_clean_project(tmp_path: Path) -> None:
 @pytest.mark.skipif(not _HAS_PYRIGHT, reason="pyright not installed")
 def test_live_error_project(tmp_path: Path) -> None:
     cfg = NormalizedConfig(src_roots=(str(_FIXTURES / "error_project"),))
-    argv, env = PyrightAdapter().command("err", cfg, ThreadMode.ONE_CORE, tmp_path)
+    argv, env = PyrightAdapter().command("err", cfg, ThreadMode.CONSTRAINED, tmp_path)
     raw = run_command(argv, timeout=120, env=env)
     assert PyrightAdapter().classify(raw) == ResultClass.DIAGNOSTICS
     diags, _ = PyrightAdapter().parse(raw.stdout, raw.stderr, raw.exit_code)

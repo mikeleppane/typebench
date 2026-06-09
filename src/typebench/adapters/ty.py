@@ -104,7 +104,7 @@ class TyAdapter:
             argv += ["--python", config.venv_python]  # resolve third-party from venv
 
         env: dict[str, str] = {}
-        if thread_mode is ThreadMode.ONE_CORE:
+        if thread_mode is ThreadMode.CONSTRAINED:
             env["TY_MAX_PARALLELISM"] = "1"  # SOFT cap (ty may still spawn threads)
         return (argv, env)
 

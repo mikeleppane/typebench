@@ -45,7 +45,7 @@ def _probe_one(
     """Probe one adapter and assemble its ToolPreflight."""
     with tempfile.TemporaryDirectory(prefix="typebench-preflight-") as tmp:
         try:
-            argv, env = adapter.command(prepared.name, config, ThreadMode.ONE_CORE, Path(tmp))
+            argv, env = adapter.command(prepared.name, config, ThreadMode.CONSTRAINED, Path(tmp))
         except (OSError, ValueError) as exc:
             return ToolPreflight(
                 tool=adapter.name,

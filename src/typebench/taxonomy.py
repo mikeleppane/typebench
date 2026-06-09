@@ -29,7 +29,7 @@ class ResultClass(StrEnum):
 class ThreadMode(StrEnum):
     """Spec §5.3. A literal '1 thread' is not claimed; the floor is 1-core."""
 
-    ONE_CORE = "1-core-constrained"
+    CONSTRAINED = "constrained"
     ALL_CORES = "all-cores"
 
 

@@ -93,7 +93,7 @@ def capable(runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess
     the cpu controller is not delegated to user scopes, `-p CPUAccounting=yes`
     fails, so we fall back to timing-only (§15) instead of silently recording
     `cpu_time_s=0`. `taskset` is deliberately NOT checked here: it gates only the
-    ONE_CORE affinity floor (`collector._taskset_available`), never all-cores
+    CONSTRAINED affinity floor (`collector._taskset_available`), never all-cores
     memory measurement, so a box without `taskset` still measures memory."""
     if shutil.which("systemd-run") is None:
         return False

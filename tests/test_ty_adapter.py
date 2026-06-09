@@ -79,7 +79,7 @@ def test_command_writes_ty_toml_and_builds_argv(tmp_path: Path) -> None:
     cfg = NormalizedConfig(
         src_roots=("/abs/src",), python_version="3.11", venv_python="/v/bin/python"
     )
-    argv, env = TyAdapter().command("demo", cfg, ThreadMode.ONE_CORE, tmp_path)
+    argv, env = TyAdapter().command("demo", cfg, ThreadMode.CONSTRAINED, tmp_path)
     assert env == {"TY_MAX_PARALLELISM": "1"}  # 1-core soft cap
     cfg_path = tmp_path / "ty.toml"
     assert "--config-file" in argv and str(cfg_path) in argv
@@ -105,7 +105,7 @@ def test_command_all_cores_omits_parallelism_cap(tmp_path: Path) -> None:
 
 
 def test_parallelism_cap_is_soft() -> None:
-    cap = TyAdapter().parallelism_cap(ThreadMode.ONE_CORE)
+    cap = TyAdapter().parallelism_cap(ThreadMode.CONSTRAINED)
     assert cap.hard_cap is False
 
 
@@ -124,7 +124,7 @@ def test_missing_ty_yields_schema_valid_failed_env(monkeypatch: pytest.MonkeyPat
         TyAdapter(),
         project="demo",
         config=cfg,
-        thread_mode=ThreadMode.ONE_CORE,
+        thread_mode=ThreadMode.CONSTRAINED,
         warmup=1,
         runs=2,
         timeout=10,
@@ -136,7 +136,7 @@ def test_missing_ty_yields_schema_valid_failed_env(monkeypatch: pytest.MonkeyPat
 @pytest.mark.skipif(not _HAS_TY, reason="ty not installed")
 def test_live_clean_project(tmp_path: Path) -> None:
     cfg = NormalizedConfig(src_roots=(str(_FIXTURES / "clean_project"),))
-    argv, env = TyAdapter().command("clean", cfg, ThreadMode.ONE_CORE, tmp_path)
+    argv, env = TyAdapter().command("clean", cfg, ThreadMode.CONSTRAINED, tmp_path)
     raw = run_command(argv, timeout=120, env=env)
     assert TyAdapter().classify(raw) == ResultClass.CLEAN
     diags, _files = TyAdapter().parse(raw.stdout, raw.stderr, raw.exit_code)
@@ -146,7 +146,7 @@ def test_live_clean_project(tmp_path: Path) -> None:
 @pytest.mark.skipif(not _HAS_TY, reason="ty not installed")
 def test_live_error_project(tmp_path: Path) -> None:
     cfg = NormalizedConfig(src_roots=(str(_FIXTURES / "error_project"),))
-    argv, env = TyAdapter().command("err", cfg, ThreadMode.ONE_CORE, tmp_path)
+    argv, env = TyAdapter().command("err", cfg, ThreadMode.CONSTRAINED, tmp_path)
     raw = run_command(argv, timeout=120, env=env)
     assert TyAdapter().classify(raw) == ResultClass.DIAGNOSTICS
     diags, _ = TyAdapter().parse(raw.stdout, raw.stderr, raw.exit_code)
@@ -159,7 +159,7 @@ def test_command_disables_ignore_file_filtering() -> None:
     # tools analyze them -> non-neutral file set / false-clean. The normalized
     # file set must derive only from src_roots + exclude_globs.
     cfg = NormalizedConfig(src_roots=("/abs/src",))
-    argv, _env = TyAdapter().command("demo", cfg, ThreadMode.ONE_CORE, Path("/tmp"))
+    argv, _env = TyAdapter().command("demo", cfg, ThreadMode.CONSTRAINED, Path("/tmp"))
     assert "--no-respect-ignore-files" in argv
 
 
@@ -176,7 +176,7 @@ def test_live_gitignored_first_party_file_is_still_checked(tmp_path: Path) -> No
     workdir = tmp_path / "work"
     workdir.mkdir()
     cfg = NormalizedConfig(src_roots=(str(src),))
-    argv, env = TyAdapter().command("gi", cfg, ThreadMode.ONE_CORE, workdir)
+    argv, env = TyAdapter().command("gi", cfg, ThreadMode.CONSTRAINED, workdir)
     raw = run_command(argv, timeout=120, env=env)
     assert TyAdapter().classify(raw) == ResultClass.DIAGNOSTICS, raw.stdout + raw.stderr
     diags, _files = TyAdapter().parse(raw.stdout, raw.stderr, raw.exit_code)
