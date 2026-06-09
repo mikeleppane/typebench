@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>typebench — Python type-checker performance trends</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; }
+    h1 { margin-bottom: 0; }
+    .sub { color: #666; margin-top: .25rem; }
+    .controls { margin: 1rem 0; display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
+    canvas { max-width: 100%; }
+    .note { color: #666; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <h1>typebench</h1>
+  <p class="sub">Neutral, reproducible Python type-checker performance trends. Raw JSON is the source of truth; this page renders it.</p>
+  <div class="controls">
+    <label>Metric:
+      <select id="metric">
+        <option value="wall_median_s_norm">Wall (calibration-normalized)</option>
+        <option value="wall_median_s">Wall (raw)</option>
+        <option value="peak_mem_mb">Peak cgroup memory (MB)</option>
+        <option value="kloc_s">Throughput (kLOC/s)</option>
+      </select>
+    </label>
+    <label>Thread mode: <select id="mode"></select></label>
+    <label>Project: <select id="project"></select></label>
+  </div>
+  <canvas id="chart" height="160"></canvas>
+  <p class="note">Normalized series divide each run by its per-CPU-model calibration anchor, so VM hardware variance does not masquerade as a checker change (spec &sect;5.7).</p>
+  <script src="./vendor/chart.umd.min.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
