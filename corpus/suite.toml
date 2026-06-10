@@ -1,11 +1,19 @@
 [suite]
-version = "2026-06-08"
+version = "2026-06-10"
 
 # typebench corpus (spec §4). Each entry is pinned to a release-tag SHA so
 # third-party imports resolve identically over time. Checkers always float to
 # latest; the corpus is bumped via a PR-gated job (later plan). src_roots and
 # exclude_globs are repo-relative. install is the explicit per-entry recipe,
 # run with the prepared venv active.
+#
+# Three buckets, bucketed on tokei code-LOC (blanks + comments excluded) over
+# src_roots with tests excluded — the same denominator the engine reports:
+#   small  ~5-18k   medium  ~18-40k   large  >70k
+# constraints=None for this seed; locks are frozen from the prepared cache and
+# wired in afterwards (a later hardening pass).
+
+# ===================== SMALL =====================
 
 [[project]]
 name = "httpx"
@@ -18,3 +26,164 @@ python_platform = "linux"
 src_roots = ["httpx"]
 install = ["uv pip install ."]
 constraints = "corpus/locks/httpx-0.28.0.txt"
+
+[[project]]
+name = "click"
+repo_url = "https://github.com/pallets/click"
+sha = "6eeb50e948ea136db145280f6f5dd52eca3fa7e5"
+tag = "8.4.1"
+size_bucket = "small"
+python_version = "3.12"
+python_platform = "linux"
+src_roots = ["src/click"]
+install = ["uv pip install ."]
+
+[[project]]
+name = "jinja2"
+repo_url = "https://github.com/pallets/jinja"
+sha = "15206881c006c79667fe5154fe80c01c65410679"
+tag = "3.1.6"
+size_bucket = "small"
+python_version = "3.12"
+python_platform = "linux"
+src_roots = ["src/jinja2"]
+install = ["uv pip install ."]
+
+[[project]]
+name = "fastapi"
+repo_url = "https://github.com/fastapi/fastapi"
+sha = "82064857539e6286522c347b4b11331b48dd2378"
+tag = "0.136.3"
+size_bucket = "small"
+python_version = "3.12"
+python_platform = "linux"
+src_roots = ["fastapi"]
+install = ["uv pip install ."]
+
+[[project]]
+name = "anyio"
+repo_url = "https://github.com/agronholm/anyio"
+sha = "afbe93ca9d0c447adf26e9c1715ac20870622bf2"
+tag = "4.13.0"
+size_bucket = "small"
+python_version = "3.12"
+python_platform = "linux"
+src_roots = ["src/anyio"]
+install = ["uv pip install ."]
+
+# ===================== MEDIUM =====================
+
+[[project]]
+name = "trio"
+repo_url = "https://github.com/python-trio/trio"
+sha = "3073f0c2108bad83c27dda6c83474a9b8ce4a957"
+tag = "v0.33.0"
+size_bucket = "medium"
+python_version = "3.12"
+python_platform = "linux"
+src_roots = ["src/trio"]
+install = ["uv pip install ."]
+# trio embeds its test suite inside the package as _tests/ (and _core/_tests/);
+# exclude both so the denominator is shipped code, keeping public testing/.
+exclude_globs = ["**/_tests/**"]
+
+[[project]]
+name = "pydantic"
+repo_url = "https://github.com/pydantic/pydantic"
+sha = "cf67d4b3193c3fe43ede18612ed62785eee11382"
+tag = "v2.13.4"
+size_bucket = "medium"
+python_version = "3.12"
+python_platform = "linux"
+src_roots = ["pydantic"]
+install = ["uv pip install ."]
+# Exclude the legacy v1 compat shim so the target is v2-only source.
+exclude_globs = ["**/v1/**"]
+
+[[project]]
+name = "rich"
+repo_url = "https://github.com/Textualize/rich"
+sha = "6ac483cbea39cab124dfd3483bba70ffafb71050"
+tag = "v15.0.0"
+size_bucket = "medium"
+python_version = "3.12"
+python_platform = "linux"
+src_roots = ["rich"]
+install = ["uv pip install ."]
+
+[[project]]
+name = "hypothesis"
+repo_url = "https://github.com/HypothesisWorks/hypothesis"
+sha = "fcc26c4c67eb9aaf4f153417f373f4c349128b54"
+tag = "v6.155.2"
+size_bucket = "medium"
+python_version = "3.12"
+python_platform = "linux"
+# The installable package lives under hypothesis/ (own pyproject); source at
+# hypothesis/src/hypothesis. The repo root pyproject is tooling config only.
+src_roots = ["hypothesis/src/hypothesis"]
+install = ["uv pip install ./hypothesis"]
+
+[[project]]
+name = "pylint"
+repo_url = "https://github.com/pylint-dev/pylint"
+sha = "88e1ab7545a4af4aea15c305a154c164a95ab842"
+tag = "v4.0.5"
+size_bucket = "medium"
+python_version = "3.12"
+python_platform = "linux"
+src_roots = ["pylint"]
+install = ["uv pip install ."]
+
+# ===================== LARGE =====================
+
+[[project]]
+name = "mypy"
+repo_url = "https://github.com/python/mypy"
+sha = "c1c336d7e34eb313080c79b156518c58d27c7234"
+tag = "v2.1.0"
+size_bucket = "large"
+python_version = "3.12"
+python_platform = "linux"
+# Both the checker (mypy/) and the compiler backend (mypyc/); test/ dirs are
+# excluded by the default **/test/** glob. Exclude the bundled vendored typeshed
+# (third-party stubs, not mypy's own code) — mypy's self-shadow guard hard-errors
+# on it, and it inflates no .py LOC anyway.
+src_roots = ["mypy", "mypyc"]
+install = ["uv pip install ."]
+exclude_globs = ["**/typeshed/**"]
+
+[[project]]
+name = "sqlalchemy"
+repo_url = "https://github.com/sqlalchemy/sqlalchemy"
+sha = "372eab22636380efeda26affd0b1c0f4b5031489"
+tag = "rel_2_0_50"
+size_bucket = "large"
+python_version = "3.12"
+python_platform = "linux"
+src_roots = ["lib"]
+install = ["uv pip install ."]
+
+[[project]]
+name = "textual"
+repo_url = "https://github.com/Textualize/textual"
+sha = "182277f69011ba0b9665a9a1b1b0c3e89630e913"
+tag = "v8.2.7"
+size_bucket = "large"
+python_version = "3.12"
+python_platform = "linux"
+src_roots = ["src/textual"]
+install = ["uv pip install ."]
+
+[[project]]
+name = "ansible-core"
+repo_url = "https://github.com/ansible/ansible"
+sha = "98ab81f087db7cb81355e297f404781b550f9212"
+tag = "v2.21.0"
+size_bucket = "large"
+python_version = "3.12"
+python_platform = "linux"
+# Lightly typed, ships no py.typed — the "real-world large app, sparse
+# annotations" data point. Flagged asymmetry, not apples-to-apples density.
+src_roots = ["lib/ansible"]
+install = ["uv pip install ."]
