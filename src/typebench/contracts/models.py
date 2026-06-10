@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
+from typebench.contracts.policy import Policy
+
 # ResultClass / ThreadMode / FailurePhase live in a pydantic-free module so the
 # exit-code wrapper (hyperfine's per-run command) can import them without paying
 # pydantic's import cost on every timed run. Re-exported here for the stable
@@ -16,6 +18,7 @@ __all__ = [
     "FailurePhase",
     "LocDenominator",
     "MemoryStats",
+    "Policy",
     "PreflightReport",
     "PreparedProject",
     "ResultClass",
@@ -113,13 +116,27 @@ class RunResult(BaseModel):
     `typebench run` writes ONE self-contained record. `typebench suite` wraps
     many records in ResultsEnvelope; the per-record schema_version versions this
     record shape independently of the envelope.
+    New fields are defaulted so a manual typebench run (no corpus, no resolved
+    spec) still constructs a valid v4 record; the bump distinguishes v4 records
+    from legacy v3.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: int = 3
+    schema_version: int = 4
     tool: str
-    tool_version: str
+    tool_version: str  # EXACT resolved checker version (never "latest")
+    # Resolved checker identity (tool + version + optional label). The matrix key
+    # for version-aware comparison; None in a manual run() with no resolved spec.
+    checker_id: str | None = None
+    # The policy preset this measurement ran under. STANDARD keeps today's
+    # config_hash so trend history stays continuous; a non-standard policy would
+    # differ deliberately (and is not headline-eligible).
+    policy: Policy = Policy.STANDARD
+    # Whether this measurement counts toward the published headline. True for the
+    # standard policy; a non-standard policy sets it False so the audit surface
+    # never mixes a tuned posture into the neutral comparison.
+    headline_eligible: bool = True
     project: str
     thread_mode: ThreadMode
     # Honesty flag, CONSTRAINED-specific: True only when the N-core taskset

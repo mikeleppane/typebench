@@ -10,6 +10,7 @@ from typebench.contracts.models import (
     FailurePhase,
     LocDenominator,
     MemoryStats,
+    Policy,
     ResultClass,
     ResultsEnvelope,
     RunResult,
@@ -59,7 +60,7 @@ def test_run_result_round_trips_through_json(make_env: EnvFactory) -> None:
     blob = result.model_dump_json()
     restored = RunResult.model_validate_json(blob)
     assert restored == result
-    assert restored.schema_version == 3
+    assert restored.schema_version == 4
     assert restored.thread_mode_enforced is False  # default; Plan 4 sets it true
     assert json.loads(blob)["result_class"] == "diagnostics"
 
@@ -92,6 +93,46 @@ def test_run_result_rejects_unknown_fields(make_env: EnvFactory) -> None:
                 "bogus": True,
             }
         )
+
+
+def test_runresult_schema_version_is_4() -> None:
+    rec = RunResult(
+        tool="mypy",
+        tool_version="1.18.2",
+        project="httpx",
+        thread_mode=ThreadMode.ALL_CORES,
+        result_class=ResultClass.CLEAN,
+        real_exit_code=0,
+        env=EnvFingerprint(
+            os="linux", kernel="x", cpu_model="x", core_count=1, python_version="3.12"
+        ),
+    )
+    assert rec.schema_version == 4
+    # New identity/policy fields default for a manual (no-corpus) run.
+    assert rec.checker_id is None
+    assert rec.policy is Policy.STANDARD
+    assert rec.headline_eligible is True  # standard policy is headline-eligible
+
+
+def test_runresult_records_checker_id_and_policy_round_trip() -> None:
+    rec = RunResult(
+        tool="mypy",
+        tool_version="1.19.0",
+        checker_id="mypy@1.19.0+rc",
+        policy=Policy.STANDARD,
+        headline_eligible=True,
+        project="httpx",
+        thread_mode=ThreadMode.CONSTRAINED,
+        result_class=ResultClass.CLEAN,
+        real_exit_code=0,
+        env=EnvFingerprint(
+            os="linux", kernel="x", cpu_model="x", core_count=1, python_version="3.12"
+        ),
+    )
+    back = RunResult.model_validate_json(rec.model_dump_json())
+    assert back.checker_id == "mypy@1.19.0+rc"
+    assert back.policy is Policy.STANDARD
+    assert back.schema_version == 4
 
 
 def test_thread_mode_enforced_defaults_false(make_env: EnvFactory) -> None:
@@ -189,7 +230,7 @@ def test_run_result_v2_carries_memory_cpu_calibration(make_env: EnvFactory) -> N
         calibration=calib,
         env=make_env(),
     )
-    assert r.schema_version == 3
+    assert r.schema_version == 4
     assert r.memory is not None and r.memory.peak_bytes_median == 110
     assert r.cpu_time_s == 0.42
     assert r.parallel_efficiency == 0.95
@@ -209,7 +250,7 @@ def test_run_result_v2_defaults_are_none(make_env: EnvFactory) -> None:
         real_exit_code=0,
         env=make_env(),
     )
-    assert r.schema_version == 3
+    assert r.schema_version == 4
     assert r.memory is None
     assert r.cpu_time_s is None
     assert r.parallel_efficiency is None
@@ -254,7 +295,7 @@ def test_run_result_enrichment_scalars_default_none_and_round_trip(make_env: Env
         real_exit_code=0,
         env=make_env(),
     )
-    assert base.schema_version == 3
+    assert base.schema_version == 4
     for field in (
         base.project_sha,
         base.lock_hash,
