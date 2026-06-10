@@ -194,11 +194,12 @@ def render_compare(envelope: ResultsEnvelope, baseline: str | None = None) -> st
         base_mem = _peak_mb_value(baseline_record) if baseline_record is not None else None
 
         parts.append(f"\n#### {project} — {mode} · {_cores_label(cores)}\n")
-        parts.append(
-            "| Checker | Wall median (s) | Δ wall | kLOC/s | Δ kLOC/s | Peak mem (MB) | Δ mem |\n"
-            "|---------|-----------------|--------|--------|----------|---------------|-------|\n"
-        )
-        rows = []
+        # Header + separator + data rows must be ONE join-free block: a blank line
+        # between the separator and the first row terminates the table in GFM.
+        rows = [
+            "| Checker | Wall median (s) | Δ wall | kLOC/s | Δ kLOC/s | Peak mem (MB) | Δ mem |",
+            "|---------|-----------------|--------|--------|----------|---------------|-------|",
+        ]
         for record in sorted(records, key=_sort_key):
             checker_id = _checker_id(record)
             wall = record.timing.median_s if record.timing is not None else None

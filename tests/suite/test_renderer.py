@@ -397,6 +397,11 @@ def test_render_compare_baseline_is_first_spec_others_are_deltas(
     assert "6.27" in md
     assert "-7.3%" in md
     assert "diagnostics" not in md.lower()
+    # GFM: a blank line after the |---| separator terminates the table, so the data
+    # rows must immediately follow it (no blank line between separator and first row).
+    lines = md.splitlines()
+    sep = next(i for i, line in enumerate(lines) if line.startswith("|---"))
+    assert lines[sep + 1].lstrip().startswith("| mypy@")
 
 
 def test_render_compare_defaults_baseline_to_first_record_checker_id(
