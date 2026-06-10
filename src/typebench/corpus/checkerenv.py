@@ -12,7 +12,7 @@ from pathlib import Path
 from typebench.contracts.identity import CheckerRuntime, CheckerSpec, Source
 from typebench.corpus.envman import PrepareError, Runner, RunOut, lock_hash, run_subprocess
 
-__all__ = ["PrepareError", "RunOut", "Runner", "prepare_checker"]
+__all__ = ["PrepareError", "RunOut", "Runner", "cache_status", "prepare_checker"]
 
 _SIDECAR = "checker.json"
 
@@ -146,6 +146,33 @@ def prepare_checker(
     except PrepareError:
         shutil.rmtree(dest, ignore_errors=True)
         raise
+
+
+def cache_status(
+    spec: CheckerSpec,
+    cache_root: Path,
+    *,
+    python_version: str = "3.12",
+    python_platform: str = "linux",
+) -> tuple[str, str | None]:
+    """Return the checker env cache state without building anything."""
+    if spec.version is None:
+        return ("will-build", None)
+
+    cache_root = cache_root.resolve()
+    fingerprint = _fingerprint(spec, python_version, python_platform)
+    dest = _checker_dir(cache_root, spec.checker_id(), fingerprint)
+    sidecar = dest / _SIDECAR
+    if not sidecar.is_file():
+        return ("will-build", None)
+
+    try:
+        data = _read_sidecar(sidecar)
+    except (OSError, ValueError):
+        return ("will-build", None)
+
+    version = data.get("version")
+    return ("cache-hit", str(version) if version else None)
 
 
 def _read_sidecar(sidecar: Path) -> dict[str, object]:

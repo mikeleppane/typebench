@@ -21,9 +21,11 @@ from typebench.adapters.pyright import PyrightAdapter
 from typebench.adapters.stub import StubAdapter
 from typebench.adapters.ty import TyAdapter
 from typebench.contracts.config import DEFAULT_EXCLUDES, NormalizedConfig, config_hash
+from typebench.contracts.configfile import load_config
 from typebench.contracts.identity import CheckerSpec
 from typebench.contracts.models import ResultsEnvelope, ThreadMode
 from typebench.corpus.catalog import load_suite
+from typebench.corpus.checkerenv import cache_status as checker_cache_status
 from typebench.corpus.envman import PrepareError, prepare_project
 from typebench.engine.calibration import calibrate
 from typebench.engine.collector import RunManifest, run_single
@@ -37,6 +39,7 @@ if TYPE_CHECKING:
 
     from typebench.adapters.base import Adapter
     from typebench.contracts.models import PreparedProject
+    from typebench.contracts.runconfig import RunConfig
     from typebench.corpus.catalog import CorpusProject
 
 app = typer.Typer(help="Neutral Python type-checker performance benchmark.")
@@ -136,6 +139,15 @@ def _load_suite_or_exit(corpus: Path) -> list[CorpusProject]:
         return load_suite(corpus)
     except (OSError, ValueError) as exc:
         typer.echo(f"Could not read corpus {corpus}: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+
+
+def _load_config_or_exit(path: Path) -> RunConfig:
+    """Load typebench.toml, translating file/validation failures to a CLI error."""
+    try:
+        return load_config(path)
+    except (OSError, ValueError) as exc:
+        typer.echo(f"Could not read config {path}: {exc}", err=True)
         raise typer.Exit(code=2) from exc
 
 
@@ -484,6 +496,10 @@ def doctor(
         bool,
         typer.Option(help="Exit nonzero if a REQUIRED-tier tool is missing (CI gate)."),
     ] = False,
+    config: Annotated[
+        Path | None,
+        typer.Option("-c", "--config", help="typebench.toml to validate configured checkers."),
+    ] = None,
 ) -> None:
     """Report external-tool availability, versions, roles, and consequence-if-absent.
 
@@ -515,6 +531,13 @@ def doctor(
     unhealthy_required = [c.name for c in checks if c.tier is Tier.REQUIRED and not c.healthy]
     if unhealthy_required:
         typer.echo(f"\nmissing/unhealthy required: {', '.join(unhealthy_required)}", err=True)
+    if config is not None:
+        run_config = _load_config_or_exit(config)
+        typer.echo("\nconfigured checkers:")
+        for spec in run_config.checkers:
+            state, version = checker_cache_status(spec, DEFAULT_CACHE_ROOT)
+            resolved = f" (resolved {version})" if version else ""
+            typer.echo(f"  {spec.checker_id():<24}  {state}{resolved}")
     if check and unhealthy_required:
         raise typer.Exit(code=1)
 

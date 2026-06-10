@@ -7,6 +7,7 @@ from typebench.corpus.checkerenv import (
     PrepareError,
     _checker_dir,
     _fingerprint,
+    cache_status,
     prepare_checker,
 )
 from typebench.corpus.envman import RunOut
@@ -110,6 +111,20 @@ def test_prepare_checker_is_idempotent_via_sidecar(tmp_path: Path) -> None:
     second = prepare_checker(spec, tmp_path, install_source="s", run=run2)
     assert run2.calls == []
     assert second == first
+
+
+def test_cache_status_reports_hit_for_pinned_and_miss_for_unpinned_sidecar(
+    tmp_path: Path,
+) -> None:
+    pinned = CheckerSpec(tool="mypy", version="1.18.2")
+    pinned_run = _FakeRunner({("uv", "pip"): _FREEZE})
+    prepare_checker(pinned, tmp_path, install_source="s", run=pinned_run)
+    assert cache_status(pinned, tmp_path) == ("cache-hit", "1.18.2")
+
+    unpinned = CheckerSpec(tool="mypy")
+    unpinned_run = _FakeRunner({("uv", "pip"): _FREEZE})
+    prepare_checker(unpinned, tmp_path, install_source="s", run=unpinned_run)
+    assert cache_status(unpinned, tmp_path) == ("will-build", None)
 
 
 def test_prepare_checker_rebuilds_on_python_version_change(tmp_path: Path) -> None:

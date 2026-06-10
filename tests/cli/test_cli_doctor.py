@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from typer.testing import CliRunner
 
@@ -85,3 +87,20 @@ def test_doctor_prints_install_hint_for_unhealthy_rows(monkeypatch: pytest.Monke
     fix_section = result.stdout.split("to fix:", 1)[1]
     assert "tokei" in fix_section  # missing tool's remediation listed
     assert "uv" not in fix_section  # healthy tool not listed in remediation
+
+
+def test_doctor_with_config_lists_configured_checkers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = tmp_path / "typebench.toml"
+    config.write_text('[[checker]]\ntool = "mypy"\nversion = "1.18.2"\n', encoding="utf-8")
+
+    def fake_checker_cache_status(*_args: object) -> tuple[str, str | None]:
+        return ("will-build", None)
+
+    monkeypatch.setattr("typebench.cli.checker_cache_status", fake_checker_cache_status)
+    monkeypatch.setattr("typebench.cli.run_doctor", lambda: [])
+    result = runner.invoke(app, ["doctor", "-c", str(config)])
+    assert result.exit_code == 0
+    assert "mypy@1.18.2" in result.stdout
+    assert "will-build" in result.stdout
