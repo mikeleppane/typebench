@@ -26,7 +26,7 @@ from typebench.contracts.identity import CheckerSpec
 from typebench.contracts.models import ResultsEnvelope
 from typebench.contracts.policy import Policy
 from typebench.contracts.runconfig import RunConfig, merge_tool_override
-from typebench.contracts.taxonomy import ThreadMode
+from typebench.contracts.taxonomy import SizeBucket, ThreadMode
 from typebench.corpus.catalog import load_suite
 from typebench.corpus.checkerenv import cache_status as checker_cache_status
 from typebench.corpus.envman import PrepareError, prepare_project
@@ -34,7 +34,7 @@ from typebench.engine.calibration import calibrate
 from typebench.engine.collector import RunManifest, run_single
 from typebench.engine.doctor import Tier, run_doctor
 from typebench.suite.preflight import preflight_project
-from typebench.suite.renderer import build_trends, render_readme
+from typebench.suite.renderer import build_trends, render_compare, render_readme
 from typebench.suite.runner import run_suite
 from typebench.suite.selection import SelectionError, resolve_selection
 
@@ -59,6 +59,7 @@ DEFAULT_CACHE_ROOT = Path("typebench-cache")
 _README_BEGIN = "<!-- TYPEBENCH:BEGIN -->"
 _README_END = "<!-- TYPEBENCH:END -->"
 _DEFAULT_TOOLS = ("mypy", "pyright", "pyrefly", "ty")
+_MIN_COMPARE_CHECKERS = 2
 _INIT_FALLBACKS = {
     "mypy": "1.18.2",
     "pyright": "1.1.410",
@@ -665,6 +666,106 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
     output.write_text(envelope.model_dump_json(indent=2))
     measured = sum(1 for r in envelope.runs if r.result_class.is_measured_success)
     typer.echo(f"suite {shard} -> {measured}/{len(envelope.runs)} measured -> {output}")
+
+
+@app.command()
+def compare(  # noqa: PLR0913 — distinct user-facing CLI options for one command
+    corpus: Annotated[Path, typer.Option(help="Path to suite.toml.")],
+    output: Annotated[Path, typer.Option(help="Where to write the results envelope JSON.")],
+    checker: Annotated[
+        list[str],
+        typer.Option(help="Checker spec name[@version[+label]] (repeatable; >=2 to compare)."),
+    ],
+    project: Annotated[
+        list[str] | None, typer.Option(help="Project name(s) to compare over.")
+    ] = None,
+    bucket: Annotated[
+        list[str] | None, typer.Option(help="Size bucket(s) to compare over.")
+    ] = None,
+    cores: Annotated[int, typer.Option(help="Constrained core count for the compare run.")] = 1,
+    thread_mode: Annotated[ThreadMode, typer.Option(help="Thread track.")] = (
+        ThreadMode.CONSTRAINED
+    ),
+    runs: Annotated[int, typer.Option(help="hyperfine timed runs.")] = 10,
+    warmup: Annotated[int, typer.Option(help="hyperfine warmup runs.")] = 3,
+    mem_runs: Annotated[int, typer.Option(help="Resource-pass repeats (>=1).")] = 3,
+    measure: Annotated[bool, typer.Option(help="Run the cgroup memory/CPU pass.")] = True,
+    calibrate_baseline: Annotated[
+        bool,
+        typer.Option("--calibrate/--no-calibrate", help="Time the calibration workload."),
+    ] = True,
+    calib_runs: Annotated[int, typer.Option(help="Calibration workload repeats (>=1).")] = 5,
+    timeout: Annotated[float, typer.Option(help="Per-invocation timeout (seconds).")] = 900.0,
+    cache_root: Annotated[
+        Path, typer.Option(help="Where prepared clones/venvs are cached.")
+    ] = DEFAULT_CACHE_ROOT,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Print the effective plan; execute nothing.")
+    ] = False,
+) -> None:
+    """Compare N checker specs over one selected corpus slice."""
+    if len(checker) < _MIN_COMPARE_CHECKERS:
+        typer.echo("compare needs >=2 --checker specs.", err=True)
+        raise typer.Exit(code=2)
+    out_dir = output.parent
+    if not out_dir.exists() or not os.access(out_dir, os.W_OK):
+        typer.echo(f"Output directory not writable: {out_dir}", err=True)
+        raise typer.Exit(code=2)
+    _validate_timing(runs, warmup, timeout)
+    if mem_runs < 1 or calib_runs < 1:
+        typer.echo("--mem-runs and --calib-runs must be >= 1.", err=True)
+        raise typer.Exit(code=2)
+    cores = _validate_cores(cores)
+
+    try:
+        specs = merge_tool_override((), checker)
+        buckets = tuple(SizeBucket(value) for value in (bucket or ()))
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    run_config = RunConfig(
+        checkers=specs,
+        projects=tuple(project or ()),
+        buckets=buckets,
+        thread_modes=(thread_mode,),
+        cores=(cores,),
+        runs=runs,
+        warmup=warmup,
+        mem_runs=mem_runs,
+    )
+    corpus_entries = _load_suite_or_exit(corpus)
+    try:
+        selected = resolve_selection(run_config, corpus_entries)
+    except SelectionError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+    if dry_run:
+        _print_dry_run(run_config, selected, corpus)
+        raise typer.Exit(code=0)
+
+    envelope = run_suite(
+        suite_path=corpus,
+        cache_root=cache_root,
+        checkers=specs,
+        policy=run_config.policy,
+        thread_modes=list(run_config.thread_modes),
+        generated_at=datetime.now(UTC).isoformat(),
+        runs=runs,
+        warmup=warmup,
+        timeout=timeout,
+        mem_runs=mem_runs,
+        measure_enabled=measure,
+        calib_runs=calib_runs,
+        cores=run_config.cores,
+        projects=selected,
+        run_config=run_config,
+        lookup_entry=_lookup_project,
+        adapter_factory=lambda name: _adapters_for([name])[0],
+        calibrate_fn=calibrate if calibrate_baseline else None,
+    )
+    output.write_text(envelope.model_dump_json(indent=2), encoding="utf-8")
+    typer.echo(render_compare(envelope, baseline=specs[0].checker_id()))
 
 
 @app.command()
