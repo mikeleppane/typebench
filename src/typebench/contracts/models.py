@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from typebench.contracts.policy import Policy
 
@@ -193,6 +193,12 @@ class RunResult(BaseModel):
     loc_denominator: LocDenominator | None = None  # "code" | "physical" on disk
     # From preflight: self-reported files > canonical -> withhold/caveat kLOC/s.
     over_reports: bool | None = None
+
+    @model_validator(mode="after")
+    def validate_headline_policy(self) -> RunResult:
+        if self.policy is not Policy.STANDARD and self.headline_eligible is True:
+            raise ValueError(f"non-standard policy {self.policy} cannot be headline_eligible")
+        return self
 
 
 class ResultsEnvelope(BaseModel):

@@ -135,6 +135,43 @@ def test_runresult_records_checker_id_and_policy_round_trip() -> None:
     assert back.schema_version == 4
 
 
+def test_runresult_nonstandard_policy_cannot_be_headline_eligible() -> None:
+    with pytest.raises(ValidationError):
+        RunResult(
+            tool="mypy",
+            tool_version="1.19.0",
+            policy=Policy.STRICT,
+            headline_eligible=True,
+            project="httpx",
+            thread_mode=ThreadMode.ALL_CORES,
+            result_class=ResultClass.CLEAN,
+            real_exit_code=0,
+            env=EnvFingerprint(
+                os="linux", kernel="x", cpu_model="x", core_count=1, python_version="3.12"
+            ),
+        )
+
+
+def test_runresult_nonstandard_policy_not_headline_eligible_is_valid() -> None:
+    rec = RunResult(
+        tool="mypy",
+        tool_version="1.19.0",
+        policy=Policy.STRICT,
+        headline_eligible=False,
+        project="httpx",
+        thread_mode=ThreadMode.ALL_CORES,
+        result_class=ResultClass.CLEAN,
+        real_exit_code=0,
+        env=EnvFingerprint(
+            os="linux", kernel="x", cpu_model="x", core_count=1, python_version="3.12"
+        ),
+    )
+    back = RunResult.model_validate_json(rec.model_dump_json())
+    assert back == rec
+    assert back.policy is Policy.STRICT
+    assert back.headline_eligible is False
+
+
 def test_thread_mode_enforced_defaults_false(make_env: EnvFactory) -> None:
     # Plan 1 records the requested thread_mode but applies no CPU affinity, so
     # the JSON must never claim a methodology that was not enforced (spec §5.3).
