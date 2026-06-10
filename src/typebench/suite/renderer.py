@@ -155,6 +155,70 @@ def _kloc_value(record: RunResult) -> float | None:
     return (loc / 1000) / record.timing.median_s if loc is not None else None
 
 
+def _peak_mb_value(record: RunResult) -> float | None:
+    return record.memory.peak_bytes_median / 1_000_000 if record.memory is not None else None
+
+
+def _delta_pct(baseline: float | None, value: float | None) -> str:
+    if baseline is None or value is None or baseline == 0:
+        return "—"
+    return f"{((value - baseline) / baseline * 100):+.1f}%"
+
+
+def render_compare(envelope: ResultsEnvelope, baseline: str | None = None) -> str:
+    """Terminal delta table for compare runs, grouped by project/mode/cores."""
+    if not envelope.runs:
+        return "_no records to compare_"
+
+    base_id = baseline or _checker_id(envelope.runs[0])
+    groups: dict[tuple[str, str, int | None], list[RunResult]] = {}
+    for record in envelope.runs:
+        groups.setdefault((record.project, record.thread_mode.value, record.cores), []).append(
+            record
+        )
+
+    parts = [f"_compare · baseline `{base_id}` · suite `{envelope.suite_version}`_\n"]
+    for project, mode, cores in sorted(
+        groups, key=lambda group: (group[0], group[1], -1 if group[2] is None else group[2])
+    ):
+        records = groups[(project, mode, cores)]
+        baseline_record = next(
+            (record for record in records if _checker_id(record) == base_id), None
+        )
+        base_wall = (
+            baseline_record.timing.median_s
+            if baseline_record is not None and baseline_record.timing is not None
+            else None
+        )
+        base_kloc = _kloc_value(baseline_record) if baseline_record is not None else None
+        base_mem = _peak_mb_value(baseline_record) if baseline_record is not None else None
+
+        parts.append(f"\n#### {project} — {mode} · {_cores_label(cores)}\n")
+        parts.append(
+            "| Checker | Wall median (s) | Δ wall | kLOC/s | Δ kLOC/s | Peak mem (MB) | Δ mem |\n"
+            "|---------|-----------------|--------|--------|----------|---------------|-------|\n"
+        )
+        rows = []
+        for record in sorted(records, key=_sort_key):
+            checker_id = _checker_id(record)
+            wall = record.timing.median_s if record.timing is not None else None
+            kloc = _kloc_value(record)
+            mem = _peak_mb_value(record)
+            is_baseline = checker_id == base_id
+            delta_wall = "baseline" if is_baseline else _delta_pct(base_wall, wall)
+            delta_kloc = "baseline" if is_baseline else _delta_pct(base_kloc, kloc)
+            delta_mem = "baseline" if is_baseline else _delta_pct(base_mem, mem)
+            wall_text = f"{wall:.2f}" if wall is not None else "—"
+            kloc_text = f"{kloc:.1f}" if kloc is not None else "—"
+            mem_text = f"{mem:.1f}" if mem is not None else "—"
+            rows.append(
+                f"| {checker_id} | {wall_text} | {delta_wall} | {kloc_text} | "
+                f"{delta_kloc} | {mem_text} | {delta_mem} |"
+            )
+        parts.append("\n".join(rows) + "\n")
+    return "\n".join(parts)
+
+
 def build_trends(history: list[ResultsEnvelope]) -> dict[str, object]:
     """Flatten history to fully-labelled points + per-CPU-model-normalized variants.
     The GH Pages app groups points into series and derives inter-checker ratios

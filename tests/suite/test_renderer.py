@@ -16,6 +16,7 @@ from typebench.suite.renderer import (
     _code_loc_or_withheld,
     build_trends,
     cpu_model_anchors,
+    render_compare,
     render_readme,
 )
 
@@ -335,3 +336,94 @@ def test_render_readme_groups_constrained_records_by_cores(make_env: EnvFactory)
     assert "#### httpx — constrained · cores=1" in md
     assert "#### httpx — constrained · cores=4" in md
     assert md.count("| mypy@1.19.0 |") == 2
+
+
+def _cmp_record(checker_id: str, wall: float, peak: int, make_env: EnvFactory) -> RunResult:
+    tool, version = checker_id.split("@", 1)
+    return RunResult(
+        tool=tool,
+        tool_version=version,
+        checker_id=checker_id,
+        project="sqlalchemy",
+        thread_mode=ThreadMode.CONSTRAINED,
+        cores=4,
+        result_class=ResultClass.CLEAN,
+        real_exit_code=0,
+        timing=TimingStats(
+            runs=1,
+            min_s=wall,
+            median_s=wall,
+            mean_s=wall,
+            stddev_s=0.0,
+            max_s=wall,
+            times_s=[wall],
+        ),
+        memory=MemoryStats(
+            runs=1,
+            peak_bytes_min=peak,
+            peak_bytes_median=peak,
+            peak_bytes_max=peak,
+        ),
+        canonical_code_loc=200_000,
+        loc_denominator=LocDenominator.CODE,
+        over_reports=False,
+        env=make_env(),
+    )
+
+
+def test_render_compare_baseline_is_first_spec_others_are_deltas(
+    make_env: EnvFactory,
+) -> None:
+    env = ResultsEnvelope(
+        suite_version="v",
+        generated_at="t",
+        runs=[
+            _cmp_record("mypy@1.14.1", 6.27, 289_000_000, make_env),
+            _cmp_record("mypy@1.15.0", 5.81, 301_000_000, make_env),
+        ],
+    )
+
+    md = render_compare(env, baseline="mypy@1.14.1")
+
+    assert md.startswith("_compare · baseline `mypy@1.14.1` · suite `v`_")
+    assert "TYPEBENCH:BEGIN" not in md
+    assert "TYPEBENCH:END" not in md
+    assert "#### sqlalchemy — constrained · cores=4" in md
+    assert (
+        "| Checker | Wall median (s) | Δ wall | kLOC/s | Δ kLOC/s | Peak mem (MB) | Δ mem |" in md
+    )
+    assert "mypy@1.14.1" in md
+    assert "mypy@1.15.0" in md
+    assert "6.27" in md
+    assert "-7.3%" in md
+    assert "diagnostics" not in md.lower()
+
+
+def test_render_compare_defaults_baseline_to_first_record_checker_id(
+    make_env: EnvFactory,
+) -> None:
+    env = ResultsEnvelope(
+        suite_version="v",
+        generated_at="t",
+        runs=[
+            _cmp_record("pyright@1.1.400", 4.0, 100_000_000, make_env),
+            _cmp_record("ty@0.0.1", 1.0, 50_000_000, make_env),
+        ],
+    )
+
+    md = render_compare(env)
+
+    assert md.startswith("_compare · baseline `pyright@1.1.400` · suite `v`_")
+    assert "TYPEBENCH:BEGIN" not in md
+    assert "pyright@1.1.400" in md
+    assert "ty@0.0.1" in md
+    assert "-75.0%" in md
+
+
+def test_render_compare_empty_envelope_has_plain_terminal_message() -> None:
+    env = ResultsEnvelope(suite_version="v", generated_at="t", runs=[])
+
+    md = render_compare(env)
+
+    assert md == "_no records to compare_"
+    assert "TYPEBENCH:BEGIN" not in md
