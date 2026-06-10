@@ -175,7 +175,9 @@ def load_config(path: Path) -> RunConfig:
     try:
         return RunConfig.model_validate(payload)
     except ValidationError as exc:
-        msg = f"invalid {path.name}: {exc}"
+        # Surface just the human messages, not pydantic's full dump (input echo + URL).
+        details = "; ".join(error["msg"] for error in exc.errors())
+        msg = f"invalid {path.name}: {details}"
         raise ValueError(msg) from exc
 
 

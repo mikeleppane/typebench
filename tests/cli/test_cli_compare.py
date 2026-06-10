@@ -155,6 +155,42 @@ def test_compare_dry_run_executes_nothing(
     assert not out.exists()
 
 
+def test_compare_corpus_defaults_to_repo_corpus_when_omitted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # --corpus is optional (parity with `suite`): omitting it resolves corpus/suite.toml
+    # under the cwd, NOT a Typer "Missing option '--corpus'" hard error.
+    def boom(**_kwargs: object) -> object:
+        raise AssertionError("run_suite must NOT run on --dry-run")
+
+    monkeypatch.setattr(cli, "run_suite", boom)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "corpus").mkdir()
+    (tmp_path / "corpus" / "suite.toml").write_text(_SUITE, encoding="utf-8")
+    out = tmp_path / "cmp.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "--checker",
+            "mypy@1.18.2",
+            "--checker",
+            "mypy@1.19.0",
+            "--project",
+            "sqlalchemy",
+            "--output",
+            str(out),
+            "--dry-run",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Missing option" not in result.output
+    assert "corpus/suite.toml" in result.stdout  # the default resolved
+    assert not out.exists()
+
+
 def test_compare_rejects_unknown_checker_tool(tmp_path: Path) -> None:
     out = tmp_path / "cmp.json"
     result = runner.invoke(

@@ -245,6 +245,24 @@ def test_suite_rejects_strict_policy_before_running(
     assert not out.exists()
 
 
+def test_suite_rejects_unknown_tool_up_front(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def boom() -> ResultsEnvelope:
+        raise AssertionError("run_suite must not run for an unknown tool")
+
+    monkeypatch.setattr(cli, "run_suite", boom)
+    suite = tmp_path / "suite.toml"
+    suite.write_text(_suite_toml(), encoding="utf-8")
+    out = tmp_path / "r.json"
+
+    result = _invoke(["suite", "--corpus", str(suite), "--output", str(out), "--tool", "bogus"])
+
+    assert result.exit_code == 2
+    assert "bogus" in result.output
+    assert not out.exists()
+
+
 def test_suite_reads_run_knobs_from_config_when_cli_absent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

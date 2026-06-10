@@ -399,6 +399,7 @@ def run(  # noqa: PLR0912, PLR0913, PLR0915 — many user-facing CLI options + l
         ),
     ] = 1,
 ) -> None:
+    """Run ONE checker on ONE project and write a single RunResult (manual/single-cell)."""
     cores = _validate_cores(cores)
     if config is not None and not dry_run:
         typer.echo(
@@ -620,6 +621,9 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
             f"policy '{run_config.policy.value}' is not supported yet (standard only).", err=True
         )
         raise typer.Exit(code=2)
+    # Reject an unknown checker tool up front (exit 2) rather than cloning projects and
+    # failing late inside run_suite — matches `compare`/`run` fail-fast behavior.
+    _adapters_for([spec.tool for spec in run_config.checkers])
     # Run-knob layering (defaults < file [run] < CLI): a CLI flag overrides; otherwise
     # the file/default value from RunConfig wins (RunConfig already range-validated them).
     effective_runs = runs if runs is not None else run_config.runs
@@ -670,12 +674,15 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
 
 @app.command()
 def compare(  # noqa: PLR0913 — distinct user-facing CLI options for one command
-    corpus: Annotated[Path, typer.Option(help="Path to suite.toml.")],
     output: Annotated[Path, typer.Option(help="Where to write the results envelope JSON.")],
     checker: Annotated[
         list[str],
         typer.Option(help="Checker spec name[@version[+label]] (repeatable; >=2 to compare)."),
     ],
+    corpus: Annotated[
+        Path | None,
+        typer.Option(help="Path to suite.toml (else corpus/suite.toml)."),
+    ] = None,
     project: Annotated[
         list[str] | None, typer.Option(help="Project name(s) to compare over.")
     ] = None,
@@ -734,7 +741,8 @@ def compare(  # noqa: PLR0913 — distinct user-facing CLI options for one comma
         warmup=warmup,
         mem_runs=mem_runs,
     )
-    corpus_entries = _load_suite_or_exit(corpus)
+    effective_corpus = resolve_corpus(run_config, corpus, Path("corpus/suite.toml"))
+    corpus_entries = _load_suite_or_exit(effective_corpus)
     try:
         selected = resolve_selection(run_config, corpus_entries)
     except SelectionError as exc:
@@ -742,11 +750,11 @@ def compare(  # noqa: PLR0913 — distinct user-facing CLI options for one comma
         raise typer.Exit(code=2) from exc
 
     if dry_run:
-        _print_dry_run(run_config, selected, corpus)
+        _print_dry_run(run_config, selected, effective_corpus)
         raise typer.Exit(code=0)
 
     envelope = run_suite(
-        suite_path=corpus,
+        suite_path=effective_corpus,
         cache_root=cache_root,
         checkers=specs,
         policy=run_config.policy,
