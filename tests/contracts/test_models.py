@@ -4,6 +4,7 @@ from collections.abc import Callable
 import pytest
 from pydantic import ValidationError
 
+from typebench.contracts.identity import CheckerSpec
 from typebench.contracts.models import (
     CalibrationStats,
     EnvFingerprint,
@@ -11,12 +12,14 @@ from typebench.contracts.models import (
     LocDenominator,
     MemoryStats,
     Policy,
+    ResolvedChecker,
     ResultClass,
     ResultsEnvelope,
     RunResult,
     ThreadMode,
     TimingStats,
 )
+from typebench.contracts.runconfig import RunConfig
 
 type EnvFactory = Callable[..., EnvFingerprint]
 
@@ -439,10 +442,35 @@ def test_results_envelope_wraps_records(make_env: EnvFactory) -> None:
         generated_at="2026-06-08T00:00:00Z",
         runs=[rec],
     )
-    assert env.schema_version == 1
+    assert env.schema_version == 2
     restored = ResultsEnvelope.model_validate_json(env.model_dump_json())
     assert restored == env
     assert len(restored.runs) == 1
+
+
+def test_results_envelope_carries_run_config_and_resolved_checker() -> None:
+    cfg = RunConfig(checkers=(CheckerSpec(tool="mypy", version="1.18.2"),))
+    env = ResultsEnvelope(
+        suite_version="v",
+        generated_at="t",
+        runs=[],
+        run_config=cfg,
+        resolved_checkers=(
+            ResolvedChecker(
+                checker_id="mypy@1.18.2",
+                tool="mypy",
+                version="1.18.2",
+                lock_hash="checker-lock",
+                install_source="pypi",
+            ),
+        ),
+    )
+
+    assert env.schema_version == 2
+    back = ResultsEnvelope.model_validate_json(env.model_dump_json())
+    assert back.run_config is not None
+    assert back.run_config.checkers[0].checker_id() == "mypy@1.18.2"
+    assert back.resolved_checkers[0].lock_hash == "checker-lock"
 
 
 def test_results_envelope_rejects_unknown_fields() -> None:

@@ -13,12 +13,15 @@ from typebench.contracts.config import NormalizedConfig, config_hash
 from typebench.contracts.models import (
     FailurePhase,
     PreflightReport,
+    ResolvedChecker,
     ResultClass,
     ResultsEnvelope,
     RunResult,
     ThreadMode,
 )
+from typebench.contracts.policy import Policy
 from typebench.corpus.catalog import load_suite, load_suite_version
+from typebench.corpus.checkerenv import prepare_checker
 from typebench.corpus.envman import prepare_project
 from typebench.engine.collector import RunManifest, run_single
 from typebench.engine.env import detect_env
@@ -29,7 +32,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from typebench.adapters.base import Adapter
+    from typebench.contracts.identity import CheckerRuntime, CheckerSpec
     from typebench.contracts.models import PreparedProject
+    from typebench.contracts.runconfig import RunConfig
     from typebench.corpus.catalog import CorpusProject
     from typebench.engine.calibration import CalibrationStats
 
@@ -89,6 +94,8 @@ def _excluded_record(
     install_source: str,
     detail: str,
     calibration: CalibrationStats | None,
+    policy: Policy,
+    headline_eligible: bool,
 ) -> RunResult:
     """A FAILED_ENV record for a cell whose project was excluded by preflight or a
     prepare failure. The bar must read 'didn't compete', never be silently absent.
@@ -107,6 +114,8 @@ def _excluded_record(
         tool=_tool_of(cell.checker_id),
         tool_version="unknown",
         checker_id=cell.checker_id,
+        policy=policy,
+        headline_eligible=headline_eligible,
         project=cell.project,
         thread_mode=cell.thread_mode,
         result_class=ResultClass.FAILED_ENV,
@@ -125,6 +134,32 @@ def _excluded_record(
     )
 
 
+def _checker_resolve_failed_record(
+    cell: SuiteCell,
+    spec: CheckerSpec,
+    detail: str,
+    calibration: CalibrationStats | None,
+    policy: Policy,
+) -> RunResult:
+    """A visible FAILED_ENV record for a checker that could not resolve up front."""
+    return RunResult(
+        tool=spec.tool,
+        tool_version="unknown",
+        checker_id=spec.checker_id(),
+        policy=policy,
+        headline_eligible=False,
+        project=cell.project,
+        thread_mode=cell.thread_mode,
+        cores=cell.cores,
+        result_class=ResultClass.FAILED_ENV,
+        failure_phase=FailurePhase.PROBE,
+        real_exit_code=-1,
+        error_detail=detail.strip()[-500:] or None,
+        calibration=calibration,
+        env=detect_env(),
+    )
+
+
 def _suite_config(prepared: PreparedProject, cores: int) -> NormalizedConfig:
     return NormalizedConfig(
         src_roots=prepared.src_roots,
@@ -136,11 +171,60 @@ def _suite_config(prepared: PreparedProject, cores: int) -> NormalizedConfig:
     )
 
 
+def _resolve_runtimes(
+    checkers: tuple[CheckerSpec, ...],
+    cache_root: Path,
+    adapter_factory: Callable[[str], Adapter],
+    prepare_checker_fn: Callable[..., CheckerRuntime],
+) -> tuple[list[CheckerRuntime], list[tuple[CheckerSpec, str]]]:
+    """Resolve each spec to a runtime up front. A per-spec failure becomes a visible
+    record (returned as a failed-spec), never an abort — one bad pin must not drop
+    every other checker's results."""
+    runtimes: list[CheckerRuntime] = []
+    failed: list[tuple[CheckerSpec, str]] = []
+    for spec in checkers:
+        try:
+            runtime = prepare_checker_fn(
+                spec, cache_root, install_source=adapter_factory(spec.tool).install_source
+            )
+        except Exception as exc:  # resolve failures become visible records, never abort
+            failed.append((spec, f"checker resolve failed: {exc}"))
+        else:
+            runtimes.append(runtime)
+    return runtimes, failed
+
+
+def _failed_checker_records(
+    failed_specs: list[tuple[CheckerSpec, str]],
+    all_projects: list[str],
+    thread_modes: list[ThreadMode],
+    cores: tuple[int, ...],
+    shard_index: int,
+    shard_total: int,
+    calibration: CalibrationStats | None,
+    policy: Policy,
+) -> list[RunResult]:
+    """FAILED_ENV records for every cell of a checker that could not resolve, so it
+    reads 'didn't compete' rather than being silently absent."""
+    records: list[RunResult] = []
+    for spec, detail in failed_specs:
+        cells = shard(
+            build_matrix(all_projects, [spec.checker_id()], thread_modes, cores),
+            shard_index,
+            shard_total,
+        )
+        records.extend(
+            _checker_resolve_failed_record(cell, spec, detail, calibration, policy)
+            for cell in cells
+        )
+    return records
+
+
 def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable seams, mirrors run_single's noqa precedent
     *,
     suite_path: Path,
     cache_root: Path,
-    tools: list[str],
+    checkers: tuple[CheckerSpec, ...],
     thread_modes: list[ThreadMode],
     generated_at: str,
     runs: int,
@@ -150,6 +234,8 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
     measure_enabled: bool,
     calib_runs: int,
     cores: tuple[int, ...] = (1,),
+    policy: Policy = Policy.STANDARD,
+    run_config: RunConfig | None = None,
     shard_index: int = 0,
     shard_total: int = 1,
     projects: list[str] | None = None,
@@ -160,6 +246,7 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
     prepare: Callable[..., PreparedProject] = prepare_project,
     preflight: Callable[..., PreflightReport] = preflight_project,
     run_one: Callable[..., RunResult] = run_single,
+    prepare_checker_fn: Callable[..., CheckerRuntime] = prepare_checker,
     calibrate_fn: Callable[[int], CalibrationStats] | None = None,
 ) -> ResultsEnvelope:
     """Run the sharded matrix behind the preflight gate -> ResultsEnvelope.
@@ -176,7 +263,11 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
 
     all_projects = projects if projects is not None else load_projects(suite_path)
     suite_version = load_version(suite_path)
-    checker_ids = [f"{tool}@latest" for tool in tools]
+    runtimes, failed_specs = _resolve_runtimes(
+        checkers, cache_root, adapter_factory, prepare_checker_fn
+    )
+    checker_ids = [rt.checker_id for rt in runtimes]
+    runtime_by_id = {rt.checker_id: rt for rt in runtimes}
     cells = shard(
         build_matrix(all_projects, checker_ids, thread_modes, cores), shard_index, shard_total
     )
@@ -190,7 +281,16 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
     for cell in cells:
         by_project.setdefault(cell.project, []).append(cell)
 
-    results: list[RunResult] = []
+    results: list[RunResult] = _failed_checker_records(
+        failed_specs,
+        all_projects,
+        thread_modes,
+        cores,
+        shard_index,
+        shard_total,
+        calibration,
+        policy,
+    )
     for project, project_cells in by_project.items():
         entry = lookup_entry(suite_path, project)
         project_tools = sorted({_tool_of(c.checker_id) for c in project_cells})
@@ -214,11 +314,20 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
                         src,
                         f"prepare failed: {exc}",
                         calibration,
+                        policy,
+                        policy is Policy.STANDARD,
                     )
                 )
             continue
 
-        report = preflight(prepared, adapters, timeout=timeout)
+        report = preflight(
+            prepared,
+            adapters,
+            timeout=timeout,
+            specs={spec.tool: spec for spec in checkers},
+            policy=policy,
+            binaries={rt.tool: rt.binary for rt in runtimes},
+        )
         if not report.ready:
             detail = "; ".join(
                 f"{t.tool}: {t.result_class.value} {t.error_detail or ''}".strip()
@@ -235,6 +344,8 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
                         src,
                         detail or "preflight not ready",
                         calibration,
+                        policy,
+                        policy is Policy.STANDARD,
                     )
                 )
             continue
@@ -246,12 +357,9 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
             entry.python_version,
             entry.python_platform,
         )
-        # A2 boundary: stamp checker_id only on excluded records. Measured records
-        # still keep checker_id=None because run_single has not received the A3
-        # resolved-spec wiring yet, so an A2 envelope can mix @latest excluded
-        # cells with None measured cells. A3 replaces both with resolved ids.
         for cell in project_cells:
-            adapter = adapter_by_name[_tool_of(cell.checker_id)]
+            runtime = runtime_by_id[cell.checker_id]
+            adapter = adapter_by_name[runtime.tool]
             cell_cores = cell.cores if cell.cores is not None else 1
             config = _suite_config(prepared, cell_cores)
             manifest = RunManifest(
@@ -261,7 +369,7 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
                 canonical_files=prepared.canonical_files,
                 canonical_loc=prepared.canonical_loc,
                 canonical_code_loc=prepared.canonical_code_loc,
-                tool_install_source=adapter.install_source,
+                tool_install_source=runtime.install_source,
                 over_reports=over_by_tool.get(_tool_of(cell.checker_id), False),
             )
             results.append(
@@ -277,7 +385,27 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
                     measure_enabled=measure_enabled,
                     calibration=calibration,
                     manifest=manifest,
+                    binary=runtime.binary,
+                    checker_id=cell.checker_id,
+                    policy=policy,
+                    headline_eligible=policy is Policy.STANDARD,
                 )
             )
 
-    return ResultsEnvelope(suite_version=suite_version, generated_at=generated_at, runs=results)
+    resolved_checkers = tuple(
+        ResolvedChecker(
+            checker_id=rt.checker_id,
+            tool=rt.tool,
+            version=rt.version,
+            lock_hash=rt.lock_hash,
+            install_source=rt.install_source,
+        )
+        for rt in runtimes
+    )
+    return ResultsEnvelope(
+        suite_version=suite_version,
+        generated_at=generated_at,
+        runs=results,
+        run_config=run_config,
+        resolved_checkers=resolved_checkers,
+    )

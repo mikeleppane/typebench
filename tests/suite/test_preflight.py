@@ -9,8 +9,10 @@ from typebench.adapters.base import Adapter, ParallelismCap
 from typebench.adapters.mypy import MypyAdapter
 from typebench.adapters.pyrefly import PyreflyAdapter
 from typebench.adapters.pyright import PyrightAdapter
+from typebench.adapters.stub import StubAdapter
 from typebench.adapters.ty import TyAdapter
 from typebench.contracts.config import DEFAULT_EXCLUDES, NormalizedConfig
+from typebench.contracts.identity import CheckerSpec
 from typebench.contracts.models import (
     PreflightReport,
     PreparedProject,
@@ -18,6 +20,7 @@ from typebench.contracts.models import (
     ThreadMode,
     ToolPreflight,
 )
+from typebench.contracts.policy import Policy
 from typebench.corpus.counting import count_first_party
 from typebench.engine.wrapper import RawRun
 from typebench.suite.preflight import preflight_project
@@ -272,6 +275,30 @@ def test_preflight_records_command_construction_failure(tmp_path: Path) -> None:
     assert tool_preflight.result_class is ResultClass.FAILED_ENV
     assert tool_preflight.real_exit_code == -1
     assert "cannot write config" in (tool_preflight.error_detail or "")
+
+
+def test_preflight_records_checker_id_policy_and_uses_binary(tmp_path: Path) -> None:
+    prepared = _prepared_at(tmp_path)
+    seen_argv: list[str] = []
+
+    def fake_probe(argv: list[str], timeout: float, env: dict[str, str] | None = None) -> RawRun:
+        seen_argv.extend(argv)
+        return RawRun(exit_code=0, signal=None, timed_out=False, oom=False, stdout="", stderr="")
+
+    report = preflight_project(
+        prepared,
+        [StubAdapter()],
+        timeout=1.0,
+        probe=fake_probe,
+        specs={"stub": CheckerSpec(tool="stub", version="1.0")},
+        policy=Policy.STANDARD,
+        binaries={"stub": "/b/stub"},
+    )
+
+    tool_preflight = report.tools[0]
+    assert seen_argv[0] == "/b/stub"
+    assert tool_preflight.checker_id == "stub@1.0"
+    assert tool_preflight.policy is Policy.STANDARD
 
 
 def test_preflight_real_tools_on_clean_fixture(tmp_path: Path, fixtures_dir: Path) -> None:

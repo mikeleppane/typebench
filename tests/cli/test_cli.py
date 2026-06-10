@@ -308,7 +308,7 @@ def test_suite_threads_cores_into_run_suite(
         ],
     )
     assert result.exit_code == 0, result.output
-    assert captured["cores"] == 8
+    assert captured["cores"] == (8,)  # scalar --cores is threaded as a 1-tuple sweep
 
 
 def test_suite_rejects_cores_below_one(tmp_path: Path) -> None:

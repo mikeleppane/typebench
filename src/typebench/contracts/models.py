@@ -5,6 +5,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from typebench.contracts.policy import Policy
+from typebench.contracts.runconfig import RunConfig
 
 # ResultClass / ThreadMode / FailurePhase live in a pydantic-free module so the
 # exit-code wrapper (hyperfine's per-run command) can import them without paying
@@ -21,8 +22,10 @@ __all__ = [
     "Policy",
     "PreflightReport",
     "PreparedProject",
+    "ResolvedChecker",
     "ResultClass",
     "ResultsEnvelope",
+    "RunConfig",
     "RunResult",
     "ThreadMode",
     "TimingStats",
@@ -201,6 +204,18 @@ class RunResult(BaseModel):
         return self
 
 
+class ResolvedChecker(BaseModel):
+    """Resolved checker runtime stamped once per envelope."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    checker_id: str
+    tool: str
+    version: str
+    lock_hash: str
+    install_source: str
+
+
 class ResultsEnvelope(BaseModel):
     """The committed results file: many records + suite metadata.
 
@@ -209,10 +224,12 @@ class ResultsEnvelope(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: int = 1
+    schema_version: int = 2
     suite_version: str
     generated_at: str  # ISO-8601 UTC, stamped by the CLI
     runs: list[RunResult]
+    run_config: RunConfig | None = None
+    resolved_checkers: tuple[ResolvedChecker, ...] = ()
 
 
 class PreparedProject(BaseModel):
@@ -242,6 +259,8 @@ class ToolPreflight(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tool: str
+    checker_id: str | None = None
+    policy: Policy = Policy.STANDARD
     version: str
     result_class: ResultClass
     real_exit_code: int

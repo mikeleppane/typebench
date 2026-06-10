@@ -12,10 +12,12 @@ from typing import TYPE_CHECKING, Protocol
 
 from typebench.contracts.config import NormalizedConfig
 from typebench.contracts.models import PreflightReport, ResultClass, ThreadMode, ToolPreflight
+from typebench.contracts.policy import Policy
 from typebench.engine.wrapper import RawRun, run_command
 
 if TYPE_CHECKING:
     from typebench.adapters.base import Adapter
+    from typebench.contracts.identity import CheckerSpec
     from typebench.contracts.models import PreparedProject
 
 
@@ -41,15 +43,22 @@ def _probe_one(
     config: NormalizedConfig,
     timeout: float,
     probe: Probe,
+    spec: CheckerSpec | None,
+    policy: Policy,
+    binary: str | None,
 ) -> ToolPreflight:
     """Probe one adapter and assemble its ToolPreflight."""
     with tempfile.TemporaryDirectory(prefix="typebench-preflight-") as tmp:
         try:
-            argv, env = adapter.command(prepared.name, config, ThreadMode.CONSTRAINED, Path(tmp))
+            argv, env = adapter.command(
+                prepared.name, config, ThreadMode.CONSTRAINED, Path(tmp), binary=binary
+            )
         except (OSError, ValueError) as exc:
             return ToolPreflight(
                 tool=adapter.name,
-                version=adapter.version(),
+                checker_id=spec.checker_id() if spec is not None else None,
+                policy=policy,
+                version=adapter.version(binary),
                 result_class=ResultClass.FAILED_ENV,
                 real_exit_code=-1,
                 error_detail=f"command construction failed: {exc}".strip()[-500:],
@@ -73,7 +82,9 @@ def _probe_one(
 
     return ToolPreflight(
         tool=adapter.name,
-        version=adapter.version(),
+        checker_id=spec.checker_id() if spec is not None else None,
+        policy=policy,
+        version=adapter.version(binary),
         result_class=result_class,
         real_exit_code=raw.exit_code,
         signal=raw.signal,
@@ -93,10 +104,27 @@ def preflight_project(
     *,
     timeout: float,
     probe: Probe = run_command,
+    specs: dict[str, CheckerSpec] | None = None,
+    policy: Policy = Policy.STANDARD,
+    binaries: dict[str, str] | None = None,
 ) -> PreflightReport:
     """Probe each adapter once on the prepared project."""
     config = _config_for(prepared)
-    tools = [_probe_one(adapter, prepared, config, timeout, probe) for adapter in adapters]
+    spec_by_tool = specs or {}
+    binary_by_tool = binaries or {}
+    tools = [
+        _probe_one(
+            adapter,
+            prepared,
+            config,
+            timeout,
+            probe,
+            spec_by_tool.get(adapter.name),
+            policy,
+            binary_by_tool.get(adapter.name),
+        )
+        for adapter in adapters
+    ]
     return PreflightReport(
         project=prepared.name,
         sha=prepared.sha,

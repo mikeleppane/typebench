@@ -21,6 +21,7 @@ from typebench.adapters.pyright import PyrightAdapter
 from typebench.adapters.stub import StubAdapter
 from typebench.adapters.ty import TyAdapter
 from typebench.contracts.config import DEFAULT_EXCLUDES, NormalizedConfig, config_hash
+from typebench.contracts.identity import CheckerSpec
 from typebench.contracts.models import ResultsEnvelope, ThreadMode
 from typebench.corpus.catalog import load_suite
 from typebench.corpus.envman import PrepareError, prepare_project
@@ -389,7 +390,7 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
     envelope = run_suite(
         suite_path=corpus,
         cache_root=cache_root,
-        tools=tools,
+        checkers=tuple(CheckerSpec(tool=t) for t in tools),
         thread_modes=modes,
         generated_at=datetime.now(UTC).isoformat(),
         runs=runs,

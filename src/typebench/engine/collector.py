@@ -18,6 +18,7 @@ from typebench.contracts.models import (
     RunResult,
     ThreadMode,
 )
+from typebench.contracts.policy import Policy
 from typebench.contracts.taxonomy import is_constrained
 from typebench.engine import measure
 from typebench.engine.env import detect_env
@@ -98,6 +99,10 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
     measure_enabled: bool = True,
     calibration: CalibrationStats | None = None,
     manifest: RunManifest | None = None,
+    binary: str | None = None,
+    checker_id: str | None = None,
+    policy: Policy = Policy.STANDARD,
+    headline_eligible: bool = True,
 ) -> RunResult:
     if mem_runs < 1:
         raise ValueError(f"mem_runs must be >= 1, got {mem_runs}")
@@ -120,7 +125,7 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
     with tempfile.TemporaryDirectory(prefix="typebench-") as tmp:
         workdir = Path(tmp)
         try:
-            argv, extra_env = adapter.command(project, config, thread_mode, workdir)
+            argv, extra_env = adapter.command(project, config, thread_mode, workdir, binary=binary)
         except (OSError, ValueError) as exc:
             # Building the command can touch disk / do path math (e.g. writing a
             # generated tool config, relpath across drives). A failure here is a
@@ -129,7 +134,10 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
             # ran, so real_exit_code is the -1 sentinel.
             return RunResult(
                 tool=adapter.name,
-                tool_version=adapter.version(),
+                tool_version=adapter.version(binary),
+                checker_id=checker_id,
+                policy=policy,
+                headline_eligible=headline_eligible,
                 project=project,
                 thread_mode=thread_mode,
                 thread_mode_enforced=False,
@@ -152,7 +160,7 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
         # Apply the N-core affinity prefix (CONSTRAINED only) BEFORE any run, so
         # probe + resource + timing all share the same pinned command.
         argv, thread_enforced = _apply_affinity(argv, thread_mode, config.cores)
-        cap = adapter.parallelism_cap(thread_mode, config.cores)
+        cap = adapter.parallelism_cap(thread_mode, config.cores, binary=binary)
         # The adapter mechanism strings bake in "cpu-affinity", so record the cap
         # + pinned core count ONLY when affinity actually ran. On CONSTRAINED
         # without taskset (mac/dev) or on ALL_CORES, record neither; never claim a
@@ -272,7 +280,10 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
 
         return RunResult(
             tool=adapter.name,
-            tool_version=adapter.version(),
+            tool_version=adapter.version(binary),
+            checker_id=checker_id,
+            policy=policy,
+            headline_eligible=headline_eligible,
             project=project,
             thread_mode=thread_mode,
             thread_mode_enforced=thread_enforced,

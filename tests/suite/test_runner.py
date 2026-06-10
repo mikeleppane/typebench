@@ -4,9 +4,11 @@ from pathlib import Path
 import pytest
 
 from typebench.adapters.stub import StubAdapter
+from typebench.contracts.identity import CheckerRuntime, CheckerSpec
 from typebench.contracts.models import (
     CalibrationStats,
     EnvFingerprint,
+    FailurePhase,
     PreflightReport,
     PreparedProject,
     ResultClass,
@@ -15,6 +17,8 @@ from typebench.contracts.models import (
     ThreadMode,
     ToolPreflight,
 )
+from typebench.contracts.policy import Policy
+from typebench.contracts.runconfig import RunConfig
 from typebench.corpus.catalog import CorpusProject, SizeBucket
 from typebench.suite.runner import SuiteCell, build_matrix, run_suite, shard
 
@@ -152,6 +156,39 @@ def _calib() -> CalibrationStats:
     )
 
 
+def _prepare_stub_runtime(
+    spec: CheckerSpec, cache_root: Path, *, install_source: str
+) -> CheckerRuntime:
+    return CheckerRuntime(
+        checker_id=spec.checker_id(),
+        tool=spec.tool,
+        binary="/b/stub",
+        version=spec.version or "1.0",
+        lock_hash="L",
+        install_source=install_source,
+    )
+
+
+def _thread_mode(value: object) -> ThreadMode:
+    if isinstance(value, ThreadMode):
+        return value
+    if isinstance(value, str):
+        return ThreadMode(value)
+    raise TypeError(f"unexpected thread mode: {value!r}")
+
+
+def _policy(value: object) -> Policy:
+    if isinstance(value, Policy):
+        return value
+    raise TypeError(f"unexpected policy: {value!r}")
+
+
+def _headline_eligible(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    raise TypeError(f"unexpected headline eligibility: {value!r}")
+
+
 def test_run_suite_runs_ready_cells_and_builds_envelope(make_env: EnvFactory) -> None:
     captured: list[object] = []
 
@@ -161,19 +198,23 @@ def test_run_suite_runs_ready_cells_and_builds_envelope(make_env: EnvFactory) ->
         return RunResult(
             tool=getattr(adapter, "name", "stub"),
             tool_version="1",
+            checker_id=str(kwargs["checker_id"]),
+            policy=_policy(kwargs["policy"]),
+            headline_eligible=_headline_eligible(kwargs["headline_eligible"]),
             project=str(kwargs["project"]),
-            thread_mode=ThreadMode(kwargs["thread_mode"])
-            if not isinstance(kwargs["thread_mode"], ThreadMode)
-            else kwargs["thread_mode"],
+            thread_mode=_thread_mode(kwargs["thread_mode"]),
             result_class=ResultClass.CLEAN,
             real_exit_code=0,
             env=make_env(),
         )
 
+    run_config = RunConfig(checkers=(CheckerSpec(tool="stub", version="1.0"),))
     envelope = run_suite(
         suite_path=Path("/x/suite.toml"),
         cache_root=Path("/x/cache"),
-        tools=["stub"],
+        checkers=(CheckerSpec(tool="stub", version="1.0"),),
+        policy=Policy.STANDARD,
+        run_config=run_config,
         thread_modes=[ThreadMode.ALL_CORES, ThreadMode.CONSTRAINED],
         generated_at="2026-06-08T00:00:00Z",
         runs=1,
@@ -188,6 +229,7 @@ def test_run_suite_runs_ready_cells_and_builds_envelope(make_env: EnvFactory) ->
         lookup_entry=lambda _p, name: _entry(name),
         prepare=lambda _entry, _cache: _prepared("demo"),
         preflight=lambda _prepared, _adapters, **_kwargs: _ready_report("demo", ["stub"]),
+        prepare_checker_fn=_prepare_stub_runtime,
         run_one=fake_run_one,
         calibrate_fn=lambda _runs: _calib(),
     )
@@ -196,6 +238,9 @@ def test_run_suite_runs_ready_cells_and_builds_envelope(make_env: EnvFactory) ->
     assert envelope.generated_at == "2026-06-08T00:00:00Z"
     assert len(envelope.runs) == 2
     assert all(r.result_class == ResultClass.CLEAN for r in envelope.runs)
+    assert envelope.run_config == run_config
+    assert envelope.resolved_checkers[0].lock_hash == "L"
+    assert all(r.checker_id == "stub@1.0" for r in envelope.runs)
     assert all(m is not None for m in captured)
 
 
@@ -225,7 +270,8 @@ def test_run_suite_excluded_project_emits_failed_records() -> None:
     envelope = run_suite(
         suite_path=Path("/x/suite.toml"),
         cache_root=Path("/x/cache"),
-        tools=["stub"],
+        checkers=(CheckerSpec(tool="stub", version="1.0"),),
+        policy=Policy.STANDARD,
         thread_modes=[ThreadMode.ALL_CORES],
         generated_at="t",
         runs=1,
@@ -240,6 +286,7 @@ def test_run_suite_excluded_project_emits_failed_records() -> None:
         lookup_entry=lambda _p, name: _entry(name),
         prepare=lambda _entry, _cache: _prepared("demo"),
         preflight=lambda _prepared, _adapters, **_kwargs: not_ready,
+        prepare_checker_fn=_prepare_stub_runtime,
         run_one=boom_run_one,
         calibrate_fn=lambda _runs: _calib(),
     )
@@ -247,3 +294,67 @@ def test_run_suite_excluded_project_emits_failed_records() -> None:
     rec = envelope.runs[0]
     assert rec.result_class == ResultClass.FAILED_ENV
     assert rec.error_detail is not None and "pyrefly env error" in rec.error_detail
+    assert rec.checker_id == "stub@1.0"
+
+
+def test_run_suite_checker_resolve_failure_emits_failed_records(
+    make_env: EnvFactory,
+) -> None:
+    def prepare_checker_fn(
+        spec: CheckerSpec, cache_root: Path, *, install_source: str
+    ) -> CheckerRuntime:
+        if spec.tool == "pyright":
+            raise RuntimeError("no matching wheel")
+        return _prepare_stub_runtime(spec, cache_root, install_source=install_source)
+
+    def fake_run_one(adapter: object, **kwargs: object) -> RunResult:
+        return RunResult(
+            tool=getattr(adapter, "name", "stub"),
+            tool_version="1",
+            checker_id=str(kwargs["checker_id"]),
+            policy=_policy(kwargs["policy"]),
+            headline_eligible=_headline_eligible(kwargs["headline_eligible"]),
+            project=str(kwargs["project"]),
+            thread_mode=_thread_mode(kwargs["thread_mode"]),
+            result_class=ResultClass.CLEAN,
+            real_exit_code=0,
+            env=make_env(),
+        )
+
+    envelope = run_suite(
+        suite_path=Path("/x/suite.toml"),
+        cache_root=Path("/x/cache"),
+        checkers=(
+            CheckerSpec(tool="stub", version="1.0"),
+            CheckerSpec(tool="pyright", version="1.1.0"),
+        ),
+        policy=Policy.STANDARD,
+        thread_modes=[ThreadMode.ALL_CORES],
+        generated_at="t",
+        runs=1,
+        warmup=1,
+        timeout=10,
+        mem_runs=1,
+        measure_enabled=False,
+        calib_runs=1,
+        load_projects=lambda _p: ["demo"],
+        load_version=lambda _p: "v",
+        adapter_factory=lambda _name: StubAdapter(),
+        lookup_entry=lambda _p, name: _entry(name),
+        prepare=lambda _entry, _cache: _prepared("demo"),
+        preflight=lambda _prepared, _adapters, **_kwargs: _ready_report("demo", ["stub"]),
+        prepare_checker_fn=prepare_checker_fn,
+        run_one=fake_run_one,
+        calibrate_fn=lambda _runs: _calib(),
+    )
+
+    clean = [r for r in envelope.runs if r.result_class is ResultClass.CLEAN]
+    failed = [r for r in envelope.runs if r.result_class is ResultClass.FAILED_ENV]
+    assert [r.checker_id for r in clean] == ["stub@1.0"]
+    assert len(failed) == 1
+    assert failed[0].tool == "pyright"
+    assert failed[0].tool_version == "unknown"
+    assert failed[0].checker_id == "pyright@1.1.0"
+    assert failed[0].failure_phase is FailurePhase.PROBE
+    assert failed[0].headline_eligible is False
+    assert "checker resolve failed: no matching wheel" in (failed[0].error_detail or "")
