@@ -48,18 +48,21 @@ def build_matrix(
     projects: list[str],
     checker_ids: list[str],
     thread_modes: list[ThreadMode],
-    cores: int = 1,
+    cores: tuple[int, ...] = (1,),
 ) -> list[SuiteCell]:
     """Project-major matrix so a project's clone/venv is reused across its cells.
     ALL_CORES cells carry cores=None (unconstrained); CONSTRAINED cells carry the
-    scalar `cores`. The cores-LIST sweep (one constrained cell per cores value) is
-    added in A3; A2 threads a single scalar."""
-    return [
-        SuiteCell(project, checker_id, mode, None if mode is ThreadMode.ALL_CORES else cores)
-        for project in projects
-        for checker_id in checker_ids
-        for mode in thread_modes
-    ]
+    selected core count. Cores multiply only CONSTRAINED cells; ALL_CORES is emitted
+    exactly once per project/checker with cores=None."""
+    cells: list[SuiteCell] = []
+    for project in projects:
+        for checker_id in checker_ids:
+            for mode in thread_modes:
+                if mode is ThreadMode.ALL_CORES:
+                    cells.append(SuiteCell(project, checker_id, mode, None))
+                else:
+                    cells.extend(SuiteCell(project, checker_id, mode, n) for n in cores)
+    return cells
 
 
 def shard(cells: list[SuiteCell], index: int, total: int) -> list[SuiteCell]:
@@ -146,7 +149,7 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
     mem_runs: int,
     measure_enabled: bool,
     calib_runs: int,
-    cores: int = 1,
+    cores: tuple[int, ...] = (1,),
     shard_index: int = 0,
     shard_total: int = 1,
     projects: list[str] | None = None,
@@ -249,7 +252,7 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
         # cells with None measured cells. A3 replaces both with resolved ids.
         for cell in project_cells:
             adapter = adapter_by_name[_tool_of(cell.checker_id)]
-            cell_cores = cell.cores if cell.cores is not None else cores
+            cell_cores = cell.cores if cell.cores is not None else 1
             config = _suite_config(prepared, cell_cores)
             manifest = RunManifest(
                 project_sha=prepared.sha,

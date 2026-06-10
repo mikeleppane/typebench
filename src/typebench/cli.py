@@ -398,7 +398,7 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
         mem_runs=mem_runs,
         measure_enabled=measure,
         calib_runs=calib_runs,
-        cores=cores,
+        cores=(cores,),
         shard_index=shard_index,
         shard_total=shard_total,
         lookup_entry=_lookup_project,

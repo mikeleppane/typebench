@@ -31,6 +31,37 @@ def test_build_matrix_is_project_major() -> None:
     assert all(isinstance(c, SuiteCell) for c in cells)
 
 
+def test_build_matrix_cores_list_multiplies_only_constrained() -> None:
+    cells = build_matrix(
+        ["demo"],
+        ["mypy@latest", "pyright@latest"],
+        [ThreadMode.ALL_CORES, ThreadMode.CONSTRAINED],
+        cores=(1, 4),
+    )
+
+    assert cells == [
+        SuiteCell("demo", "mypy@latest", ThreadMode.ALL_CORES, None),
+        SuiteCell("demo", "mypy@latest", ThreadMode.CONSTRAINED, 1),
+        SuiteCell("demo", "mypy@latest", ThreadMode.CONSTRAINED, 4),
+        SuiteCell("demo", "pyright@latest", ThreadMode.ALL_CORES, None),
+        SuiteCell("demo", "pyright@latest", ThreadMode.CONSTRAINED, 1),
+        SuiteCell("demo", "pyright@latest", ThreadMode.CONSTRAINED, 4),
+    ]
+
+
+def test_build_matrix_single_core_default_is_one_constrained_cell() -> None:
+    cells = build_matrix(
+        ["demo"],
+        ["mypy@latest"],
+        [ThreadMode.ALL_CORES, ThreadMode.CONSTRAINED],
+    )
+
+    assert cells == [
+        SuiteCell("demo", "mypy@latest", ThreadMode.ALL_CORES, None),
+        SuiteCell("demo", "mypy@latest", ThreadMode.CONSTRAINED, 1),
+    ]
+
+
 def test_shard_partitions_disjointly_and_covers_all() -> None:
     cells = build_matrix(["a", "b", "c"], ["mypy", "ty"], [ThreadMode.ALL_CORES])
     s0 = shard(cells, 0, 3)
