@@ -11,7 +11,6 @@ import os
 import re
 import shlex
 import shutil
-import subprocess
 import tempfile
 from pathlib import Path  # runtime: used to build the parallel cache dir path
 from typing import TYPE_CHECKING
@@ -21,11 +20,12 @@ from typebench.adapters.base import ParallelismCap
 from typebench.contracts.models import ResultClass, ThreadMode
 from typebench.contracts.policy import PRESETS, CheckerPosture, Policy
 from typebench.contracts.taxonomy import is_constrained
+from typebench.engine.proc import SYSTEM_HOST
 from typebench.engine.wrapper import universal_failure_prefix
 
 if TYPE_CHECKING:
     from typebench.contracts.config import NormalizedConfig
-    from typebench.engine.wrapper import RawRun
+    from typebench.contracts.proc import ProcessHost, RawRun
 
 # Text summaries: errors+files, and the clean form.
 _FOUND_RE = re.compile(r"Found (\d+) errors? in \d+ files? \(checked (\d+) source files?\)")
@@ -93,8 +93,11 @@ class MypyAdapter:
     name = "mypy"
     install_source = "PyPI wheel (mypyc-compiled)"
 
+    def __init__(self, host: ProcessHost = SYSTEM_HOST) -> None:
+        self._host = host
+
     def version(self, binary: str | None = None) -> str:
-        return probe_version([binary or "mypy", "--version"], runner=subprocess.run)
+        return probe_version([binary or "mypy", "--version"], host=self._host)
 
     def install(self) -> str:
         # Records the version string, which carries "(compiled: yes)" for the lock

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from typebench.adapters import pyright as pyright_mod
+from typebench._internal.test_fakes import FakeHost, fake_raw
 from typebench.adapters.base import Adapter
 from typebench.adapters.pyright import PyrightAdapter
 from typebench.contracts.config import NormalizedConfig
@@ -132,12 +132,21 @@ def test_command_venv_layout_does_not_follow_bin_python_symlink(tmp_path: Path) 
     assert written["venv"] == "myenv"  # the venv dir, NOT "system"/"usr"
 
 
-def test_version_is_no_raise_when_binary_absent(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _boom(*_a: object, **_k: object) -> object:
-        raise FileNotFoundError("pyright")
+def test_version_is_no_raise_when_binary_absent() -> None:
+    host = FakeHost({("pyright", "--version"): fake_raw(stderr="missing", env_error=True)})
 
-    monkeypatch.setattr(pyright_mod.subprocess, "run", _boom)
-    assert PyrightAdapter().version() == "unknown"
+    assert PyrightAdapter(host=host).version() == "unknown"
+
+
+def test_install_records_node_version_from_host() -> None:
+    host = FakeHost(
+        {
+            ("pyright", "--version"): fake_raw(stdout="pyright 1.2.3\n"),
+            ("node", "--version"): fake_raw(stdout="v22.0.0\n"),
+        }
+    )
+
+    assert PyrightAdapter(host=host).install() == "pyright 1.2.3 (node v22.0.0)"
 
 
 def test_missing_pyright_yields_schema_valid_failed_env(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
     from typebench.contracts.config import NormalizedConfig
     from typebench.contracts.models import ResultClass, ThreadMode
-    from typebench.engine.wrapper import RawRun
+    from typebench.contracts.proc import RawRun
 
 
 @dataclass(frozen=True)

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from typing import TYPE_CHECKING
 
 from typebench.adapters._support import confirm_clean, probe_version
@@ -16,13 +15,14 @@ from typebench.adapters.base import ParallelismCap, coerce_count
 from typebench.contracts.models import ResultClass, ThreadMode
 from typebench.contracts.policy import PRESETS, CheckerPosture, Policy
 from typebench.contracts.taxonomy import is_constrained
+from typebench.engine.proc import SYSTEM_HOST
 from typebench.engine.wrapper import classify_with_map
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from typebench.contracts.config import NormalizedConfig
-    from typebench.engine.wrapper import RawRun
+    from typebench.contracts.proc import ProcessHost, RawRun
 
 _FOUND_RE = re.compile(r"Found (\d+) diagnostics?")
 _INDEXED_RE = re.compile(r"Indexed (\d+) file\(s\)")
@@ -48,8 +48,11 @@ class TyAdapter:
     name = "ty"
     install_source = "PyPI wheel (Rust)"
 
+    def __init__(self, host: ProcessHost = SYSTEM_HOST) -> None:
+        self._host = host
+
     def version(self, binary: str | None = None) -> str:
-        return probe_version([binary or "ty", "--version"], runner=subprocess.run)
+        return probe_version([binary or "ty", "--version"], host=self._host)
 
     def install(self) -> str:
         return self.version()

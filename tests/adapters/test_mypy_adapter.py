@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from typebench._internal.test_fakes import FakeHost, fake_raw
 from typebench.adapters import mypy as mypy_mod
 from typebench.adapters.base import Adapter
 from typebench.adapters.mypy import MypyAdapter
@@ -206,12 +207,10 @@ def test_parallelism_cap_pre_2_0_is_single_process(monkeypatch: pytest.MonkeyPat
     assert "single-process" in cap_old.mechanism
 
 
-def test_version_is_no_raise_when_binary_absent(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _boom(*_a: object, **_k: object) -> object:
-        raise FileNotFoundError("mypy")
+def test_version_is_no_raise_when_binary_absent() -> None:
+    host = FakeHost({("mypy", "--version"): fake_raw(stderr="missing", env_error=True)})
 
-    monkeypatch.setattr(mypy_mod.subprocess, "run", _boom)
-    assert MypyAdapter().version() == "unknown"
+    assert MypyAdapter(host=host).version() == "unknown"
 
 
 def test_missing_mypy_yields_schema_valid_failed_env(monkeypatch: pytest.MonkeyPatch) -> None:

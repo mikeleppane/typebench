@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from typebench.adapters import ty as ty_mod
+from typebench._internal.test_fakes import FakeHost, fake_raw
 from typebench.adapters.base import Adapter
 from typebench.adapters.ty import TyAdapter
 from typebench.contracts.config import NormalizedConfig
@@ -115,12 +115,10 @@ def test_parallelism_cap_is_soft() -> None:
     assert cap.hard_cap is False
 
 
-def test_version_is_no_raise_when_binary_absent(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _boom(*_a: object, **_k: object) -> object:
-        raise FileNotFoundError("ty")
+def test_version_is_no_raise_when_binary_absent() -> None:
+    host = FakeHost({("ty", "--version"): fake_raw(stderr="missing", env_error=True)})
 
-    monkeypatch.setattr(ty_mod.subprocess, "run", _boom)
-    assert TyAdapter().version() == "unknown"
+    assert TyAdapter(host=host).version() == "unknown"
 
 
 def test_missing_ty_yields_schema_valid_failed_env(monkeypatch: pytest.MonkeyPatch) -> None:

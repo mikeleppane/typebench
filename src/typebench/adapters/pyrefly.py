@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import re
-import subprocess
 from typing import TYPE_CHECKING
 
 from typebench.adapters._support import confirm_clean, probe_version
@@ -19,13 +18,14 @@ from typebench.adapters.base import ParallelismCap, coerce_count
 from typebench.contracts.models import ResultClass, ThreadMode
 from typebench.contracts.policy import PRESETS, CheckerPosture, Policy
 from typebench.contracts.taxonomy import is_constrained
+from typebench.engine.proc import SYSTEM_HOST
 from typebench.engine.wrapper import universal_failure_prefix
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from typebench.contracts.config import NormalizedConfig
-    from typebench.engine.wrapper import RawRun
+    from typebench.contracts.proc import ProcessHost, RawRun
 
 _MODULES_RE = re.compile(r"(\d+) modules?")  # singular "1 module" is real output
 
@@ -54,8 +54,11 @@ class PyreflyAdapter:
     name = "pyrefly"
     install_source = "PyPI wheel (Rust)"
 
+    def __init__(self, host: ProcessHost = SYSTEM_HOST) -> None:
+        self._host = host
+
     def version(self, binary: str | None = None) -> str:
-        return probe_version([binary or "pyrefly", "--version"], runner=subprocess.run)
+        return probe_version([binary or "pyrefly", "--version"], host=self._host)
 
     def install(self) -> str:
         return self.version()

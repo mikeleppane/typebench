@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 from pathlib import Path  # runtime: used to derive venvPath (not annotation-only)
 from typing import TYPE_CHECKING
 
@@ -16,11 +15,12 @@ from typebench.adapters.base import ParallelismCap, coerce_count
 from typebench.contracts.models import ResultClass, ThreadMode
 from typebench.contracts.policy import PRESETS, CheckerPosture, Policy
 from typebench.contracts.taxonomy import is_constrained
+from typebench.engine.proc import SYSTEM_HOST
 from typebench.engine.wrapper import classify_with_map
 
 if TYPE_CHECKING:
     from typebench.contracts.config import NormalizedConfig
-    from typebench.engine.wrapper import RawRun
+    from typebench.contracts.proc import ProcessHost, RawRun
 
 # Exit codes: 0 clean, 1 errors, 2 fatal, 3 config, 4 bad-CLI/missing-path.
 _EXIT_MAP: dict[int, ResultClass] = {
@@ -49,11 +49,10 @@ def _relative_to(target: str, base: Path) -> str:
     return os.path.relpath(target, base)
 
 
-def _node_version() -> str:
+def _node_version(host: ProcessHost) -> str:
     """Node version (pyright is a Node app; `pyright --version` omits it). No-raise."""
-    try:
-        out = subprocess.run(["node", "--version"], capture_output=True, text=True, check=False)
-    except OSError:
+    out = host.run(["node", "--version"], timeout=10)
+    if out.env_error or out.timed_out:
         return "unknown"
     return out.stdout.strip() or "unknown"
 
@@ -73,13 +72,16 @@ class PyrightAdapter:
     name = "pyright"
     install_source = "npm + Node"
 
+    def __init__(self, host: ProcessHost = SYSTEM_HOST) -> None:
+        self._host = host
+
     def version(self, binary: str | None = None) -> str:
-        return probe_version([binary or "pyright", "--version"], runner=subprocess.run)
+        return probe_version([binary or "pyright", "--version"], host=self._host)
 
     def install(self) -> str:
         # `pyright --version` omits Node; record both for reproducibility. Node
         # pinning is an environment concern.
-        return f"{self.version()} (node {_node_version()})"
+        return f"{self.version()} (node {_node_version(self._host)})"
 
     def _platform(self, config: NormalizedConfig) -> str:
         return _PYRIGHT_PLATFORM.get(

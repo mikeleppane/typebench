@@ -1,19 +1,18 @@
 from __future__ import annotations
 
-import subprocess
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from typebench.contracts.taxonomy import ResultClass
 
-type VersionRunner = Callable[..., subprocess.CompletedProcess[str]]
+if TYPE_CHECKING:
+    from typebench.contracts.proc import ProcessHost
 
 
-def probe_version(argv: list[str], *, runner: VersionRunner) -> str:
+def probe_version(argv: list[str], *, host: ProcessHost) -> str:
     """No-raise `<tool> --version`: return stdout.strip() or stderr.strip() or
-    "unknown". OSError returns "unknown" so version probes never drop a record."""
-    try:
-        out = runner(argv, capture_output=True, text=True, check=False)
-    except OSError:
+    "unknown". Launch failures return "unknown" so version probes never drop a record."""
+    out = host.run(argv, timeout=10)
+    if out.env_error or out.timed_out:
         return "unknown"
     return out.stdout.strip() or out.stderr.strip() or "unknown"
 

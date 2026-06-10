@@ -1,68 +1,34 @@
 from __future__ import annotations
 
-import subprocess
-from typing import Never
-
+from typebench._internal.test_fakes import FakeHost, fake_raw
 from typebench.adapters._support import confirm_clean, probe_version
 from typebench.adapters.stub import StubAdapter
+from typebench.contracts.proc import RawRun
 from typebench.contracts.taxonomy import ResultClass
-from typebench.engine.wrapper import RawRun
-
-
-def _completed(stdout: str, stderr: str = "") -> subprocess.CompletedProcess[str]:
-    return subprocess.CompletedProcess(["tool", "--version"], 0, stdout=stdout, stderr=stderr)
 
 
 def test_probe_version_stdout_wins() -> None:
-    def runner(
-        argv: list[str],
-        *,
-        capture_output: bool,
-        text: bool,
-        check: bool,
-    ) -> subprocess.CompletedProcess[str]:
-        return _completed("tool 1.2.3\n", "stderr version\n")
+    host = FakeHost({("tool", "--version"): fake_raw(stdout="tool 1.2.3\n", stderr="stderr\n")})
 
-    assert probe_version(["tool", "--version"], runner=runner) == "tool 1.2.3"
+    assert probe_version(["tool", "--version"], host=host) == "tool 1.2.3"
 
 
 def test_probe_version_stderr_fallback_when_stdout_empty() -> None:
-    def runner(
-        argv: list[str],
-        *,
-        capture_output: bool,
-        text: bool,
-        check: bool,
-    ) -> subprocess.CompletedProcess[str]:
-        return _completed("", "stderr version\n")
+    host = FakeHost({("tool", "--version"): fake_raw(stderr="stderr version\n")})
 
-    assert probe_version(["tool", "--version"], runner=runner) == "stderr version"
+    assert probe_version(["tool", "--version"], host=host) == "stderr version"
 
 
 def test_probe_version_unknown_when_both_streams_empty() -> None:
-    def runner(
-        argv: list[str],
-        *,
-        capture_output: bool,
-        text: bool,
-        check: bool,
-    ) -> subprocess.CompletedProcess[str]:
-        return _completed("", "")
+    host = FakeHost({("tool", "--version"): fake_raw()})
 
-    assert probe_version(["tool", "--version"], runner=runner) == "unknown"
+    assert probe_version(["tool", "--version"], host=host) == "unknown"
 
 
-def test_probe_version_unknown_on_oserror() -> None:
-    def runner(
-        argv: list[str],
-        *,
-        capture_output: bool,
-        text: bool,
-        check: bool,
-    ) -> Never:
-        raise OSError("missing")
+def test_probe_version_unknown_on_env_error() -> None:
+    host = FakeHost({("tool", "--version"): fake_raw(stderr="missing", env_error=True)})
 
-    assert probe_version(["tool", "--version"], runner=runner) == "unknown"
+    assert probe_version(["tool", "--version"], host=host) == "unknown"
 
 
 def test_confirm_clean_truth_table() -> None:
