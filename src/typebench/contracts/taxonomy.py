@@ -82,3 +82,12 @@ class LocDenominator(StrEnum):
 
     CODE = "code"  # tokei reconciled code-LOC (blanks + comments excluded)
     PHYSICAL = "physical"  # fallback physical line count
+
+
+class SizeBucket(StrEnum):
+    """LOC bands that reveal scaling curves."""
+
+    SMALL = "small"
+    MEDIUM = "medium"
+    LARGE = "large"
+    GIANT = "giant"

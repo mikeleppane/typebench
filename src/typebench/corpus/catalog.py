@@ -9,24 +9,15 @@ everything else is generic.
 from __future__ import annotations
 
 import tomllib
-from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from typebench.contracts.config import DEFAULT_EXCLUDES
+from typebench.contracts.taxonomy import SizeBucket  # noqa: TC001
 
 if TYPE_CHECKING:
     from pathlib import Path
-
-
-class SizeBucket(StrEnum):
-    """LOC bands that reveal scaling curves."""
-
-    SMALL = "small"
-    MEDIUM = "medium"
-    LARGE = "large"
-    GIANT = "giant"
 
 
 class CorpusProject(BaseModel):
