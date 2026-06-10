@@ -23,22 +23,44 @@ def _config(root: Path) -> NormalizedConfig:
     )
 
 
-def _diagnostics(binary: str | None, tmp_path: Path) -> int | None:
-    adapter = StubAdapter(diagnostics=7, files=3)
-    workdir = tmp_path / f"work-{binary is None}"
+def _run_stub(binary: str | None, workdir: Path) -> tuple[list[str], int | None]:
     workdir.mkdir()
+    adapter = StubAdapter(diagnostics=7, files=3)
     argv, env = adapter.command(
-        "demo", _config(tmp_path), ThreadMode.CONSTRAINED, workdir, binary=binary
+        "demo", _config(workdir.parent), ThreadMode.CONSTRAINED, workdir, binary=binary
     )
     raw = run_command(argv, timeout=30, env=env)
     diags, _files = adapter.parse(raw.stdout, raw.stderr, raw.exit_code)
-    return diags
+    return argv, diags
+
+
+def test_stub_command_uses_binary_as_launcher(tmp_path: Path) -> None:
+    # Structural falsifiability: the resolved per-version binary IS argv[0]. Build the
+    # argv only (do not run a fake path) — this proves the launcher seam is real, so the
+    # count-invariance test below cannot pass as a tautology if `binary=` were ignored.
+    # (A naked symlink to the interpreter can't actually RUN — Python derives its prefix
+    # from the launcher path — so the seam is asserted structurally, the count by running.)
+    adapter = StubAdapter(diagnostics=7, files=3)
+    workdir = tmp_path / "argv"
+    workdir.mkdir()
+    default_argv, _ = adapter.command("demo", _config(tmp_path), ThreadMode.CONSTRAINED, workdir)
+    pinned_argv, _ = adapter.command(
+        "demo", _config(tmp_path), ThreadMode.CONSTRAINED, workdir, binary="/opt/venv/bin/python"
+    )
+    assert default_argv[0] == sys.executable
+    assert pinned_argv[0] == "/opt/venv/bin/python"  # the resolved-venv launcher lands at argv[0]
 
 
 def test_stub_count_invariant_to_launcher_path(tmp_path: Path) -> None:
-    bare = _diagnostics(None, tmp_path)
-    venv_like = _diagnostics(sys.executable, tmp_path)
-    assert bare == venv_like == 7
+    # The launcher path does not change the emitted diagnostic count: a per-version venv
+    # changes WHERE the interpreter lives, never WHAT it counts. Both arms use a runnable
+    # interpreter (sys.executable); the seam itself is proven structurally above.
+    bare_argv, bare = _run_stub(None, tmp_path / "bare")
+    explicit_argv, explicit = _run_stub(sys.executable, tmp_path / "explicit")
+
+    assert bare_argv[0] == sys.executable
+    assert explicit_argv[0] == sys.executable
+    assert bare == explicit == 7
 
 
 def _mypy_diagnostics(binary: str | None, project_root: Path, workdir: Path) -> int | None:

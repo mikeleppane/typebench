@@ -723,6 +723,7 @@ def compare(  # noqa: PLR0913 — distinct user-facing CLI options for one comma
     except ValueError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
+    _adapters_for([spec.tool for spec in specs])  # reject an unknown checker tool up front (exit 2)
     run_config = RunConfig(
         checkers=specs,
         projects=tuple(project or ()),
@@ -765,7 +766,14 @@ def compare(  # noqa: PLR0913 — distinct user-facing CLI options for one comma
         calibrate_fn=calibrate if calibrate_baseline else None,
     )
     output.write_text(envelope.model_dump_json(indent=2), encoding="utf-8")
-    typer.echo(render_compare(envelope, baseline=specs[0].checker_id()))
+    # Baseline = the FIRST spec's RESOLVED checker_id (records are keyed on the
+    # resolved id, so a declared `mypy@latest` would match no row and zero the deltas).
+    baseline_id = (
+        envelope.resolved_checkers[0].checker_id
+        if envelope.resolved_checkers
+        else specs[0].checker_id()
+    )
+    typer.echo(render_compare(envelope, baseline=baseline_id))
 
 
 @app.command()

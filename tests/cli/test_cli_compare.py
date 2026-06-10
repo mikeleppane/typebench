@@ -9,6 +9,7 @@ from typebench.cli import app
 from typebench.contracts.models import (
     EnvFingerprint,
     MemoryStats,
+    ResolvedChecker,
     ResultsEnvelope,
     RunResult,
     TimingStats,
@@ -152,3 +153,90 @@ def test_compare_dry_run_executes_nothing(
     assert result.exit_code == 0, result.output
     assert "matrix" in result.stdout.lower()
     assert not out.exists()
+
+
+def test_compare_rejects_unknown_checker_tool(tmp_path: Path) -> None:
+    out = tmp_path / "cmp.json"
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "--corpus",
+            str(tmp_path / "suite.toml"),
+            "--checker",
+            "bogus@1.0",
+            "--checker",
+            "mypy@1.0",
+            "--output",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 2
+    assert "bogus" in result.output
+    assert not out.exists()
+
+
+def test_compare_baseline_uses_resolved_checker_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, make_env: EnvFactory
+) -> None:
+    # The first --checker is UNPINNED (declared id `mypy@latest`); records are keyed
+    # on the RESOLVED id. Baseline must come from resolved_checkers, or no row matches
+    # and every delta zeroes to "—".
+    def fake_run_suite(**kwargs: object) -> ResultsEnvelope:
+        return ResultsEnvelope(
+            suite_version="v",
+            generated_at=str(kwargs["generated_at"]),
+            runs=[
+                _cmp_record("mypy@1.18.2", 6.0, make_env),
+                _cmp_record("mypy@1.19.0", 5.4, make_env),
+            ],
+            resolved_checkers=(
+                ResolvedChecker(
+                    checker_id="mypy@1.18.2",
+                    tool="mypy",
+                    version="1.18.2",
+                    lock_hash="L0",
+                    install_source="pypi",
+                ),
+                ResolvedChecker(
+                    checker_id="mypy@1.19.0",
+                    tool="mypy",
+                    version="1.19.0",
+                    lock_hash="L1",
+                    install_source="pypi",
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(cli, "run_suite", fake_run_suite)
+    suite = tmp_path / "suite.toml"
+    suite.write_text(_SUITE, encoding="utf-8")
+    out = tmp_path / "cmp.json"
+
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "--corpus",
+            str(suite),
+            "--checker",
+            "mypy",  # unpinned -> declared mypy@latest, resolved mypy@1.18.2
+            "--checker",
+            "mypy@1.19.0",
+            "--project",
+            "sqlalchemy",
+            "--cores",
+            "4",
+            "--output",
+            str(out),
+            "--no-measure",
+            "--no-calibrate",
+            "--runs",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    # The resolved baseline matched a row -> a real signed delta, not "—".
+    assert "baseline" in result.stdout
+    assert "-10.0%" in result.stdout  # (5.4 - 6.0) / 6.0 = -10.0%
