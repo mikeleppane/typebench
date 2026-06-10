@@ -13,11 +13,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from typebench.adapters.base import CheckerHandle
 from typebench.contracts.config import NormalizedConfig, config_hash
 from typebench.contracts.models import (
     FailurePhase,
-    PreflightReport,
     ResolvedChecker,
     ResultClass,
     ResultsEnvelope,
@@ -25,25 +23,20 @@ from typebench.contracts.models import (
     ThreadMode,
 )
 from typebench.contracts.policy import Policy
-from typebench.corpus.catalog import load_suite, load_suite_version
-from typebench.corpus.checkerenv import prepare_checker
 from typebench.corpus.counting import first_party_files
-from typebench.corpus.envman import prepare_project
 from typebench.engine import measure
-from typebench.engine.collector import RunManifest, run_single
+from typebench.engine.collector import RunManifest
 from typebench.engine.env import detect_env
 from typebench.engine.timing import run_timing
-from typebench.suite.preflight import preflight_project
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from typebench.adapters.base import Adapter
-    from typebench.contracts.identity import CheckerRuntime, CheckerSpec
+    from typebench.adapters.base import CheckerHandle
+    from typebench.contracts.identity import CheckerSpec
     from typebench.contracts.models import PreparedProject
     from typebench.contracts.runconfig import RunConfig
     from typebench.corpus.catalog import CorpusProject
     from typebench.engine.calibration import CalibrationStats
+    from typebench.suite.ports import BenchEngine, CheckerResolver, CorpusSource
 
 
 @dataclass(frozen=True)
@@ -229,28 +222,6 @@ def _measure_harness_baselines(
     return mem_baseline, wall_overhead
 
 
-def _resolve_runtimes(
-    checkers: tuple[CheckerSpec, ...],
-    cache_root: Path,
-    adapter_factory: Callable[[str], Adapter],
-    prepare_checker_fn: Callable[..., CheckerRuntime],
-) -> tuple[list[CheckerHandle], list[tuple[CheckerSpec, str]]]:
-    """Resolve each spec to a runtime up front. A per-spec failure becomes a visible
-    record (returned as a failed-spec), never an abort — one bad pin must not drop
-    every other checker's results."""
-    handles: list[CheckerHandle] = []
-    failed: list[tuple[CheckerSpec, str]] = []
-    for spec in checkers:
-        adapter = adapter_factory(spec.tool)
-        try:
-            runtime = prepare_checker_fn(spec, cache_root, install_source=adapter.install_source)
-        except Exception as exc:  # resolve failures become visible records, never abort
-            failed.append((spec, f"checker resolve failed: {exc}"))
-        else:
-            handles.append(CheckerHandle(spec=spec, adapter=adapter, runtime=runtime))
-    return handles, failed
-
-
 def _failed_checker_records(
     failed_specs: list[tuple[CheckerSpec, str]],
     all_projects: list[str],
@@ -277,38 +248,31 @@ def _failed_checker_records(
     return records
 
 
-def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable seams, mirrors run_single's noqa precedent
+def _resolve_checkers(
     *,
-    suite_path: Path,
-    cache_root: Path,
-    checkers: tuple[CheckerSpec, ...],
-    thread_modes: list[ThreadMode],
+    specs: tuple[CheckerSpec, ...],
+    resolver: CheckerResolver,
+) -> tuple[list[CheckerHandle], list[tuple[CheckerSpec, str]]]:
+    """Resolve each spec up front; failures become visible records, never aborts."""
+    handles: list[CheckerHandle] = []
+    failed: list[tuple[CheckerSpec, str]] = []
+    for spec in specs:
+        try:
+            handles.append(resolver.resolve(spec))
+        except Exception as exc:
+            failed.append((spec, f"checker resolve failed: {exc}"))
+    return handles, failed
+
+
+def run_suite(
+    *,
+    config: RunConfig,
+    corpus: CorpusSource,
+    resolver: CheckerResolver,
+    engine: BenchEngine,
     generated_at: str,
-    runs: int,
-    warmup: int,
-    timeout: float,
-    mem_runs: int,
-    measure_enabled: bool,
-    calib_runs: int,
-    cores: tuple[int, ...] = (1,),
-    policy: Policy = Policy.STANDARD,
-    run_config: RunConfig | None = None,
     shard_index: int = 0,
     shard_total: int = 1,
-    projects: list[str] | None = None,
-    load_projects: Callable[[Path], list[str]] = lambda p: [e.name for e in load_suite(p)],
-    load_version: Callable[[Path], str] = load_suite_version,
-    lookup_entry: Callable[[Path, str], CorpusProject] | None = None,
-    adapter_factory: Callable[[str], Adapter] | None = None,
-    prepare: Callable[..., PreparedProject] = prepare_project,
-    preflight: Callable[..., PreflightReport] = preflight_project,
-    run_one: Callable[..., RunResult] = run_single,
-    prepare_checker_fn: Callable[..., CheckerRuntime] = prepare_checker,
-    calibrate_fn: Callable[[int], CalibrationStats] | None = None,
-    prewarm_sources: Callable[[PreparedProject], None] = prewarm_project_sources,
-    measure_harness_baselines_fn: Callable[..., tuple[int | None, float | None]] = (
-        _measure_harness_baselines
-    ),
 ) -> ResultsEnvelope:
     """Run the sharded matrix behind the preflight gate -> ResultsEnvelope.
 
@@ -317,30 +281,33 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
     cell (visible 'didn't compete') and skip running. Otherwise run each ready
     cell via run_one with a stamped RunManifest. One calibration per invocation
     is attached to every record."""
-    if adapter_factory is None:
-        raise ValueError("adapter_factory is required")
-    if lookup_entry is None:
-        raise ValueError("lookup_entry is required")
-
-    all_projects = projects if projects is not None else load_projects(suite_path)
-    suite_version = load_version(suite_path)
-    handles, failed_specs = _resolve_runtimes(
-        checkers, cache_root, adapter_factory, prepare_checker_fn
-    )
+    entries = corpus.entries()
+    all_projects = [entry.name for entry in entries]
+    entry_by_name = {entry.name: entry for entry in entries}
+    suite_version = corpus.version()
+    plan = config.measurement_plan()
+    handles, failed_specs = _resolve_checkers(specs=config.checkers, resolver=resolver)
     checker_ids = [handle.checker_id for handle in handles]
     handle_by_id = {handle.checker_id: handle for handle in handles}
     cells = shard(
-        build_matrix(all_projects, checker_ids, thread_modes, cores), shard_index, shard_total
+        build_matrix(
+            all_projects,
+            checker_ids,
+            list(config.thread_modes),
+            config.cores,
+        ),
+        shard_index,
+        shard_total,
     )
 
     calibration: CalibrationStats | None = None
-    if calibrate_fn is not None:
-        calibration = calibrate_fn(calib_runs)
-    harness_mem_baseline_bytes, harness_wall_overhead_s = measure_harness_baselines_fn(
-        timeout=timeout,
-        runs=runs,
-        warmup=warmup,
-        measure_enabled=measure_enabled,
+    if config.calibrate:
+        calibration = engine.calibrate(config.calib_runs)
+    harness_mem_baseline_bytes, harness_wall_overhead_s = _measure_harness_baselines(
+        timeout=plan.timeout_s,
+        runs=plan.runs,
+        warmup=plan.warmup,
+        measure_enabled=plan.measure,
     )
 
     # Group sharded cells by project, preserving matrix order.
@@ -351,21 +318,21 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
     results: list[RunResult] = _failed_checker_records(
         failed_specs,
         all_projects,
-        thread_modes,
-        cores,
+        list(config.thread_modes),
+        config.cores,
         shard_index,
         shard_total,
         calibration,
-        policy,
+        config.policy,
     )
     for project, project_cells in by_project.items():
-        entry = lookup_entry(suite_path, project)
+        entry = entry_by_name[project]
         project_handles = list(
             {cell.checker_id: handle_by_id[cell.checker_id] for cell in project_cells}.values()
         )
 
         try:
-            prepared = prepare(entry, cache_root)
+            prepared = corpus.prepare(entry)
         # Broad by intent: prepare_project raises PrepareError, but a failure of ANY
         # kind must still emit records for the project's cells, never abort the suite.
         except Exception as exc:
@@ -379,14 +346,14 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
                         entry,
                         f"prepare failed: {exc}",
                         calibration,
-                        policy,
-                        policy is Policy.STANDARD,
+                        config.policy,
+                        config.policy is Policy.STANDARD,
                     )
                 )
             continue
 
         try:
-            prewarm_sources(prepared)
+            prewarm_project_sources(prepared)
         except Exception as exc:
             for cell in project_cells:
                 handle = handle_by_id[cell.checker_id]
@@ -398,17 +365,17 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
                         entry,
                         f"source pre-warm failed: {exc}",
                         calibration,
-                        policy,
-                        policy is Policy.STANDARD,
+                        config.policy,
+                        config.policy is Policy.STANDARD,
                     )
                 )
             continue
 
-        report = preflight(
+        report = engine.preflight(
             prepared,
             project_handles,
-            timeout=timeout,
-            policy=policy,
+            timeout=plan.timeout_s,
+            policy=config.policy,
         )
         if not report.ready:
             detail = "; ".join(
@@ -426,8 +393,8 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
                         entry,
                         detail or "preflight not ready",
                         calibration,
-                        policy,
-                        policy is Policy.STANDARD,
+                        config.policy,
+                        config.policy is Policy.STANDARD,
                     )
                 )
             continue
@@ -442,7 +409,7 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
         for cell in project_cells:
             handle = handle_by_id[cell.checker_id]
             cell_cores = cell.cores if cell.cores is not None else 1
-            config = _suite_config(prepared, cell_cores)
+            cell_config = _suite_config(prepared, cell_cores)
             manifest = RunManifest(
                 project_sha=prepared.sha,
                 lock_hash=prepared.lock_hash,
@@ -454,22 +421,15 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
                 over_reports=over_by_checker.get(handle.checker_id, False),
             )
             results.append(
-                run_one(
-                    handle.adapter,
+                engine.run_cell(
+                    handle,
                     project=project,
-                    config=config,
+                    config=cell_config,
                     thread_mode=cell.thread_mode,
-                    warmup=warmup,
-                    runs=runs,
-                    timeout=timeout,
-                    mem_runs=mem_runs,
-                    measure_enabled=measure_enabled,
+                    plan=plan,
                     calibration=calibration,
                     manifest=manifest,
-                    binary=handle.binary,
-                    checker_id=handle.checker_id,
-                    policy=policy,
-                    headline_eligible=policy is Policy.STANDARD,
+                    policy=config.policy,
                 )
             )
 
@@ -487,7 +447,7 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
         suite_version=suite_version,
         generated_at=generated_at,
         runs=results,
-        run_config=run_config,
+        run_config=config,
         resolved_checkers=resolved_checkers,
         harness_mem_baseline_bytes=harness_mem_baseline_bytes,
         harness_wall_overhead_s=harness_wall_overhead_s,

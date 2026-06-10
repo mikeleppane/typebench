@@ -1,16 +1,15 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NotRequired, TypedDict, Unpack
+from typing import Protocol, TypedDict, Unpack
 
 import pytest
 from typer.testing import CliRunner, Result
 
 from typebench import cli
-from typebench.adapters.base import Adapter
 from typebench.cli import app
 from typebench.contracts.identity import CheckerSpec
-from typebench.contracts.models import CalibrationStats, ResultsEnvelope
+from typebench.contracts.models import ResultsEnvelope
 from typebench.contracts.policy import Policy
 from typebench.contracts.runconfig import RunConfig
 from typebench.contracts.taxonomy import ThreadMode
@@ -32,29 +31,18 @@ class SuiteCapture:
     mem_runs: int
 
 
+class CapturedCorpus(Protocol):
+    def entries(self) -> list[CorpusProject]: ...
+
+
 class RunSuiteKwargs(TypedDict):
-    suite_path: Path
-    cache_root: Path
-    checkers: tuple[CheckerSpec, ...]
-    thread_modes: list[ThreadMode]
+    config: RunConfig
+    corpus: CapturedCorpus
+    resolver: object
+    engine: object
     generated_at: str
-    runs: int
-    warmup: int
-    timeout: float
-    mem_runs: int
-    measure_enabled: bool
-    calib_runs: int
-    cores: tuple[int, ...]
-    policy: Policy
-    run_config: RunConfig
     shard_index: int
     shard_total: int
-    projects: list[str]
-    lookup_entry: Callable[[Path, str], CorpusProject]
-    adapter_factory: Callable[[str], Adapter]
-    calibrate_fn: Callable[[int], CalibrationStats] | None
-    load_projects: NotRequired[Callable[[Path], list[str]]]
-    load_version: NotRequired[Callable[[Path], str]]
 
 
 def _suite_toml(project_name: str = "httpx", bucket: str = "small") -> str:
@@ -80,17 +68,18 @@ def _invoke(args: list[str]) -> Result:
 
 def _capture_run_suite(captures: list[SuiteCapture]) -> Callable[..., ResultsEnvelope]:
     def fake_run_suite(**kwargs: Unpack[RunSuiteKwargs]) -> ResultsEnvelope:
+        run_config = kwargs["config"]
         captures.append(
             SuiteCapture(
-                checkers=kwargs["checkers"],
-                thread_modes=kwargs["thread_modes"],
-                cores=kwargs["cores"],
-                projects=kwargs["projects"],
-                policy=kwargs["policy"],
-                run_config=kwargs["run_config"],
-                runs=kwargs["runs"],
-                warmup=kwargs["warmup"],
-                mem_runs=kwargs["mem_runs"],
+                checkers=run_config.checkers,
+                thread_modes=list(run_config.thread_modes),
+                cores=run_config.cores,
+                projects=[entry.name for entry in kwargs["corpus"].entries()],
+                policy=run_config.policy,
+                run_config=run_config,
+                runs=run_config.runs,
+                warmup=run_config.warmup,
+                mem_runs=run_config.mem_runs,
             )
         )
         return ResultsEnvelope(suite_version="v", generated_at=kwargs["generated_at"], runs=[])

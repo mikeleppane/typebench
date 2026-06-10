@@ -1,8 +1,10 @@
 from collections.abc import Callable
-from pathlib import Path
+from dataclasses import dataclass, field
 
 import pytest
 
+import typebench.suite.runner as runner_mod
+from typebench.adapters.base import CheckerHandle
 from typebench.adapters.stub import StubAdapter
 from typebench.contracts.identity import CheckerRuntime, CheckerSpec
 from typebench.contracts.models import (
@@ -20,6 +22,7 @@ from typebench.contracts.models import (
 from typebench.contracts.policy import Policy
 from typebench.contracts.runconfig import RunConfig
 from typebench.corpus.catalog import CorpusProject, SizeBucket
+from typebench.engine.collector import RunManifest
 from typebench.suite.runner import SuiteCell, build_matrix, run_suite, shard
 
 type EnvFactory = Callable[..., EnvFingerprint]
@@ -156,9 +159,7 @@ def _calib() -> CalibrationStats:
     )
 
 
-def _prepare_stub_runtime(
-    spec: CheckerSpec, cache_root: Path, *, install_source: str
-) -> CheckerRuntime:
+def _prepare_stub_runtime(spec: CheckerSpec, *, install_source: str) -> CheckerRuntime:
     return CheckerRuntime(
         checker_id=spec.checker_id(),
         tool=spec.tool,
@@ -169,69 +170,114 @@ def _prepare_stub_runtime(
     )
 
 
-def _thread_mode(value: object) -> ThreadMode:
-    if isinstance(value, ThreadMode):
-        return value
-    if isinstance(value, str):
-        return ThreadMode(value)
-    raise TypeError(f"unexpected thread mode: {value!r}")
+@dataclass
+class FakeCorpus:
+    entries_: list[CorpusProject]
+    version_: str = "v"
+    prepared: dict[str, PreparedProject] = field(default_factory=dict)
+    prepare_failures: dict[str, Exception] = field(default_factory=dict)
+
+    def entries(self) -> list[CorpusProject]:
+        return list(self.entries_)
+
+    def version(self) -> str:
+        return self.version_
+
+    def prepare(self, entry: CorpusProject) -> PreparedProject:
+        failure = self.prepare_failures.get(entry.name)
+        if failure is not None:
+            raise failure
+        return self.prepared.get(entry.name, _prepared(entry.name))
 
 
-def _policy(value: object) -> Policy:
-    if isinstance(value, Policy):
-        return value
-    raise TypeError(f"unexpected policy: {value!r}")
+@dataclass
+class FakeResolver:
+    fail_tools: set[str] = field(default_factory=set)
+
+    def resolve(self, spec: CheckerSpec) -> CheckerHandle:
+        if spec.tool in self.fail_tools:
+            raise RuntimeError("no matching wheel")
+        adapter = StubAdapter()
+        runtime = _prepare_stub_runtime(spec, install_source=adapter.install_source)
+        return CheckerHandle(spec=spec, adapter=adapter, runtime=runtime)
 
 
-def _headline_eligible(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
-    raise TypeError(f"unexpected headline eligibility: {value!r}")
+@dataclass
+class FakeEngine:
+    make_env: EnvFactory
+    report: PreflightReport | None = None
+    run_should_fail: bool = False
+    calibration_calls: list[int] = field(default_factory=list)
+    preflight_timeouts: list[float] = field(default_factory=list)
+    run_manifests: list[RunManifest] = field(default_factory=list)
+    run_plans: list[object] = field(default_factory=list)
+    events: list[str] = field(default_factory=list)
+
+    def calibrate(self, runs: int) -> CalibrationStats:
+        self.calibration_calls.append(runs)
+        return _calib()
+
+    def preflight(
+        self,
+        prepared: PreparedProject,
+        checkers: list[CheckerHandle],
+        *,
+        timeout: float,
+        policy: Policy,
+    ) -> PreflightReport:
+        self.preflight_timeouts.append(timeout)
+        if self.report is not None:
+            return self.report
+        return _ready_report(prepared.name, [checker.tool for checker in checkers])
+
+    def run_cell(
+        self,
+        checker: CheckerHandle,
+        *,
+        project: str,
+        config: object,
+        thread_mode: ThreadMode,
+        plan: object,
+        manifest: RunManifest,
+        calibration: CalibrationStats | None,
+        policy: Policy,
+    ) -> RunResult:
+        if self.run_should_fail:
+            raise AssertionError("run_cell must NOT be called")
+        self.events.append("run_cell")
+        self.run_manifests.append(manifest)
+        self.run_plans.append(plan)
+        return RunResult(
+            tool=checker.tool,
+            tool_version=checker.runtime.version if checker.runtime is not None else "1",
+            checker_id=checker.checker_id,
+            policy=policy,
+            headline_eligible=policy is Policy.STANDARD,
+            project=project,
+            thread_mode=thread_mode,
+            result_class=ResultClass.CLEAN,
+            real_exit_code=0,
+            calibration=calibration,
+            env=self.make_env(),
+        )
 
 
 def test_run_suite_runs_ready_cells_and_builds_envelope(make_env: EnvFactory) -> None:
-    captured: list[object] = []
-
-    def fake_run_one(adapter: object, **kwargs: object) -> RunResult:
-        captured.append(kwargs.get("manifest"))
-
-        return RunResult(
-            tool=getattr(adapter, "name", "stub"),
-            tool_version="1",
-            checker_id=str(kwargs["checker_id"]),
-            policy=_policy(kwargs["policy"]),
-            headline_eligible=_headline_eligible(kwargs["headline_eligible"]),
-            project=str(kwargs["project"]),
-            thread_mode=_thread_mode(kwargs["thread_mode"]),
-            result_class=ResultClass.CLEAN,
-            real_exit_code=0,
-            env=make_env(),
-        )
-
-    run_config = RunConfig(checkers=(CheckerSpec(tool="stub", version="1.0"),))
-    envelope = run_suite(
-        suite_path=Path("/x/suite.toml"),
-        cache_root=Path("/x/cache"),
+    run_config = RunConfig(
         checkers=(CheckerSpec(tool="stub", version="1.0"),),
-        policy=Policy.STANDARD,
-        run_config=run_config,
-        thread_modes=[ThreadMode.ALL_CORES, ThreadMode.CONSTRAINED],
-        generated_at="2026-06-08T00:00:00Z",
         runs=1,
         warmup=1,
         timeout=10,
         mem_runs=1,
-        measure_enabled=False,
         calib_runs=1,
-        load_projects=lambda _p: ["demo"],
-        load_version=lambda _p: "2026-06-08",
-        adapter_factory=lambda _name: StubAdapter(),
-        lookup_entry=lambda _p, name: _entry(name),
-        prepare=lambda _entry, _cache: _prepared("demo"),
-        preflight=lambda _prepared, _adapters, **_kwargs: _ready_report("demo", ["stub"]),
-        prepare_checker_fn=_prepare_stub_runtime,
-        run_one=fake_run_one,
-        calibrate_fn=lambda _runs: _calib(),
+    )
+    engine = FakeEngine(make_env)
+    envelope = run_suite(
+        config=run_config,
+        corpus=FakeCorpus([_entry("demo")], version_="2026-06-08"),
+        resolver=FakeResolver(),
+        engine=engine,
+        generated_at="2026-06-08T00:00:00Z",
     )
     assert isinstance(envelope, ResultsEnvelope)
     assert envelope.suite_version == "2026-06-08"
@@ -241,52 +287,36 @@ def test_run_suite_runs_ready_cells_and_builds_envelope(make_env: EnvFactory) ->
     assert envelope.run_config == run_config
     assert envelope.resolved_checkers[0].lock_hash == "L"
     assert all(r.checker_id == "stub@1.0" for r in envelope.runs)
-    assert all(m is not None for m in captured)
+    assert all(m is not None for m in engine.run_manifests)
+    assert engine.calibration_calls == [1]
 
 
-def test_run_suite_records_harness_baselines_once(make_env: EnvFactory) -> None:
+def test_run_suite_records_harness_baselines_once(
+    monkeypatch: pytest.MonkeyPatch, make_env: EnvFactory
+) -> None:
     calls = {"baselines": 0}
-
-    def fake_run_one(adapter: object, **kwargs: object) -> RunResult:
-        return RunResult(
-            tool=getattr(adapter, "name", "stub"),
-            tool_version="1",
-            checker_id=str(kwargs["checker_id"]),
-            policy=_policy(kwargs["policy"]),
-            headline_eligible=_headline_eligible(kwargs["headline_eligible"]),
-            project=str(kwargs["project"]),
-            thread_mode=_thread_mode(kwargs["thread_mode"]),
-            result_class=ResultClass.CLEAN,
-            real_exit_code=0,
-            env=make_env(),
-        )
 
     def fake_baselines(**kwargs: object) -> tuple[int | None, float | None]:
         calls["baselines"] += 1
         return (14_000_000, 0.029)
 
+    monkeypatch.setattr(runner_mod, "_measure_harness_baselines", fake_baselines)
+
     envelope = run_suite(
-        suite_path=Path("/x/suite.toml"),
-        cache_root=Path("/x/cache"),
-        checkers=(CheckerSpec(tool="stub", version="1.0"),),
-        policy=Policy.STANDARD,
-        thread_modes=[ThreadMode.ALL_CORES],
+        config=RunConfig(
+            checkers=(CheckerSpec(tool="stub", version="1.0"),),
+            thread_modes=(ThreadMode.ALL_CORES,),
+            runs=1,
+            warmup=1,
+            timeout=10,
+            mem_runs=1,
+            measure=True,
+            calibrate=False,
+        ),
+        corpus=FakeCorpus([_entry("demo")]),
+        resolver=FakeResolver(),
+        engine=FakeEngine(make_env),
         generated_at="t",
-        runs=1,
-        warmup=1,
-        timeout=10,
-        mem_runs=1,
-        measure_enabled=True,
-        calib_runs=1,
-        projects=["demo"],
-        load_version=lambda _p: "v",
-        adapter_factory=lambda _name: StubAdapter(),
-        lookup_entry=lambda _p, name: _entry(name),
-        prepare=lambda _entry, _cache: _prepared("demo"),
-        preflight=lambda _prepared, _adapters, **_kwargs: _ready_report("demo", ["stub"]),
-        prepare_checker_fn=_prepare_stub_runtime,
-        run_one=fake_run_one,
-        measure_harness_baselines_fn=fake_baselines,
     )
 
     assert calls["baselines"] == 1
@@ -294,56 +324,39 @@ def test_run_suite_records_harness_baselines_once(make_env: EnvFactory) -> None:
     assert envelope.harness_wall_overhead_s == 0.029
 
 
-def test_run_suite_prewarms_project_sources_before_run_one(make_env: EnvFactory) -> None:
+def test_run_suite_prewarms_project_sources_before_run_one(
+    monkeypatch: pytest.MonkeyPatch, make_env: EnvFactory
+) -> None:
     events: list[str] = []
-
-    def fake_run_one(adapter: object, **kwargs: object) -> RunResult:
-        events.append("run_one")
-        return RunResult(
-            tool=getattr(adapter, "name", "stub"),
-            tool_version="1",
-            checker_id=str(kwargs["checker_id"]),
-            policy=_policy(kwargs["policy"]),
-            headline_eligible=_headline_eligible(kwargs["headline_eligible"]),
-            project=str(kwargs["project"]),
-            thread_mode=_thread_mode(kwargs["thread_mode"]),
-            result_class=ResultClass.CLEAN,
-            real_exit_code=0,
-            env=make_env(),
-        )
+    engine = FakeEngine(make_env, events=events)
 
     def fake_prewarm(prepared: PreparedProject) -> None:
         assert prepared.name == "demo"
         events.append("prewarm")
 
+    monkeypatch.setattr(runner_mod, "prewarm_project_sources", fake_prewarm)
+
     run_suite(
-        suite_path=Path("/x/suite.toml"),
-        cache_root=Path("/x/cache"),
-        checkers=(CheckerSpec(tool="stub", version="1.0"),),
-        policy=Policy.STANDARD,
-        thread_modes=[ThreadMode.ALL_CORES],
+        config=RunConfig(
+            checkers=(CheckerSpec(tool="stub", version="1.0"),),
+            thread_modes=(ThreadMode.ALL_CORES,),
+            runs=1,
+            warmup=1,
+            timeout=10,
+            mem_runs=1,
+            measure=False,
+            calibrate=False,
+        ),
+        corpus=FakeCorpus([_entry("demo")]),
+        resolver=FakeResolver(),
+        engine=engine,
         generated_at="t",
-        runs=1,
-        warmup=1,
-        timeout=10,
-        mem_runs=1,
-        measure_enabled=False,
-        calib_runs=1,
-        projects=["demo"],
-        load_version=lambda _p: "v",
-        adapter_factory=lambda _name: StubAdapter(),
-        lookup_entry=lambda _p, name: _entry(name),
-        prepare=lambda _entry, _cache: _prepared("demo"),
-        preflight=lambda _prepared, _adapters, **_kwargs: _ready_report("demo", ["stub"]),
-        prepare_checker_fn=_prepare_stub_runtime,
-        run_one=fake_run_one,
-        prewarm_sources=fake_prewarm,
     )
 
-    assert events == ["prewarm", "run_one"]
+    assert events == ["prewarm", "run_cell"]
 
 
-def test_run_suite_excluded_project_emits_failed_records() -> None:
+def test_run_suite_excluded_project_emits_failed_records(make_env: EnvFactory) -> None:
     not_ready = PreflightReport(
         project="demo",
         sha="SHA1",
@@ -363,31 +376,21 @@ def test_run_suite_excluded_project_emits_failed_records() -> None:
         ],
     )
 
-    def boom_run_one(adapter: object, **kwargs: object) -> RunResult:
-        raise AssertionError("run_one must NOT be called for an excluded project")
-
     envelope = run_suite(
-        suite_path=Path("/x/suite.toml"),
-        cache_root=Path("/x/cache"),
-        checkers=(CheckerSpec(tool="stub", version="1.0"),),
-        policy=Policy.STANDARD,
-        thread_modes=[ThreadMode.ALL_CORES],
+        config=RunConfig(
+            checkers=(CheckerSpec(tool="stub", version="1.0"),),
+            thread_modes=(ThreadMode.ALL_CORES,),
+            runs=1,
+            warmup=1,
+            timeout=10,
+            mem_runs=1,
+            measure=False,
+            calib_runs=1,
+        ),
+        corpus=FakeCorpus([_entry("demo")]),
+        resolver=FakeResolver(),
+        engine=FakeEngine(make_env, report=not_ready, run_should_fail=True),
         generated_at="t",
-        runs=1,
-        warmup=1,
-        timeout=10,
-        mem_runs=1,
-        measure_enabled=False,
-        calib_runs=1,
-        load_projects=lambda _p: ["demo"],
-        load_version=lambda _p: "v",
-        adapter_factory=lambda _name: StubAdapter(),
-        lookup_entry=lambda _p, name: _entry(name),
-        prepare=lambda _entry, _cache: _prepared("demo"),
-        preflight=lambda _prepared, _adapters, **_kwargs: not_ready,
-        prepare_checker_fn=_prepare_stub_runtime,
-        run_one=boom_run_one,
-        calibrate_fn=lambda _runs: _calib(),
     )
     assert len(envelope.runs) == 1
     rec = envelope.runs[0]
@@ -399,52 +402,24 @@ def test_run_suite_excluded_project_emits_failed_records() -> None:
 def test_run_suite_checker_resolve_failure_emits_failed_records(
     make_env: EnvFactory,
 ) -> None:
-    def prepare_checker_fn(
-        spec: CheckerSpec, cache_root: Path, *, install_source: str
-    ) -> CheckerRuntime:
-        if spec.tool == "pyright":
-            raise RuntimeError("no matching wheel")
-        return _prepare_stub_runtime(spec, cache_root, install_source=install_source)
-
-    def fake_run_one(adapter: object, **kwargs: object) -> RunResult:
-        return RunResult(
-            tool=getattr(adapter, "name", "stub"),
-            tool_version="1",
-            checker_id=str(kwargs["checker_id"]),
-            policy=_policy(kwargs["policy"]),
-            headline_eligible=_headline_eligible(kwargs["headline_eligible"]),
-            project=str(kwargs["project"]),
-            thread_mode=_thread_mode(kwargs["thread_mode"]),
-            result_class=ResultClass.CLEAN,
-            real_exit_code=0,
-            env=make_env(),
-        )
-
     envelope = run_suite(
-        suite_path=Path("/x/suite.toml"),
-        cache_root=Path("/x/cache"),
-        checkers=(
-            CheckerSpec(tool="stub", version="1.0"),
-            CheckerSpec(tool="pyright", version="1.1.0"),
+        config=RunConfig(
+            checkers=(
+                CheckerSpec(tool="stub", version="1.0"),
+                CheckerSpec(tool="pyright", version="1.1.0"),
+            ),
+            thread_modes=(ThreadMode.ALL_CORES,),
+            runs=1,
+            warmup=1,
+            timeout=10,
+            mem_runs=1,
+            measure=False,
+            calib_runs=1,
         ),
-        policy=Policy.STANDARD,
-        thread_modes=[ThreadMode.ALL_CORES],
+        corpus=FakeCorpus([_entry("demo")]),
+        resolver=FakeResolver(fail_tools={"pyright"}),
+        engine=FakeEngine(make_env),
         generated_at="t",
-        runs=1,
-        warmup=1,
-        timeout=10,
-        mem_runs=1,
-        measure_enabled=False,
-        calib_runs=1,
-        load_projects=lambda _p: ["demo"],
-        load_version=lambda _p: "v",
-        adapter_factory=lambda _name: StubAdapter(),
-        lookup_entry=lambda _p, name: _entry(name),
-        prepare=lambda _entry, _cache: _prepared("demo"),
-        preflight=lambda _prepared, _adapters, **_kwargs: _ready_report("demo", ["stub"]),
-        prepare_checker_fn=prepare_checker_fn,
-        run_one=fake_run_one,
-        calibrate_fn=lambda _runs: _calib(),
     )
 
     clean = [r for r in envelope.runs if r.result_class is ResultClass.CLEAN]

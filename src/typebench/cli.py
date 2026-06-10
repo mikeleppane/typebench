@@ -24,7 +24,13 @@ from typebench.adapters.registry import (
     validate_specs,
 )
 from typebench.contracts.config import DEFAULT_EXCLUDES, NormalizedConfig, config_hash
-from typebench.contracts.configfile import discover_config, load_config, merge_cli, resolve_corpus
+from typebench.contracts.configfile import (
+    RunCliOverrides,
+    discover_config,
+    load_config,
+    merge_cli,
+    resolve_corpus,
+)
 from typebench.contracts.identity import CheckerSpec
 from typebench.contracts.models import ResultsEnvelope
 from typebench.contracts.policy import Policy
@@ -40,6 +46,7 @@ from typebench.suite.preflight import preflight_project
 from typebench.suite.renderer import build_trends, render_compare, render_readme
 from typebench.suite.runner import run_suite
 from typebench.suite.selection import SelectionError, resolve_selection
+from typebench.suite.services import CorpusCache, LocalBenchEngine, UvCheckerResolver
 
 if TYPE_CHECKING:
     from typebench.contracts.models import PreparedProject
@@ -250,6 +257,11 @@ def _validate_timing(runs: int, warmup: int, timeout: float) -> None:
     if timeout <= 0:
         typer.echo("--timeout must be > 0.", err=True)
         raise typer.Exit(code=2)
+
+
+def _validation_message(exc: ValidationError) -> str:
+    details = "; ".join(error["msg"] for error in exc.errors())
+    return details or str(exc)
 
 
 def _load_suite_or_exit(corpus: Path) -> list[CorpusProject]:
@@ -540,12 +552,22 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
     mem_runs: Annotated[
         int | None, typer.Option(help="Resource-pass repeats (>=1; else config [run].mem_runs).")
     ] = None,
-    measure: Annotated[bool, typer.Option(help="Run the cgroup memory/CPU pass.")] = True,
+    measure: Annotated[
+        bool | None,
+        typer.Option("--measure/--no-measure", help="Run the cgroup memory/CPU pass."),
+    ] = None,
     calibrate_baseline: Annotated[
-        bool, typer.Option("--calibrate/--no-calibrate", help="Time the calibration workload.")
-    ] = True,
-    calib_runs: Annotated[int, typer.Option(help="Calibration workload repeats (>=1).")] = 5,
-    timeout: Annotated[float, typer.Option(help="Per-invocation timeout (seconds).")] = 900.0,
+        bool | None,
+        typer.Option("--calibrate/--no-calibrate", help="Time the calibration workload."),
+    ] = None,
+    calib_runs: Annotated[
+        int | None,
+        typer.Option(help="Calibration workload repeats (else config [run].calib_runs)."),
+    ] = None,
+    timeout: Annotated[
+        float | None,
+        typer.Option(help="Per-invocation timeout (else config [run].timeout)."),
+    ] = None,
     cache_root: Annotated[
         Path, typer.Option(help="Where prepared clones/venvs are cached.")
     ] = DEFAULT_CACHE_ROOT,
@@ -566,10 +588,6 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
     if not out_dir.exists() or not os.access(out_dir, os.W_OK):
         typer.echo(f"Output directory not writable: {out_dir}", err=True)
         raise typer.Exit(code=2)
-    if calib_runs < 1:
-        typer.echo("--calib-runs must be >= 1.", err=True)
-        raise typer.Exit(code=2)
-
     config_path = config or discover_config(Path.cwd())
     base = (
         _load_config_or_exit(config_path)
@@ -583,14 +601,27 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
     cores_sweep = _parse_cores_list(cores_list) if cores_list else None
     # Scalar --cores back-compat: --cores-list wins; then explicit scalar; else file/default sweep.
     effective_cores = cores_sweep or ([_validate_cores(cores)] if cores is not None else None)
-    run_config = merge_cli(
-        base,
-        tools=tool,
-        projects=project,
-        buckets=bucket,
-        thread_modes=thread_mode,
-        cores=effective_cores,
-    )
+    try:
+        run_config = merge_cli(
+            base,
+            tools=tool,
+            projects=project,
+            buckets=bucket,
+            thread_modes=thread_mode,
+            cores=effective_cores,
+            run_overrides=RunCliOverrides(
+                runs=runs,
+                warmup=warmup,
+                mem_runs=mem_runs,
+                timeout=timeout,
+                measure=measure,
+                calibrate=calibrate_baseline,
+                calib_runs=calib_runs,
+            ),
+        )
+    except ValidationError as exc:
+        typer.echo(_validation_message(exc), err=True)
+        raise typer.Exit(code=2) from exc
     try:
         validate_specs(run_config.checkers)
     except UnknownToolError as exc:
@@ -604,15 +635,6 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
             f"policy '{run_config.policy.value}' is not supported yet (standard only).", err=True
         )
         raise typer.Exit(code=2)
-    # Run-knob layering (defaults < file [run] < CLI): a CLI flag overrides; otherwise
-    # the file/default value from RunConfig wins (RunConfig already range-validated them).
-    effective_runs = runs if runs is not None else run_config.runs
-    effective_warmup = warmup if warmup is not None else run_config.warmup
-    effective_mem_runs = mem_runs if mem_runs is not None else run_config.mem_runs
-    if effective_mem_runs < 1:
-        typer.echo("--mem-runs must be >= 1.", err=True)
-        raise typer.Exit(code=2)
-    _validate_timing(effective_runs, effective_warmup, timeout)
     effective_corpus = resolve_corpus(run_config, corpus, Path("corpus/suite.toml"))
     corpus_entries = _load_suite_or_exit(effective_corpus)
     try:
@@ -626,26 +648,13 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
 
     shard_index, shard_total = _parse_shard(shard)
     envelope = run_suite(
-        suite_path=effective_corpus,
-        cache_root=cache_root,
-        checkers=run_config.checkers,
-        policy=run_config.policy,
-        thread_modes=list(run_config.thread_modes),
+        config=run_config,
+        corpus=CorpusCache(effective_corpus, cache_root, projects=selected),
+        resolver=UvCheckerResolver(cache_root),
+        engine=LocalBenchEngine(),
         generated_at=datetime.now(UTC).isoformat(),
-        runs=effective_runs,
-        warmup=effective_warmup,
-        timeout=timeout,
-        mem_runs=effective_mem_runs,
-        measure_enabled=measure,
-        calib_runs=calib_runs,
-        cores=run_config.cores,
         shard_index=shard_index,
         shard_total=shard_total,
-        projects=selected,
-        run_config=run_config,
-        lookup_entry=_lookup_project,
-        adapter_factory=create_adapter,
-        calibrate_fn=calibrate if calibrate_baseline else None,
     )
     output.write_text(envelope.model_dump_json(indent=2))
     measured = sum(1 for r in envelope.runs if r.result_class.is_measured_success)
@@ -698,10 +707,6 @@ def compare(  # noqa: PLR0913 — distinct user-facing CLI options for one comma
     if not out_dir.exists() or not os.access(out_dir, os.W_OK):
         typer.echo(f"Output directory not writable: {out_dir}", err=True)
         raise typer.Exit(code=2)
-    _validate_timing(runs, warmup, timeout)
-    if mem_runs < 1 or calib_runs < 1:
-        typer.echo("--mem-runs and --calib-runs must be >= 1.", err=True)
-        raise typer.Exit(code=2)
     cores = _validate_cores(cores)
 
     try:
@@ -715,16 +720,24 @@ def compare(  # noqa: PLR0913 — distinct user-facing CLI options for one comma
     except UnknownToolError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
-    run_config = RunConfig(
-        checkers=specs,
-        projects=tuple(project or ()),
-        buckets=buckets,
-        thread_modes=(thread_mode,),
-        cores=(cores,),
-        runs=runs,
-        warmup=warmup,
-        mem_runs=mem_runs,
-    )
+    try:
+        run_config = RunConfig(
+            checkers=specs,
+            projects=tuple(project or ()),
+            buckets=buckets,
+            thread_modes=(thread_mode,),
+            cores=(cores,),
+            runs=runs,
+            warmup=warmup,
+            timeout=timeout,
+            mem_runs=mem_runs,
+            measure=measure,
+            calibrate=calibrate_baseline,
+            calib_runs=calib_runs,
+        )
+    except ValidationError as exc:
+        typer.echo(_validation_message(exc), err=True)
+        raise typer.Exit(code=2) from exc
     effective_corpus = resolve_corpus(run_config, corpus, Path("corpus/suite.toml"))
     corpus_entries = _load_suite_or_exit(effective_corpus)
     try:
@@ -738,24 +751,11 @@ def compare(  # noqa: PLR0913 — distinct user-facing CLI options for one comma
         raise typer.Exit(code=0)
 
     envelope = run_suite(
-        suite_path=effective_corpus,
-        cache_root=cache_root,
-        checkers=specs,
-        policy=run_config.policy,
-        thread_modes=list(run_config.thread_modes),
+        config=run_config,
+        corpus=CorpusCache(effective_corpus, cache_root, projects=selected),
+        resolver=UvCheckerResolver(cache_root),
+        engine=LocalBenchEngine(),
         generated_at=datetime.now(UTC).isoformat(),
-        runs=runs,
-        warmup=warmup,
-        timeout=timeout,
-        mem_runs=mem_runs,
-        measure_enabled=measure,
-        calib_runs=calib_runs,
-        cores=run_config.cores,
-        projects=selected,
-        run_config=run_config,
-        lookup_entry=_lookup_project,
-        adapter_factory=create_adapter,
-        calibrate_fn=calibrate if calibrate_baseline else None,
     )
     output.write_text(envelope.model_dump_json(indent=2), encoding="utf-8")
     # Baseline = the FIRST spec's RESOLVED checker_id (records are keyed on the

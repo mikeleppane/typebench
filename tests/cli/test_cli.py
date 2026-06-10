@@ -16,6 +16,7 @@ from typebench.contracts.models import (
     RunResult,
     ThreadMode,
 )
+from typebench.contracts.runconfig import RunConfig
 from typebench.corpus.catalog import CorpusProject
 from typebench.engine.collector import RunManifest
 
@@ -308,7 +309,9 @@ def test_suite_threads_cores_into_run_suite(
         ],
     )
     assert result.exit_code == 0, result.output
-    assert captured["cores"] == (8,)  # scalar --cores is threaded as a 1-tuple sweep
+    config = captured["config"]
+    assert isinstance(config, RunConfig)
+    assert config.cores == (8,)  # scalar --cores is threaded as a 1-tuple sweep
 
 
 def test_suite_rejects_cores_below_one(tmp_path: Path) -> None:
