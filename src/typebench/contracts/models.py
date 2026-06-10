@@ -61,7 +61,12 @@ class MemoryStats(BaseModel):
     diagnostics-heavy run could inflate it. Known limitation (measure.main); a
     diagnostics-flood corpus entry would warrant streaming output to disk.
     `peak_bytes_*` are min/median/max over `runs` repeats. `memory_stat` is the
-    `memory.stat` snapshot of the median-peak run (a data point, never a ranking)."""
+    `peak_bytes_*` remain raw. Suite envelopes can carry a separately measured
+    harness baseline that renderers subtract for display only. `swap_peak_bytes_*`
+    are from `memory.swap.peak` when available; `mem_under_swap=True` means swap
+    occurred and the memory peak may understate resident demand. `memory_stat` is
+    the `memory.stat` snapshot of the median-peak run (a data point, never a
+    ranking)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -69,6 +74,10 @@ class MemoryStats(BaseModel):
     peak_bytes_min: int
     peak_bytes_median: int
     peak_bytes_max: int
+    swap_peak_bytes_min: int | None = None
+    swap_peak_bytes_median: int | None = None
+    swap_peak_bytes_max: int | None = None
+    mem_under_swap: bool = False
     memory_stat: dict[str, int] | None = None
 
 
@@ -224,12 +233,16 @@ class ResultsEnvelope(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: int = 2
+    schema_version: int = 3
     suite_version: str
     generated_at: str  # ISO-8601 UTC, stamped by the CLI
     runs: list[RunResult]
     run_config: RunConfig | None = None
     resolved_checkers: tuple[ResolvedChecker, ...] = ()
+    # Raw suite-level harness costs. Per-record timings/memory stay uncorrected;
+    # renderers subtract these only for displayed/derived views.
+    harness_mem_baseline_bytes: int | None = None
+    harness_wall_overhead_s: float | None = None
 
 
 class PreparedProject(BaseModel):

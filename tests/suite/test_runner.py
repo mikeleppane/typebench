@@ -244,6 +244,105 @@ def test_run_suite_runs_ready_cells_and_builds_envelope(make_env: EnvFactory) ->
     assert all(m is not None for m in captured)
 
 
+def test_run_suite_records_harness_baselines_once(make_env: EnvFactory) -> None:
+    calls = {"baselines": 0}
+
+    def fake_run_one(adapter: object, **kwargs: object) -> RunResult:
+        return RunResult(
+            tool=getattr(adapter, "name", "stub"),
+            tool_version="1",
+            checker_id=str(kwargs["checker_id"]),
+            policy=_policy(kwargs["policy"]),
+            headline_eligible=_headline_eligible(kwargs["headline_eligible"]),
+            project=str(kwargs["project"]),
+            thread_mode=_thread_mode(kwargs["thread_mode"]),
+            result_class=ResultClass.CLEAN,
+            real_exit_code=0,
+            env=make_env(),
+        )
+
+    def fake_baselines(**kwargs: object) -> tuple[int | None, float | None]:
+        calls["baselines"] += 1
+        return (14_000_000, 0.029)
+
+    envelope = run_suite(
+        suite_path=Path("/x/suite.toml"),
+        cache_root=Path("/x/cache"),
+        checkers=(CheckerSpec(tool="stub", version="1.0"),),
+        policy=Policy.STANDARD,
+        thread_modes=[ThreadMode.ALL_CORES],
+        generated_at="t",
+        runs=1,
+        warmup=1,
+        timeout=10,
+        mem_runs=1,
+        measure_enabled=True,
+        calib_runs=1,
+        projects=["demo"],
+        load_version=lambda _p: "v",
+        adapter_factory=lambda _name: StubAdapter(),
+        lookup_entry=lambda _p, name: _entry(name),
+        prepare=lambda _entry, _cache: _prepared("demo"),
+        preflight=lambda _prepared, _adapters, **_kwargs: _ready_report("demo", ["stub"]),
+        prepare_checker_fn=_prepare_stub_runtime,
+        run_one=fake_run_one,
+        measure_harness_baselines_fn=fake_baselines,
+    )
+
+    assert calls["baselines"] == 1
+    assert envelope.harness_mem_baseline_bytes == 14_000_000
+    assert envelope.harness_wall_overhead_s == 0.029
+
+
+def test_run_suite_prewarms_project_sources_before_run_one(make_env: EnvFactory) -> None:
+    events: list[str] = []
+
+    def fake_run_one(adapter: object, **kwargs: object) -> RunResult:
+        events.append("run_one")
+        return RunResult(
+            tool=getattr(adapter, "name", "stub"),
+            tool_version="1",
+            checker_id=str(kwargs["checker_id"]),
+            policy=_policy(kwargs["policy"]),
+            headline_eligible=_headline_eligible(kwargs["headline_eligible"]),
+            project=str(kwargs["project"]),
+            thread_mode=_thread_mode(kwargs["thread_mode"]),
+            result_class=ResultClass.CLEAN,
+            real_exit_code=0,
+            env=make_env(),
+        )
+
+    def fake_prewarm(prepared: PreparedProject) -> None:
+        assert prepared.name == "demo"
+        events.append("prewarm")
+
+    run_suite(
+        suite_path=Path("/x/suite.toml"),
+        cache_root=Path("/x/cache"),
+        checkers=(CheckerSpec(tool="stub", version="1.0"),),
+        policy=Policy.STANDARD,
+        thread_modes=[ThreadMode.ALL_CORES],
+        generated_at="t",
+        runs=1,
+        warmup=1,
+        timeout=10,
+        mem_runs=1,
+        measure_enabled=False,
+        calib_runs=1,
+        projects=["demo"],
+        load_version=lambda _p: "v",
+        adapter_factory=lambda _name: StubAdapter(),
+        lookup_entry=lambda _p, name: _entry(name),
+        prepare=lambda _entry, _cache: _prepared("demo"),
+        preflight=lambda _prepared, _adapters, **_kwargs: _ready_report("demo", ["stub"]),
+        prepare_checker_fn=_prepare_stub_runtime,
+        run_one=fake_run_one,
+        prewarm_sources=fake_prewarm,
+    )
+
+    assert events == ["prewarm", "run_one"]
+
+
 def test_run_suite_excluded_project_emits_failed_records() -> None:
     not_ready = PreflightReport(
         project="demo",

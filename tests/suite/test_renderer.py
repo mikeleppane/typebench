@@ -81,6 +81,62 @@ def test_render_readme_table_is_fastest_first_and_excludes_diagnostics(
     assert "cross-pass" in md.lower()
 
 
+def test_render_readme_subtracts_harness_baselines_without_mutating_raw(
+    make_env: EnvFactory,
+) -> None:
+    record = _record("ty", 0.050, 54_000_000, make_env)
+    env = ResultsEnvelope(
+        suite_version="v",
+        generated_at="t",
+        runs=[record],
+        harness_mem_baseline_bytes=14_000_000,
+        harness_wall_overhead_s=0.010,
+    )
+
+    md = render_readme(env)
+
+    assert "| ty@1.0 | clean | 0.040 | 40.0 |" in md
+    assert "80.0" in md  # 3200 LOC / corrected 0.040 s
+    assert record.timing is not None and record.timing.median_s == 0.050
+    assert record.memory is not None and record.memory.peak_bytes_median == 54_000_000
+
+
+def test_render_readme_without_baselines_keeps_legacy_raw_display(
+    make_env: EnvFactory,
+) -> None:
+    env = ResultsEnvelope(
+        suite_version="v", generated_at="t", runs=[_record("ty", 0.050, 54_000_000, make_env)]
+    )
+
+    md = render_readme(env)
+
+    assert "| ty@1.0 | clean | 0.050 | 54.0 |" in md
+    assert "64.0" in md
+
+
+def test_render_readme_marks_rows_with_swap_observed(make_env: EnvFactory) -> None:
+    record = _record("mypy", 2.0, 200_000_000, make_env).model_copy(
+        update={
+            "memory": MemoryStats(
+                runs=3,
+                peak_bytes_min=190_000_000,
+                peak_bytes_median=200_000_000,
+                peak_bytes_max=210_000_000,
+                swap_peak_bytes_min=0,
+                swap_peak_bytes_median=4096,
+                swap_peak_bytes_max=4096,
+                mem_under_swap=True,
+            )
+        }
+    )
+    env = ResultsEnvelope(suite_version="v", generated_at="t", runs=[record])
+
+    md = render_readme(env)
+
+    assert "200.0!" in md
+    assert "`!` = swap observed" in md
+
+
 def test_render_readme_withholds_throughput_for_over_reporters(make_env: EnvFactory) -> None:
     env = ResultsEnvelope(
         suite_version="v",
@@ -274,6 +330,24 @@ def test_build_trends_includes_kloc_and_corpus_markers(make_env: EnvFactory) -> 
     assert abs(kloc_s - 1.6) < 1e-9
     assert _corpus_markers(trends)[0]["suite_version"] == "v"
     assert "CPU-A" in _cpu_models(trends)
+
+
+def test_build_trends_uses_harness_corrected_values(make_env: EnvFactory) -> None:
+    history = [
+        ResultsEnvelope(
+            suite_version="v",
+            generated_at="2026-02-01",
+            runs=[_record_for_trends("mypy", 0.050, 0.40, "CPU-A", make_env)],
+            harness_mem_baseline_bytes=14_000_000,
+            harness_wall_overhead_s=0.010,
+        )
+    ]
+
+    point = _trend_points(build_trends(history))[0]
+
+    assert point["wall_median_s"] == 0.04
+    assert point["peak_mem_mb"] == 186.0
+    assert point["kloc_s"] == 80.0
 
 
 def test_build_trends_distinguishes_same_day_versions(make_env: EnvFactory) -> None:

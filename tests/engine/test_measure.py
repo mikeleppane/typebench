@@ -12,8 +12,10 @@ from typebench.engine.measure import CgroupSample, ResourceResult, read_cgroup_s
 Runner = Callable[..., _sp.CompletedProcess[str]]
 
 
-def _write_cgroup(tmp: Path, *, peak: int, oom_kill: int = 0) -> Path:
+def _write_cgroup(tmp: Path, *, peak: int, oom_kill: int = 0, swap_peak: int | None = 0) -> Path:
     (tmp / "memory.peak").write_text(f"{peak}\n")
+    if swap_peak is not None:
+        (tmp / "memory.swap.peak").write_text(f"{swap_peak}\n")
     (tmp / "cpu.stat").write_text(
         "usage_usec 44116\nuser_usec 25734\nsystem_usec 18381\nnr_periods 0\n"
     )
@@ -31,8 +33,21 @@ def test_read_cgroup_stats_parses_all_files(tmp_path: Path) -> None:
     assert s.cpu_user_usec == 25734
     assert s.cpu_system_usec == 18381
     assert s.oom_kill == 0
+    assert s.swap_peak_bytes == 0
     assert s.mem_stat["anon"] == 1000
     assert s.mem_stat["file"] == 2000
+
+
+def test_read_cgroup_stats_tolerates_missing_swap_peak(tmp_path: Path) -> None:
+    _write_cgroup(tmp_path, peak=44998656, swap_peak=None)
+
+    assert read_cgroup_stats(tmp_path).swap_peak_bytes is None
+
+
+def test_read_cgroup_stats_parses_swap_peak(tmp_path: Path) -> None:
+    _write_cgroup(tmp_path, peak=44998656, swap_peak=8192)
+
+    assert read_cgroup_stats(tmp_path).swap_peak_bytes == 8192
 
 
 def test_read_cgroup_stats_flags_oom(tmp_path: Path) -> None:
@@ -133,7 +148,12 @@ def _fake_runner_factory(payloads: list[dict[str, object]]) -> Runner:
 
 
 def _payload(
-    peak: int, usage: int = 1000, user: int = 600, system: int = 400, oom: int = 0
+    peak: int,
+    usage: int = 1000,
+    user: int = 600,
+    system: int = 400,
+    oom: int = 0,
+    swap_peak: int | None = 0,
 ) -> dict[str, object]:
     return {
         "exit_code": 1,
@@ -149,6 +169,7 @@ def _payload(
             "cpu_user_usec": user,
             "cpu_system_usec": system,
             "oom_kill": oom,
+            "swap_peak_bytes": swap_peak,
             "mem_stat": {"anon": peak},
         },
     }
@@ -164,8 +185,27 @@ def test_scoped_probe_aggregates_min_median_max() -> None:
     assert res.memory.peak_bytes_min == 100
     assert res.memory.peak_bytes_median == 120
     assert res.memory.peak_bytes_max == 140
+    assert res.memory.swap_peak_bytes_median == 0
+    assert res.memory.mem_under_swap is False
     assert res.cpu_time_s == 0.001
     assert res.oom is False
+
+
+def test_scoped_probe_aggregates_swap_peak_and_flags_swap() -> None:
+    runner = _fake_runner_factory(
+        [
+            _payload(100, swap_peak=0),
+            _payload(140, swap_peak=4096),
+            _payload(120, swap_peak=8192),
+        ]
+    )
+    res = scoped_probe(["mypy", "."], extra_env={}, timeout=60, repeats=3, runner=runner)
+
+    assert res.memory is not None
+    assert res.memory.swap_peak_bytes_min == 0
+    assert res.memory.swap_peak_bytes_median == 4096
+    assert res.memory.swap_peak_bytes_max == 8192
+    assert res.memory.mem_under_swap is True
 
 
 def test_scoped_probe_first_run_is_the_probe() -> None:

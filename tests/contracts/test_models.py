@@ -244,6 +244,10 @@ def test_run_result_v2_carries_memory_cpu_calibration(make_env: EnvFactory) -> N
         peak_bytes_min=100,
         peak_bytes_median=110,
         peak_bytes_max=120,
+        swap_peak_bytes_min=0,
+        swap_peak_bytes_median=4096,
+        swap_peak_bytes_max=8192,
+        mem_under_swap=True,
         memory_stat={"anon": 90, "file": 10},
     )
     calib = CalibrationStats(
@@ -272,6 +276,8 @@ def test_run_result_v2_carries_memory_cpu_calibration(make_env: EnvFactory) -> N
     )
     assert r.schema_version == 4
     assert r.memory is not None and r.memory.peak_bytes_median == 110
+    assert r.memory.swap_peak_bytes_median == 4096
+    assert r.memory.mem_under_swap is True
     assert r.cpu_time_s == 0.42
     assert r.parallel_efficiency == 0.95
     assert r.calibration is not None and r.calibration.workload_id == "calib-pyloop-v1"
@@ -298,6 +304,15 @@ def test_run_result_v2_defaults_are_none(make_env: EnvFactory) -> None:
     assert r.hard_cap is None
     assert r.cap_mechanism is None
     assert r.thread_mode_enforced is False
+
+
+def test_memory_stats_swap_fields_default_to_no_swap() -> None:
+    mem = MemoryStats(runs=1, peak_bytes_min=100, peak_bytes_median=100, peak_bytes_max=100)
+
+    assert mem.swap_peak_bytes_min is None
+    assert mem.swap_peak_bytes_median is None
+    assert mem.swap_peak_bytes_max is None
+    assert mem.mem_under_swap is False
 
 
 def test_env_fingerprint_expands_with_optional_runtime_fields() -> None:
@@ -442,10 +457,12 @@ def test_results_envelope_wraps_records(make_env: EnvFactory) -> None:
         generated_at="2026-06-08T00:00:00Z",
         runs=[rec],
     )
-    assert env.schema_version == 2
+    assert env.schema_version == 3
     restored = ResultsEnvelope.model_validate_json(env.model_dump_json())
     assert restored == env
     assert len(restored.runs) == 1
+    assert restored.harness_mem_baseline_bytes is None
+    assert restored.harness_wall_overhead_s is None
 
 
 def test_results_envelope_carries_run_config_and_resolved_checker() -> None:
@@ -464,13 +481,27 @@ def test_results_envelope_carries_run_config_and_resolved_checker() -> None:
                 install_source="pypi",
             ),
         ),
+        harness_mem_baseline_bytes=14_000_000,
+        harness_wall_overhead_s=0.029,
     )
 
-    assert env.schema_version == 2
+    assert env.schema_version == 3
     back = ResultsEnvelope.model_validate_json(env.model_dump_json())
     assert back.run_config is not None
     assert back.run_config.checkers[0].checker_id() == "mypy@1.18.2"
     assert back.resolved_checkers[0].lock_hash == "checker-lock"
+    assert back.harness_mem_baseline_bytes == 14_000_000
+    assert back.harness_wall_overhead_s == 0.029
+
+
+def test_results_envelope_accepts_legacy_v2_without_baselines() -> None:
+    env = ResultsEnvelope.model_validate(
+        {"schema_version": 2, "suite_version": "v", "generated_at": "t", "runs": []}
+    )
+
+    assert env.schema_version == 2
+    assert env.harness_mem_baseline_bytes is None
+    assert env.harness_wall_overhead_s is None
 
 
 def test_results_envelope_rejects_unknown_fields() -> None:

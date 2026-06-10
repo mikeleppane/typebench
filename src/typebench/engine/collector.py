@@ -257,6 +257,10 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
                 peak_bytes_min=memory_summary.peak_bytes_min,
                 peak_bytes_median=memory_summary.peak_bytes_median,
                 peak_bytes_max=memory_summary.peak_bytes_max,
+                swap_peak_bytes_min=memory_summary.swap_peak_bytes_min,
+                swap_peak_bytes_median=memory_summary.swap_peak_bytes_median,
+                swap_peak_bytes_max=memory_summary.swap_peak_bytes_max,
+                mem_under_swap=memory_summary.mem_under_swap,
                 memory_stat=memory_summary.memory_stat,
             )
             if memory_summary is not None

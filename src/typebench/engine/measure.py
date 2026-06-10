@@ -40,6 +40,7 @@ class CgroupSample:
     cpu_user_usec: int
     cpu_system_usec: int
     oom_kill: int
+    swap_peak_bytes: int | None
     mem_stat: dict[str, int]
 
 
@@ -62,6 +63,13 @@ def _read_int(path: Path) -> int:
     return int(path.read_text().strip())
 
 
+def _read_optional_int(path: Path) -> int | None:
+    try:
+        return _read_int(path)
+    except OSError:
+        return None
+
+
 def read_cgroup_stats(cgroup_dir: Path) -> CgroupSample:
     """Read memory.peak / cpu.stat / memory.stat / memory.events from a cgroup v2
     directory. Pure (no process spawned) so it is unit-testable against fixture
@@ -74,6 +82,7 @@ def read_cgroup_stats(cgroup_dir: Path) -> CgroupSample:
         cpu_user_usec=cpu.get("user_usec", 0),
         cpu_system_usec=cpu.get("system_usec", 0),
         oom_kill=events.get("oom_kill", 0),
+        swap_peak_bytes=_read_optional_int(cgroup_dir / "memory.swap.peak"),
         mem_stat=_read_kv(cgroup_dir / "memory.stat"),
     )
 
@@ -130,6 +139,7 @@ def _sample_to_dict(sample: CgroupSample) -> dict[str, object]:
         "cpu_user_usec": sample.cpu_user_usec,
         "cpu_system_usec": sample.cpu_system_usec,
         "oom_kill": sample.oom_kill,
+        "swap_peak_bytes": sample.swap_peak_bytes,
         "mem_stat": sample.mem_stat,
     }
 
@@ -147,6 +157,10 @@ class MemorySummary:
     peak_bytes_median: int
     peak_bytes_max: int
     memory_stat: dict[str, int]
+    swap_peak_bytes_min: int | None = None
+    swap_peak_bytes_median: int | None = None
+    swap_peak_bytes_max: int | None = None
+    mem_under_swap: bool = False
 
 
 @dataclass(frozen=True)
@@ -179,8 +193,21 @@ def _coerce_int(value: object) -> int:
     raise ValueError(f"expected integer payload value, got {type(value).__name__}")
 
 
+def _coerce_optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    return _coerce_int(value)
+
+
 def _median_int(values: list[int]) -> int:
     return int(statistics.median(values))
+
+
+def _swap_summary(values: list[int | None]) -> tuple[int | None, int | None, int | None, bool]:
+    present = [value for value in values if value is not None]
+    if not present:
+        return None, None, None, False
+    return min(present), _median_int(present), max(present), any(value > 0 for value in present)
 
 
 def _memory_stat_from_payload(cgroup_payload: dict[object, object]) -> dict[str, int]:
@@ -188,6 +215,24 @@ def _memory_stat_from_payload(cgroup_payload: dict[object, object]) -> dict[str,
     if not isinstance(raw_mem_stat, dict):
         return {}
     return {str(key): _coerce_int(value) for key, value in raw_mem_stat.items()}
+
+
+def _resource_sample_from_payload(
+    cgroup_payload: dict[object, object],
+) -> tuple[int, int, int | None, dict[str, int]]:
+    return (
+        _coerce_int(cgroup_payload["peak_bytes"]),
+        _coerce_int(cgroup_payload["cpu_usage_usec"]),
+        _coerce_optional_int(cgroup_payload.get("swap_peak_bytes")),
+        _memory_stat_from_payload(cgroup_payload),
+    )
+
+
+def _authoritative_raw(raws: list[RawRun]) -> RawRun:
+    for raw in raws:
+        if universal_failure_prefix(raw) is not None:
+            return raw
+    return raws[0]
 
 
 def scoped_probe(
@@ -213,6 +258,7 @@ def scoped_probe(
 
     raws: list[RawRun] = []
     peaks: list[int] = []
+    swap_peaks: list[int | None] = []
     cpu_usages: list[int] = []
     mem_stats: list[dict[str, int]] = []
     oom = False
@@ -266,21 +312,18 @@ def scoped_probe(
             # runner) must skip this repeat, never raise out of scoped_probe: the
             # KeyError from cgroup["peak_bytes"] is NOT in the collector's fallback
             # except set, so an escape here would drop the record.
-            sample: tuple[int, int, dict[str, int]] | None = None
+            sample: tuple[int, int, int | None, dict[str, int]] | None = None
             if isinstance(cgroup, dict):
-                sample = (
-                    _coerce_int(cgroup["peak_bytes"]),
-                    _coerce_int(cgroup["cpu_usage_usec"]),
-                    _memory_stat_from_payload(cgroup),
-                )
+                sample = _resource_sample_from_payload(cgroup)
         except (KeyError, ValueError):
             continue
         raws.append(raw)
         # peaks/cpu_usages/mem_stats stay parallel: all three append together (or
         # none do), so representative_index can index mem_stats by a peaks position.
         if sample is not None:
-            peak_bytes, cpu_usage, mem_stat = sample
+            peak_bytes, cpu_usage, swap_peak_bytes, mem_stat = sample
             peaks.append(peak_bytes)
+            swap_peaks.append(swap_peak_bytes)
             cpu_usages.append(cpu_usage)
             mem_stats.append(mem_stat)
             oom = oom or oom_killed
@@ -288,23 +331,24 @@ def scoped_probe(
     if not raws:
         raise MeasureError("scoped resource pass produced no usable payload")
 
-    authoritative = raws[0]
-    for raw in raws:
-        if universal_failure_prefix(raw) is not None:
-            authoritative = raw
-            break
+    authoritative = _authoritative_raw(raws)
 
     if not peaks:
         return ResourceResult(raw=authoritative, memory=None, cpu_time_s=None, oom=oom)
 
     median_peak = _median_int(peaks)
     representative_index = min(range(len(peaks)), key=lambda index: abs(peaks[index] - median_peak))
+    swap_min, swap_median, swap_max, mem_under_swap = _swap_summary(swap_peaks)
     memory = MemorySummary(
         runs=len(peaks),
         peak_bytes_min=min(peaks),
         peak_bytes_median=median_peak,
         peak_bytes_max=max(peaks),
         memory_stat=mem_stats[representative_index],
+        swap_peak_bytes_min=swap_min,
+        swap_peak_bytes_median=swap_median,
+        swap_peak_bytes_max=swap_max,
+        mem_under_swap=mem_under_swap,
     )
     cpu_time_s = _median_int(cpu_usages) / 1_000_000
     return ResourceResult(raw=authoritative, memory=memory, cpu_time_s=cpu_time_s, oom=oom)

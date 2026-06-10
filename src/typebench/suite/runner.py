@@ -6,7 +6,11 @@ measured path; pydantic via `models` is fine here.
 
 from __future__ import annotations
 
+import shutil
+import subprocess
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from typebench.contracts.config import NormalizedConfig, config_hash
@@ -22,14 +26,16 @@ from typebench.contracts.models import (
 from typebench.contracts.policy import Policy
 from typebench.corpus.catalog import load_suite, load_suite_version
 from typebench.corpus.checkerenv import prepare_checker
+from typebench.corpus.counting import first_party_files
 from typebench.corpus.envman import prepare_project
+from typebench.engine import measure
 from typebench.engine.collector import RunManifest, run_single
 from typebench.engine.env import detect_env
+from typebench.engine.timing import run_timing
 from typebench.suite.preflight import preflight_project
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
     from typebench.adapters.base import Adapter
     from typebench.contracts.identity import CheckerRuntime, CheckerSpec
@@ -172,6 +178,61 @@ def _suite_config(prepared: PreparedProject, cores: int) -> NormalizedConfig:
     )
 
 
+def prewarm_project_sources(prepared: PreparedProject) -> None:
+    """Read canonical sources outside the measured scope.
+
+    cgroup v2 charges file-cache pages to the first scope that faults them in.
+    Pre-warming makes file pages consistently host-cache-backed before the memory
+    pass, so memory.peak measures anonymous/kernel working set rather than
+    accidental first-touch file cache state.
+    """
+    roots = [Path(root) for root in prepared.src_roots]
+    for path in first_party_files(roots, prepared.exclude_globs):
+        try:
+            path.read_bytes()
+        except OSError:
+            continue
+
+
+def _measure_harness_baselines(
+    *, timeout: float, runs: int, warmup: int, measure_enabled: bool
+) -> tuple[int | None, float | None]:
+    """Measure raw suite-level harness costs, returning None when unavailable."""
+    mem_baseline: int | None = None
+    if measure_enabled and measure.capable():
+        try:
+            resource = measure.scoped_probe(
+                [sys.executable, "-c", "pass"],
+                extra_env={},
+                timeout=timeout,
+                repeats=1,
+            )
+        except (measure.MeasureError, OSError, ValueError, KeyError):
+            mem_baseline = None
+        else:
+            if resource.memory is not None:
+                mem_baseline = resource.memory.peak_bytes_median
+
+    wall_overhead: float | None = None
+    true_bin = shutil.which("true")
+    if true_bin is not None and shutil.which("hyperfine") is not None:
+        try:
+            timing = run_timing(
+                [true_bin],
+                prepare_cmd=None,
+                warmup=warmup,
+                runs=runs,
+                timeout=timeout,
+                extra_env={},
+            )
+        except (subprocess.CalledProcessError, OSError, ValueError, KeyError):
+            wall_overhead = None
+        else:
+            wall_overhead = timing.median_s
+
+    return mem_baseline, wall_overhead
+
+
 def _resolve_runtimes(
     checkers: tuple[CheckerSpec, ...],
     cache_root: Path,
@@ -249,6 +310,10 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
     run_one: Callable[..., RunResult] = run_single,
     prepare_checker_fn: Callable[..., CheckerRuntime] = prepare_checker,
     calibrate_fn: Callable[[int], CalibrationStats] | None = None,
+    prewarm_sources: Callable[[PreparedProject], None] = prewarm_project_sources,
+    measure_harness_baselines_fn: Callable[..., tuple[int | None, float | None]] = (
+        _measure_harness_baselines
+    ),
 ) -> ResultsEnvelope:
     """Run the sharded matrix behind the preflight gate -> ResultsEnvelope.
 
@@ -276,6 +341,12 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
     calibration: CalibrationStats | None = None
     if calibrate_fn is not None:
         calibration = calibrate_fn(calib_runs)
+    harness_mem_baseline_bytes, harness_wall_overhead_s = measure_harness_baselines_fn(
+        timeout=timeout,
+        runs=runs,
+        warmup=warmup,
+        measure_enabled=measure_enabled,
+    )
 
     # Group sharded cells by project, preserving matrix order.
     by_project: dict[str, list[SuiteCell]] = {}
@@ -314,6 +385,25 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
                         entry,
                         src,
                         f"prepare failed: {exc}",
+                        calibration,
+                        policy,
+                        policy is Policy.STANDARD,
+                    )
+                )
+            continue
+
+        try:
+            prewarm_sources(prepared)
+        except Exception as exc:
+            for cell in project_cells:
+                src = adapter_by_name[_tool_of(cell.checker_id)].install_source
+                results.append(
+                    _excluded_record(
+                        cell,
+                        prepared,
+                        entry,
+                        src,
+                        f"source pre-warm failed: {exc}",
                         calibration,
                         policy,
                         policy is Policy.STANDARD,
@@ -409,4 +499,6 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
         runs=results,
         run_config=run_config,
         resolved_checkers=resolved_checkers,
+        harness_mem_baseline_bytes=harness_mem_baseline_bytes,
+        harness_wall_overhead_s=harness_wall_overhead_s,
     )

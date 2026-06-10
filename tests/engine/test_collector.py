@@ -352,6 +352,10 @@ def test_resource_pass_populates_memory_cpu_efficiency(
                 peak_bytes_min=10,
                 peak_bytes_median=12,
                 peak_bytes_max=15,
+                swap_peak_bytes_min=0,
+                swap_peak_bytes_median=4096,
+                swap_peak_bytes_max=4096,
+                mem_under_swap=True,
                 memory_stat={"anon": 12},
             ),
             cpu_time_s=2.0,
@@ -387,6 +391,8 @@ def test_resource_pass_populates_memory_cpu_efficiency(
     assert result.result_class == ResultClass.CLEAN
     assert result.files == 5
     assert result.memory is not None and result.memory.peak_bytes_median == 12
+    assert result.memory.swap_peak_bytes_median == 4096
+    assert result.memory.mem_under_swap is True
     assert result.cpu_time_s == 2.0
     assert result.parallel_efficiency == 0.5  # cpu 2.0 / wall median 4.0
 

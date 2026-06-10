@@ -19,10 +19,28 @@ _README_BEGIN = "<!-- TYPEBENCH:BEGIN -->"
 _README_END = "<!-- TYPEBENCH:END -->"
 
 
-def _peak_mem_mb(record: RunResult) -> str:
+def _corrected_wall_s(record: RunResult, harness_wall_overhead_s: float | None) -> float | None:
+    if record.timing is None:
+        return None
+    if harness_wall_overhead_s is None:
+        return record.timing.median_s
+    return max(record.timing.median_s - harness_wall_overhead_s, 0.0)
+
+
+def _corrected_peak_bytes(record: RunResult, harness_mem_baseline_bytes: int | None) -> int | None:
     if record.memory is None:
+        return None
+    if harness_mem_baseline_bytes is None:
+        return record.memory.peak_bytes_median
+    return max(record.memory.peak_bytes_median - harness_mem_baseline_bytes, 0)
+
+
+def _peak_mem_mb(record: RunResult, harness_mem_baseline_bytes: int | None) -> str:
+    peak_bytes = _corrected_peak_bytes(record, harness_mem_baseline_bytes)
+    if peak_bytes is None:
         return "—"
-    return f"{record.memory.peak_bytes_median / 1_000_000:.1f}"
+    marker = "!" if record.memory is not None and record.memory.mem_under_swap else ""
+    return f"{peak_bytes / 1_000_000:.1f}{marker}"
 
 
 def _code_loc_or_withheld(record: RunResult) -> int | None:
@@ -42,7 +60,7 @@ def _code_loc_or_withheld(record: RunResult) -> int | None:
             assert_never(unreachable)
 
 
-def _kloc_s(record: RunResult) -> str:
+def _kloc_s(record: RunResult, harness_wall_overhead_s: float | None) -> str:
     """Headline throughput = canonical code-LOC / wall median. Withheld (—*) for
     over-reporters (their analyzed set diverges from the canonical denominator) and
     (—) for physical-fallback / unknown denominators, which are not code-LOC and so
@@ -50,13 +68,15 @@ def _kloc_s(record: RunResult) -> str:
     if record.over_reports:
         return "—*"
     loc = _code_loc_or_withheld(record)
-    if loc is None or record.timing is None or record.timing.median_s <= 0:
+    wall = _corrected_wall_s(record, harness_wall_overhead_s)
+    if loc is None or wall is None or wall <= 0:
         return "—"
-    return f"{(loc / 1000) / record.timing.median_s:.1f}"
+    return f"{(loc / 1000) / wall:.1f}"
 
 
-def _wall(record: RunResult) -> str:
-    return f"{record.timing.median_s:.3f}" if record.timing is not None else "—"
+def _wall(record: RunResult, harness_wall_overhead_s: float | None) -> str:
+    wall = _corrected_wall_s(record, harness_wall_overhead_s)
+    return f"{wall:.3f}" if wall is not None else "—"
 
 
 def _checker_id(record: RunResult) -> str:
@@ -77,7 +97,12 @@ def _sort_key(record: RunResult) -> tuple[int, float, str]:
     return (1, float("inf"), _checker_id(record))
 
 
-def _table(records: list[RunResult]) -> str:
+def _table(
+    records: list[RunResult],
+    *,
+    harness_mem_baseline_bytes: int | None,
+    harness_wall_overhead_s: float | None,
+) -> str:
     header = (
         "| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | "
         "CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |\n"
@@ -89,8 +114,9 @@ def _table(records: list[RunResult]) -> str:
         cpu = f"{r.cpu_time_s:.3f}" if r.cpu_time_s is not None else "—"
         peff = f"{r.parallel_efficiency:.2f}" if r.parallel_efficiency is not None else "—"
         rows.append(
-            f"| {_checker_id(r)} | {r.result_class.value} | {_wall(r)} | {_peak_mem_mb(r)} | "
-            f"{cpu} | {peff} | {_kloc_s(r)} |"
+            f"| {_checker_id(r)} | {r.result_class.value} | {_wall(r, harness_wall_overhead_s)} | "
+            f"{_peak_mem_mb(r, harness_mem_baseline_bytes)} | {cpu} | {peff} | "
+            f"{_kloc_s(r, harness_wall_overhead_s)} |"
         )
     return header + "\n".join(rows) + "\n"
 
@@ -114,11 +140,18 @@ def render_readme(envelope: ResultsEnvelope) -> str:
         groups, key=lambda group: (group[0], group[1], -1 if group[2] is None else group[2])
     ):
         parts.append(f"\n#### {project} — {mode} · {_cores_label(cores)}\n")
-        parts.append(_table(groups[(project, mode, cores)]))
+        parts.append(
+            _table(
+                groups[(project, mode, cores)],
+                harness_mem_baseline_bytes=envelope.harness_mem_baseline_bytes,
+                harness_wall_overhead_s=envelope.harness_wall_overhead_s,
+            )
+        )
     parts.append(
         "\n> kLOC/s denominator is the canonical analyzed code-LOC (tokei; blanks+"
         "comments excluded), identical across tools. `—*` = throughput withheld "
         "because the tool over-reports its analyzed set vs the canonical denominator. "
+        "`!` = swap observed during the memory pass, so peak memory may be understated. "
         "Parallel efficiency is cross-pass (cold cgroup CPU-time ÷ warm hyperfine wall). "
         "Checker issue counts are intentionally omitted — they are not comparable across "
         "tools and are not a ranking.\n"
@@ -146,17 +179,21 @@ def cpu_model_anchors(history: list[ResultsEnvelope]) -> dict[str, float]:
     return anchors
 
 
-def _kloc_value(record: RunResult) -> float | None:
+def _kloc_value(record: RunResult, harness_wall_overhead_s: float | None = None) -> float | None:
     if record.over_reports or record.timing is None or record.timing.median_s <= 0:
         return None
     # Withhold physical-fallback / unknown denominators from the code-LOC trend so
     # GH Pages never mixes physical-LOC and code-LOC throughput as one metric.
     loc = _code_loc_or_withheld(record)
-    return (loc / 1000) / record.timing.median_s if loc is not None else None
+    wall = _corrected_wall_s(record, harness_wall_overhead_s)
+    return (loc / 1000) / wall if loc is not None and wall is not None and wall > 0 else None
 
 
-def _peak_mb_value(record: RunResult) -> float | None:
-    return record.memory.peak_bytes_median / 1_000_000 if record.memory is not None else None
+def _peak_mb_value(
+    record: RunResult, harness_mem_baseline_bytes: int | None = None
+) -> float | None:
+    peak = _corrected_peak_bytes(record, harness_mem_baseline_bytes)
+    return peak / 1_000_000 if peak is not None else None
 
 
 def _delta_pct(baseline: float | None, value: float | None) -> str:
@@ -186,12 +223,20 @@ def render_compare(envelope: ResultsEnvelope, baseline: str | None = None) -> st
             (record for record in records if _checker_id(record) == base_id), None
         )
         base_wall = (
-            baseline_record.timing.median_s
-            if baseline_record is not None and baseline_record.timing is not None
+            _corrected_wall_s(baseline_record, envelope.harness_wall_overhead_s)
+            if baseline_record is not None
             else None
         )
-        base_kloc = _kloc_value(baseline_record) if baseline_record is not None else None
-        base_mem = _peak_mb_value(baseline_record) if baseline_record is not None else None
+        base_kloc = (
+            _kloc_value(baseline_record, envelope.harness_wall_overhead_s)
+            if baseline_record is not None
+            else None
+        )
+        base_mem = (
+            _peak_mb_value(baseline_record, envelope.harness_mem_baseline_bytes)
+            if baseline_record is not None
+            else None
+        )
 
         parts.append(f"\n#### {project} — {mode} · {_cores_label(cores)}\n")
         # Header + separator + data rows must be ONE join-free block: a blank line
@@ -202,9 +247,9 @@ def render_compare(envelope: ResultsEnvelope, baseline: str | None = None) -> st
         ]
         for record in sorted(records, key=_sort_key):
             checker_id = _checker_id(record)
-            wall = record.timing.median_s if record.timing is not None else None
-            kloc = _kloc_value(record)
-            mem = _peak_mb_value(record)
+            wall = _corrected_wall_s(record, envelope.harness_wall_overhead_s)
+            kloc = _kloc_value(record, envelope.harness_wall_overhead_s)
+            mem = _peak_mb_value(record, envelope.harness_mem_baseline_bytes)
             is_baseline = checker_id == base_id
             delta_wall = "baseline" if is_baseline else _delta_pct(base_wall, wall)
             delta_kloc = "baseline" if is_baseline else _delta_pct(base_kloc, kloc)
@@ -236,13 +281,13 @@ def build_trends(history: list[ResultsEnvelope]) -> dict[str, object]:
                 continue
             calib = _calib_median(record)
             anchor = anchors.get(record.env.cpu_model)
-            wall = record.timing.median_s
+            wall = _corrected_wall_s(record, envelope.harness_wall_overhead_s)
             wall_norm = (
                 wall * anchor / calib
-                if anchor is not None and calib is not None and calib > 0
+                if wall is not None and anchor is not None and calib is not None and calib > 0
                 else None
             )
-            peak_mb = record.memory.peak_bytes_median / 1_000_000 if record.memory else None
+            peak_mb = _peak_mb_value(record, envelope.harness_mem_baseline_bytes)
             checker_id = _checker_id(record)
             points.append(
                 {
@@ -259,7 +304,7 @@ def build_trends(history: list[ResultsEnvelope]) -> dict[str, object]:
                     "wall_median_s": wall,
                     "wall_median_s_norm": wall_norm,
                     "peak_mem_mb": peak_mb,
-                    "kloc_s": _kloc_value(record),
+                    "kloc_s": _kloc_value(record, envelope.harness_wall_overhead_s),
                     "calib_median_s": calib,
                     "calib_anchor_s": anchor,
                 }
