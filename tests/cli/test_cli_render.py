@@ -74,6 +74,7 @@ def test_render_updates_readme_markers_and_writes_trends(
     text = readme.read_text()
     assert "Intro prose." in text and "Footer prose." in text
     assert "OLD" not in text
-    assert "| mypy " in text
+    assert "| mypy@" in text  # rows are checker_id-labelled (legacy record -> mypy@1.0)
     data = json.loads(trends.read_text())
     assert data["points"][0]["tool"] == "mypy"
+    assert data["points"][0]["checker_id"] == "mypy@1.0"

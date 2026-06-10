@@ -59,17 +59,27 @@ def _wall(record: RunResult) -> str:
     return f"{record.timing.median_s:.3f}" if record.timing is not None else "—"
 
 
+def _checker_id(record: RunResult) -> str:
+    if record.checker_id is not None:
+        return record.checker_id
+    return f"{record.tool}@{record.tool_version}"
+
+
+def _cores_label(cores: int | None) -> str:
+    return "all-cores" if cores is None else f"cores={cores}"
+
+
 def _sort_key(record: RunResult) -> tuple[int, float, str]:
     # Measured-success first (fastest wall first); failures sink to the bottom,
-    # then alphabetical by tool for stable ordering.
+    # then alphabetical by checker identity for stable ordering.
     if record.timing is not None:
-        return (0, record.timing.median_s, record.tool)
-    return (1, float("inf"), record.tool)
+        return (0, record.timing.median_s, _checker_id(record))
+    return (1, float("inf"), _checker_id(record))
 
 
 def _table(records: list[RunResult]) -> str:
     header = (
-        "| Tool | Result | Wall median (s) | Peak cgroup mem (MB) | "
+        "| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | "
         "CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |\n"
         "|------|--------|-----------------|----------------------|"
         "--------------|----------------------------|---------------|\n"
@@ -79,7 +89,7 @@ def _table(records: list[RunResult]) -> str:
         cpu = f"{r.cpu_time_s:.3f}" if r.cpu_time_s is not None else "—"
         peff = f"{r.parallel_efficiency:.2f}" if r.parallel_efficiency is not None else "—"
         rows.append(
-            f"| {r.tool} | {r.result_class.value} | {_wall(r)} | {_peak_mem_mb(r)} | "
+            f"| {_checker_id(r)} | {r.result_class.value} | {_wall(r)} | {_peak_mem_mb(r)} | "
             f"{cpu} | {peff} | {_kloc_s(r)} |"
         )
     return header + "\n".join(rows) + "\n"
@@ -90,17 +100,21 @@ def render_readme(envelope: ResultsEnvelope) -> str:
     (project, thread-mode), ordered fastest-first (ranking by the measured metric,
     not diagnostics). Includes the suite version, generated timestamp, and the
     caveat footnotes."""
-    groups: dict[tuple[str, str], list[RunResult]] = {}
+    groups: dict[tuple[str, str, int | None], list[RunResult]] = {}
     for record in envelope.runs:
-        groups.setdefault((record.project, record.thread_mode.value), []).append(record)
+        groups.setdefault((record.project, record.thread_mode.value, record.cores), []).append(
+            record
+        )
 
     parts = [
         _README_BEGIN,
         f"\n_Suite `{envelope.suite_version}` · generated {envelope.generated_at}_\n",
     ]
-    for project, mode in sorted(groups):
-        parts.append(f"\n#### {project} — {mode}\n")
-        parts.append(_table(groups[(project, mode)]))
+    for project, mode, cores in sorted(
+        groups, key=lambda group: (group[0], group[1], -1 if group[2] is None else group[2])
+    ):
+        parts.append(f"\n#### {project} — {mode} · {_cores_label(cores)}\n")
+        parts.append(_table(groups[(project, mode, cores)]))
     parts.append(
         "\n> kLOC/s denominator is the canonical analyzed code-LOC (tokei; blanks+"
         "comments excluded), identical across tools. `—*` = throughput withheld "
@@ -164,13 +178,18 @@ def build_trends(history: list[ResultsEnvelope]) -> dict[str, object]:
                 else None
             )
             peak_mb = record.memory.peak_bytes_median / 1_000_000 if record.memory else None
+            checker_id = _checker_id(record)
             points.append(
                 {
                     "date": date,
                     "suite_version": envelope.suite_version,
                     "project": record.project,
                     "thread_mode": record.thread_mode.value,
+                    "cores": record.cores,
+                    "checker_id": checker_id,
                     "tool": record.tool,
+                    "version": record.tool_version,
+                    "label": checker_id,
                     "cpu_model": record.env.cpu_model,
                     "wall_median_s": wall,
                     "wall_median_s_norm": wall_norm,

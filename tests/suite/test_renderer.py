@@ -7,13 +7,11 @@ from typebench.contracts.models import (
     CalibrationStats,
     EnvFingerprint,
     MemoryStats,
-    ResultClass,
     ResultsEnvelope,
     RunResult,
-    ThreadMode,
     TimingStats,
 )
-from typebench.contracts.taxonomy import LocDenominator
+from typebench.contracts.taxonomy import LocDenominator, ResultClass, ThreadMode
 from typebench.suite.renderer import (
     _code_loc_or_withheld,
     build_trends,
@@ -73,7 +71,7 @@ def test_render_readme_table_is_fastest_first_and_excludes_diagnostics(
     )
     md = render_readme(env)
     # fastest-first: ty (0.5s) before mypy (2.0s)
-    assert md.index("| ty ") < md.index("| mypy ")
+    assert md.index("| ty@") < md.index("| mypy@")
     # diagnostics is NOT a column (spec §8)
     assert "diagnostics" not in md.lower()
     # code-LOC throughput present (3200 LOC / 0.5 s = 6.4 kLOC/s)
@@ -145,6 +143,46 @@ def _record_for_trends(
             raw_max_s=calib_med,
         ),
         env=make_env(cpu_model=cpu),
+    )
+
+
+def _record_versioned(
+    checker_id: str,
+    tool: str,
+    wall: float,
+    make_env: EnvFactory,
+    *,
+    thread_mode: ThreadMode = ThreadMode.ALL_CORES,
+    cores: int | None = None,
+) -> RunResult:
+    return RunResult(
+        tool=tool,
+        tool_version=checker_id.split("@", 1)[1],
+        checker_id=checker_id,
+        project="httpx",
+        thread_mode=thread_mode,
+        cores=cores,
+        result_class=ResultClass.CLEAN,
+        real_exit_code=0,
+        timing=TimingStats(
+            runs=1,
+            min_s=wall,
+            median_s=wall,
+            mean_s=wall,
+            stddev_s=0.0,
+            max_s=wall,
+            times_s=[wall],
+        ),
+        memory=MemoryStats(
+            runs=1,
+            peak_bytes_min=1,
+            peak_bytes_median=200_000_000,
+            peak_bytes_max=200_000_000,
+        ),
+        canonical_code_loc=3200,
+        loc_denominator=LocDenominator.CODE,
+        over_reports=False,
+        env=make_env(),
     )
 
 
@@ -235,3 +273,65 @@ def test_build_trends_includes_kloc_and_corpus_markers(make_env: EnvFactory) -> 
     assert abs(kloc_s - 1.6) < 1e-9
     assert _corpus_markers(trends)[0]["suite_version"] == "v"
     assert "CPU-A" in _cpu_models(trends)
+
+
+def test_build_trends_distinguishes_same_day_versions(make_env: EnvFactory) -> None:
+    env = ResultsEnvelope(
+        suite_version="v",
+        generated_at="2026-06-10T00:00:00Z",
+        runs=[
+            _record_versioned("mypy@1.18.2", "mypy", 2.0, make_env),
+            _record_versioned("mypy@1.19.0", "mypy", 1.5, make_env),
+        ],
+    )
+    trends = build_trends([env])
+    points = _trend_points(trends)
+    ids = {p["checker_id"] for p in points}
+    assert ids == {"mypy@1.18.2", "mypy@1.19.0"}
+    by_id = {p["checker_id"]: p for p in points}
+    assert by_id["mypy@1.18.2"]["version"] == "1.18.2"
+    assert by_id["mypy@1.19.0"]["tool"] == "mypy"
+
+
+def test_render_readme_labels_rows_by_checker_id(make_env: EnvFactory) -> None:
+    env = ResultsEnvelope(
+        suite_version="v",
+        generated_at="t",
+        runs=[
+            _record_versioned("mypy@1.18.2", "mypy", 2.0, make_env),
+            _record_versioned("mypy@1.19.0", "mypy", 1.5, make_env),
+        ],
+    )
+    md = render_readme(env)
+    assert "| Checker | Result |" in md
+    assert "mypy@1.18.2" in md
+    assert "mypy@1.19.0" in md
+
+
+def test_render_readme_groups_constrained_records_by_cores(make_env: EnvFactory) -> None:
+    env = ResultsEnvelope(
+        suite_version="v",
+        generated_at="t",
+        runs=[
+            _record_versioned(
+                "mypy@1.19.0",
+                "mypy",
+                2.0,
+                make_env,
+                thread_mode=ThreadMode.CONSTRAINED,
+                cores=1,
+            ),
+            _record_versioned(
+                "mypy@1.19.0",
+                "mypy",
+                1.5,
+                make_env,
+                thread_mode=ThreadMode.CONSTRAINED,
+                cores=4,
+            ),
+        ],
+    )
+    md = render_readme(env)
+    assert "#### httpx — constrained · cores=1" in md
+    assert "#### httpx — constrained · cores=4" in md
+    assert md.count("| mypy@1.19.0 |") == 2
