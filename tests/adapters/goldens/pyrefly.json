@@ -1,0 +1,17 @@
+{
+  "argv": [
+    "pyrefly",
+    "check",
+    "--config",
+    "<ROOT>/work/pyrefly.toml",
+    "--output-format",
+    "json",
+    "--summary=full",
+    "--threads",
+    "1"
+  ],
+  "config_files": {
+    "pyrefly.toml": "preset = \"default\"\nproject-includes = [\"<ROOT>/project/src\"]\nsearch-path = [\"<ROOT>/project/src\"]\nproject-excludes = [\"<ROOT>/project/src/**/tests/**\", \"<ROOT>/project/src/**/_vendor/**\"]\npython-version = \"3.12\"\npython-platform = \"linux\"\ncheck-unannotated-defs = true\ninfer-return-types = \"checked\"\npython-interpreter-path = \"<ROOT>/venv/bin/python\"\n"
+  },
+  "env": {}
+}

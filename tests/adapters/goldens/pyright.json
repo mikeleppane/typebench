@@ -1,0 +1,16 @@
+{
+  "argv": [
+    "pyright",
+    "--project",
+    "<ROOT>/work",
+    "--outputjson",
+    "--pythonversion",
+    "3.12",
+    "--pythonplatform",
+    "Linux"
+  ],
+  "config_files": {
+    "pyrightconfig.json": "{\n  \"include\": [\n    \"../project/src\"\n  ],\n  \"exclude\": [\n    \"../project/src/**/tests/**\",\n    \"../project/src/**/_vendor/**\"\n  ],\n  \"typeCheckingMode\": \"standard\",\n  \"useLibraryCodeForTypes\": true,\n  \"pythonVersion\": \"3.12\",\n  \"pythonPlatform\": \"Linux\",\n  \"venvPath\": \"<ROOT>\",\n  \"venv\": \"venv\"\n}"
+  },
+  "env": {}
+}

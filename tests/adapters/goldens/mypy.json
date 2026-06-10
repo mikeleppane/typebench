@@ -1,0 +1,21 @@
+{
+  "argv": [
+    "mypy",
+    "--python-version",
+    "3.12",
+    "--platform",
+    "linux",
+    "--check-untyped-defs",
+    "--follow-imports=silent",
+    "--config-file=",
+    "--no-incremental",
+    "--cache-dir=/dev/null",
+    "--exclude",
+    "(^|/)(_vendor|tests)(/|$)",
+    "--python-executable",
+    "<ROOT>/venv/bin/python",
+    "<ROOT>/project/src"
+  ],
+  "config_files": {},
+  "env": {}
+}

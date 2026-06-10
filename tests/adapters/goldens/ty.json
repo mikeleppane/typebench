@@ -1,0 +1,33 @@
+{
+  "argv": [
+    "ty",
+    "check",
+    "<ROOT>/project/src",
+    "--config-file",
+    "<ROOT>/work/ty.toml",
+    "--force-exclude",
+    "--no-respect-ignore-files",
+    "--python-version",
+    "3.12",
+    "--python-platform",
+    "linux",
+    "--output-format",
+    "concise",
+    "-v",
+    "--no-progress",
+    "--color",
+    "never",
+    "--exclude",
+    "**/tests/**",
+    "--exclude",
+    "**/_vendor/**",
+    "--python",
+    "<ROOT>/venv/bin/python"
+  ],
+  "config_files": {
+    "ty.toml": "[environment]\npython-version = \"3.12\"\npython-platform = \"linux\"\n\n[src]\nexclude = [\"**/tests/**\", \"**/_vendor/**\"]\n"
+  },
+  "env": {
+    "TY_MAX_PARALLELISM": "1"
+  }
+}
