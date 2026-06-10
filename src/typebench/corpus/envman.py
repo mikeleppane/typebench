@@ -2,7 +2,7 @@
 
 Clones a corpus project at its pinned SHA, builds an isolated uv venv against
 the pinned Python, installs deps via the explicit recipe, and freezes the
-resolved versions. All subprocess calls go through an injectable Runner so
+resolved versions. All subprocess calls go through an injectable ProcessHost so
 command construction is unit-testable offline.
 """
 
@@ -13,64 +13,30 @@ import os
 import re
 import shlex
 import shutil
-import subprocess
-from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
 from typebench.contracts.models import PreparedProject
 from typebench.corpus.counting import count_code_loc, count_first_party, first_party_files
+from typebench.engine.proc import SYSTEM_HOST
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from typebench.contracts.proc import ProcessHost, RawRun
     from typebench.corpus.catalog import CorpusProject
-
-
-@dataclass(frozen=True)
-class RunOut:
-    """Captured outcome of one helper subprocess."""
-
-    returncode: int
-    stdout: str
-    stderr: str
-
-
-class Runner(Protocol):
-    def __call__(self, argv: list[str], cwd: Path | None, env: dict[str, str] | None) -> RunOut:
-        """Run a helper command."""
-        ...
 
 
 class PrepareError(RuntimeError):
     """A preparation step failed."""
 
 
-def run_subprocess(argv: list[str], cwd: Path | None, env: dict[str, str] | None) -> RunOut:
-    """Default Runner. A failure to even launch the process (missing binary like
-    git/uv, not executable) is returned as a nonzero RunOut rather than raised, so
-    `_check` turns it into a PrepareError and `prepare_project` cleans up the
-    partial cache instead of surfacing an unhandled traceback."""
-    try:
-        proc = subprocess.run(
-            argv,
-            cwd=cwd,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError as exc:
-        return RunOut(127, "", f"failed to launch {argv[0]!r}: {exc}")
-    return RunOut(proc.returncode, proc.stdout, proc.stderr)
-
-
-def _check(out: RunOut, what: str) -> RunOut:
-    if out.returncode != 0:
+def _check(out: RawRun, what: str) -> RawRun:
+    if out.exit_code != 0:
         detail = (out.stderr.strip() or out.stdout.strip())[-500:]
-        msg = f"{what} failed (exit {out.returncode}): {detail}"
+        msg = f"{what} failed (exit {out.exit_code}): {detail}"
         raise PrepareError(msg)
     return out
 
@@ -83,16 +49,14 @@ def _venv_python(venv: Path) -> str:
     )
 
 
-def _clone(url: str, tag: str, sha: str, repo: Path, run: Runner) -> None:
+def _clone(url: str, tag: str, sha: str, repo: Path, host: ProcessHost) -> None:
     """Shallow-fetch the release tag and check out the pinned SHA."""
     repo.mkdir(parents=True, exist_ok=True)
     repo_str = str(repo)
-    _check(run(["git", "init", "-q", repo_str], None, None), "git init")
+    _check(host.run(["git", "init", "-q", repo_str]), "git init")
+    _check(host.run(["git", "-C", repo_str, "remote", "add", "origin", url]), "git remote add")
     _check(
-        run(["git", "-C", repo_str, "remote", "add", "origin", url], None, None), "git remote add"
-    )
-    _check(
-        run(
+        host.run(
             [
                 "git",
                 "-C",
@@ -102,23 +66,21 @@ def _clone(url: str, tag: str, sha: str, repo: Path, run: Runner) -> None:
                 "1",
                 "origin",
                 f"refs/tags/{tag}:refs/tags/{tag}",
-            ],
-            None,
-            None,
+            ]
         ),
         "git fetch",
     )
-    _check(run(["git", "-C", repo_str, "checkout", "-q", tag], None, None), "git checkout")
-    head = _check(run(["git", "-C", repo_str, "rev-parse", "HEAD"], None, None), "git rev-parse")
+    _check(host.run(["git", "-C", repo_str, "checkout", "-q", tag]), "git checkout")
+    head = _check(host.run(["git", "-C", repo_str, "rev-parse", "HEAD"]), "git rev-parse")
     if head.stdout.strip() != sha:
         msg = f"SHA mismatch after checkout: HEAD={head.stdout.strip()} expected={sha}"
         raise PrepareError(msg)
 
 
-def _make_venv(python_version: str, venv: Path, run: Runner) -> str:
+def _make_venv(python_version: str, venv: Path, host: ProcessHost) -> str:
     """Build the per-project venv and return its interpreter path."""
     _check(
-        run(["uv", "venv", "--python", python_version, str(venv)], None, None),
+        host.run(["uv", "venv", "--python", python_version, str(venv)]),
         "uv venv",
     )
     return _venv_python(venv)
@@ -128,7 +90,7 @@ def _install(
     recipe: Sequence[str],
     repo: Path,
     venv: Path,
-    run: Runner,
+    host: ProcessHost,
     *,
     constraints: Path | None = None,
 ) -> None:
@@ -141,12 +103,12 @@ def _install(
     if constraints is not None:
         env["UV_CONSTRAINT"] = str(constraints)
     for command in recipe:
-        _check(run(shlex.split(command), repo, env), f"install: {command!r}")
+        _check(host.run(shlex.split(command), cwd=repo, env=env), f"install: {command!r}")
 
 
-def _freeze(venv_python: str, run: Runner) -> tuple[str, ...]:
+def _freeze(venv_python: str, host: ProcessHost) -> tuple[str, ...]:
     """Return the venv's resolved package versions, sorted."""
-    out = _check(run(["uv", "pip", "freeze", "--python", venv_python], None, None), "uv pip freeze")
+    out = _check(host.run(["uv", "pip", "freeze", "--python", venv_python]), "uv pip freeze")
     return tuple(sorted(line for line in out.stdout.splitlines() if line.strip()))
 
 
@@ -246,16 +208,18 @@ def _normalize_locked_freeze(
     return tuple(sorted(replacement if _is_local_project(line) else line for line in frozen))
 
 
-def _backfill_code_loc(cached: PreparedProject, sidecar: Path) -> PreparedProject:
+def _backfill_code_loc(
+    cached: PreparedProject, sidecar: Path, *, host: ProcessHost = SYSTEM_HOST
+) -> PreparedProject:
     """Recompute tokei code-LOC on a cache hit when it is missing (a cache built
     before tokei integration, or before tokei was installed). The clone + venv are
     still valid, so only the cheap derived count is refreshed — not the whole
     clone/install. Stays None (physical fallback) if tokei is still unavailable or
     the file-set reconciliation fails."""
-    if cached.canonical_code_loc is not None or shutil.which("tokei") is None:
+    if cached.canonical_code_loc is not None:
         return cached
     roots = [Path(root) for root in cached.src_roots]
-    code_loc = count_code_loc(first_party_files(roots, cached.exclude_globs))
+    code_loc = count_code_loc(first_party_files(roots, cached.exclude_globs), host=host)
     if code_loc is None:
         return cached
     refreshed = cached.model_copy(update={"canonical_code_loc": code_loc})
@@ -267,7 +231,7 @@ def prepare_project(
     entry: CorpusProject,
     cache_root: Path,
     *,
-    run: Runner = run_subprocess,
+    host: ProcessHost = SYSTEM_HOST,
 ) -> PreparedProject:
     """Clone, build venv, install, freeze, verify lock, count, and cache."""
     # Resolve to absolute up front: _install runs the recipe with cwd=repo, so a
@@ -289,16 +253,16 @@ def prepare_project(
             shutil.rmtree(dest, ignore_errors=True)
         else:
             if _cache_valid(cached, fingerprint):
-                return _backfill_code_loc(cached, sidecar)
+                return _backfill_code_loc(cached, sidecar, host=host)
             shutil.rmtree(dest, ignore_errors=True)
 
     repo = dest / "repo"
     venv = dest / "venv"
     try:
-        _clone(entry.repo_url, entry.tag, entry.sha, repo, run)
-        venv_python = _make_venv(entry.python_version, venv, run)
-        _install(entry.install, repo, venv, run, constraints=constraints_path)
-        frozen = _normalize_locked_freeze(entry, _freeze(venv_python, run), constraints_text)
+        _clone(entry.repo_url, entry.tag, entry.sha, repo, host)
+        venv_python = _make_venv(entry.python_version, venv, host)
+        _install(entry.install, repo, venv, host, constraints=constraints_path)
+        frozen = _normalize_locked_freeze(entry, _freeze(venv_python, host), constraints_text)
         if constraints_text is not None:
             locked = _locked_lines(constraints_text)
             if lock_hash(frozen) != lock_hash(locked):
@@ -315,7 +279,7 @@ def prepare_project(
         if counted.files == 0:
             msg = f"no first-party Python files counted under src_roots={entry.src_roots}"
             raise PrepareError(msg)
-        code_loc = count_code_loc(first_party_files(roots, excludes))
+        code_loc = count_code_loc(first_party_files(roots, excludes), host=host)
 
         prepared = PreparedProject(
             name=entry.name,

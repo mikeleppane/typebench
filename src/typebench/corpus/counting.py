@@ -14,10 +14,14 @@ file count. tokei code-LOC is computed here and consumed by the renderer.
 from __future__ import annotations
 
 import json
-import shutil
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from typebench.engine.proc import SYSTEM_HOST
+
+if TYPE_CHECKING:
+    from typebench.contracts.proc import ProcessHost
 
 # argv chunk size so a giant project's file list stays under OS argv limits.
 _TOKEI_CHUNK = 500
@@ -60,26 +64,20 @@ def count_first_party(roots: list[Path], exclude_globs: tuple[str, ...]) -> File
     return FileCount(files=len(files), loc=loc)
 
 
-def _count_tokei_chunk(chunk: list[Path]) -> tuple[int, int] | None:
-    try:
-        out = subprocess.run(
-            [
-                "tokei",
-                "--output",
-                "json",
-                "--no-ignore",
-                "--types",
-                "Python",
-                *[str(path) for path in chunk],
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=300,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if out.returncode != 0:
+def _count_tokei_chunk(chunk: list[Path], host: ProcessHost) -> tuple[int, int] | None:
+    out = host.run(
+        [
+            "tokei",
+            "--output",
+            "json",
+            "--no-ignore",
+            "--types",
+            "Python",
+            *[str(path) for path in chunk],
+        ],
+        timeout=300,
+    )
+    if out.exit_code != 0:
         return None
 
     try:
@@ -96,9 +94,9 @@ def _count_tokei_chunk(chunk: list[Path]) -> tuple[int, int] | None:
     return None
 
 
-def count_code_loc(files: list[Path]) -> int | None:
+def count_code_loc(files: list[Path], *, host: ProcessHost = SYSTEM_HOST) -> int | None:
     """tokei Python code-LOC over exactly `files`, or None for physical-LOC fallback."""
-    if not files or shutil.which("tokei") is None:
+    if not files or host.which("tokei") is None:
         return None
 
     normalized_files = [Path(path) for path in files]
@@ -106,7 +104,7 @@ def count_code_loc(files: list[Path]) -> int | None:
     total_reports = 0
     for start in range(0, len(normalized_files), _TOKEI_CHUNK):
         chunk = normalized_files[start : start + _TOKEI_CHUNK]
-        chunk_totals = _count_tokei_chunk(chunk)
+        chunk_totals = _count_tokei_chunk(chunk, host)
         if chunk_totals is None:
             return None
         code, reports = chunk_totals

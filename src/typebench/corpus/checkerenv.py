@@ -8,11 +8,16 @@ import os
 import shutil
 from dataclasses import asdict
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from typebench.contracts.identity import CheckerRuntime, CheckerSpec, Source
-from typebench.corpus.envman import PrepareError, Runner, RunOut, lock_hash, run_subprocess
+from typebench.corpus.envman import PrepareError, lock_hash
+from typebench.engine.proc import SYSTEM_HOST
 
-__all__ = ["PrepareError", "RunOut", "Runner", "cache_status", "prepare_checker"]
+if TYPE_CHECKING:
+    from typebench.contracts.proc import ProcessHost, RawRun
+
+__all__ = ["PrepareError", "cache_status", "prepare_checker"]
 
 _SIDECAR = "checker.json"
 
@@ -37,10 +42,10 @@ def _checker_dir(cache_root: Path, checker_id: str, fingerprint: str) -> Path:
     return cache_root / "checkers" / f"{checker_id}-{fingerprint[:12]}"
 
 
-def _check(out: RunOut, what: str) -> RunOut:
-    if out.returncode != 0:
+def _check(out: RawRun, what: str) -> RawRun:
+    if out.exit_code != 0:
         detail = (out.stderr.strip() or out.stdout.strip())[-500:]
-        msg = f"{what} failed (exit {out.returncode}): {detail}"
+        msg = f"{what} failed (exit {out.exit_code}): {detail}"
         raise PrepareError(msg)
     return out
 
@@ -86,7 +91,7 @@ def prepare_checker(
     install_source: str,
     python_version: str = "3.12",
     python_platform: str = "linux",
-    run: Runner = run_subprocess,
+    host: ProcessHost = SYSTEM_HOST,
 ) -> CheckerRuntime:
     """Build or reuse a frozen checker venv and return its resolved runtime."""
     if spec.source is not Source.PYPI:
@@ -118,17 +123,17 @@ def prepare_checker(
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
         _check(
-            run(["uv", "venv", "--python", python_version, str(venv)], None, None),
+            host.run(["uv", "venv", "--python", python_version, str(venv)]),
             "uv venv",
         )
         venv_python = _venv_python(venv)
         install_spec = _install_spec(spec)
         _check(
-            run(["uv", "pip", "install", "--python", venv_python, install_spec], None, None),
+            host.run(["uv", "pip", "install", "--python", venv_python, install_spec]),
             f"uv pip install {install_spec}",
         )
         freeze = _check(
-            run(["uv", "pip", "freeze", "--python", venv_python], None, None),
+            host.run(["uv", "pip", "freeze", "--python", venv_python]),
             "uv pip freeze",
         )
         frozen = tuple(sorted(line for line in freeze.stdout.splitlines() if line.strip()))

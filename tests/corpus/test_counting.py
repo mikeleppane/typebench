@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-import typebench.corpus.counting
+from typebench._internal.test_fakes import FakeHost
 from typebench.contracts.config import DEFAULT_EXCLUDES
 from typebench.corpus.counting import count_code_loc, count_first_party, first_party_files
 
@@ -60,13 +60,10 @@ def test_count_code_loc_excludes_comments_and_blanks(tmp_path: Path) -> None:
     assert count_code_loc([f]) == 2
 
 
-def test_count_code_loc_returns_none_without_tokei(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_count_code_loc_returns_none_without_tokei(tmp_path: Path) -> None:
     f = tmp_path / "m.py"
     f.write_text("x = 1\n", encoding="utf-8")
-    monkeypatch.setattr(typebench.corpus.counting.shutil, "which", lambda _name: None, raising=True)
-    assert count_code_loc([f]) is None
+    assert count_code_loc([f], host=FakeHost()) is None
 
 
 def test_count_code_loc_none_on_empty_input(tmp_path: Path) -> None:

@@ -1,17 +1,22 @@
 import shutil
 import subprocess
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import override
 
 import pytest
 
 import typebench.corpus.envman
+from typebench._internal.test_fakes import FakeHost as SparseHost
+from typebench._internal.test_fakes import fake_raw
 from typebench.contracts.models import PreparedProject
+from typebench.contracts.proc import RawRun
 from typebench.corpus.catalog import CorpusProject, SizeBucket
 from typebench.corpus.envman import (
     _SIDECAR,
     PrepareError,
-    RunOut,
     _backfill_code_loc,
+    _check,
     _clone,
     _fingerprint,
     _freeze,
@@ -20,44 +25,55 @@ from typebench.corpus.envman import (
     _normalize_locked_freeze,
     lock_hash,
     prepare_project,
-    run_subprocess,
 )
+from typebench.engine.proc import SYSTEM_HOST
 
 
-class _FakeRunner:
+class _FakeHost:
     """Records calls and returns canned outputs keyed by argv[:2]."""
 
     def __init__(
-        self, outs: dict[tuple[str, ...], RunOut] | None = None, head_sha: str = "abc123"
+        self, outs: dict[tuple[str, ...], RawRun] | None = None, head_sha: str = "abc123"
     ) -> None:
-        self.calls: list[tuple[list[str], Path | None, dict[str, str] | None]] = []
+        self.calls: list[tuple[list[str], Path | None, Mapping[str, str] | None]] = []
         self._outs = outs or {}
         self._head_sha = head_sha
 
-    def __call__(self, argv: list[str], cwd: Path | None, env: dict[str, str] | None) -> RunOut:
-        self.calls.append((argv, cwd, env))
-        if "rev-parse" in argv:
-            return RunOut(0, self._head_sha, "")
-        return self._outs.get(tuple(argv[:2]), RunOut(0, "", ""))
+    def run(
+        self,
+        argv: Sequence[str],
+        *,
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> RawRun:
+        argv_list = list(argv)
+        self.calls.append((argv_list, cwd, env))
+        if "rev-parse" in argv_list:
+            return fake_raw(stdout=self._head_sha)
+        return self._outs.get(tuple(argv_list[:2]), fake_raw())
+
+    def which(self, name: str) -> str | None:
+        return None
 
 
 def test_make_venv_builds_uv_command_and_returns_python(tmp_path: Path) -> None:
-    run = _FakeRunner()
+    host = _FakeHost()
     venv = tmp_path / "venv"
-    py = _make_venv("3.12", venv, run)
-    argv = run.calls[0][0]
+    py = _make_venv("3.12", venv, host)
+    argv = host.calls[0][0]
     assert argv[:2] == ["uv", "venv"]
     assert "--python" in argv and "3.12" in argv
     assert py.endswith("/venv/bin/python")
 
 
 def test_install_activates_venv_for_each_recipe_command(tmp_path: Path) -> None:
-    run = _FakeRunner()
+    host = _FakeHost()
     venv = tmp_path / "venv"
     repo = tmp_path / "repo"
-    _install(("uv pip install .", "uv pip install ./extra"), repo, venv, run)
-    assert len(run.calls) == 2
-    first_argv, first_cwd, first_env = run.calls[0]
+    _install(("uv pip install .", "uv pip install ./extra"), repo, venv, host)
+    assert len(host.calls) == 2
+    first_argv, first_cwd, first_env = host.calls[0]
     assert first_argv == ["uv", "pip", "install", "."]  # shlex-split recipe
     assert first_cwd == repo
     assert first_env is not None
@@ -67,21 +83,21 @@ def test_install_activates_venv_for_each_recipe_command(tmp_path: Path) -> None:
 
 
 def test_install_pins_uv_constraint_when_locked(tmp_path: Path) -> None:
-    run = _FakeRunner()
+    host = _FakeHost()
     venv = tmp_path / "venv"
     repo = tmp_path / "repo"
     lock = tmp_path / "lock.txt"
     lock.write_text("idna==3.0\n")
-    _install(("uv pip install .",), repo, venv, run, constraints=lock)
-    _argv, _cwd, env = run.calls[0]
+    _install(("uv pip install .",), repo, venv, host, constraints=lock)
+    _argv, _cwd, env = host.calls[0]
     assert env is not None
     assert env["UV_CONSTRAINT"] == str(lock)  # reproducible deps (spec §83/§85)
 
 
 def test_freeze_returns_sorted_lines(tmp_path: Path) -> None:
-    out = RunOut(0, "idna==3.0\nhttpcore==1.0.0\n", "")
-    run = _FakeRunner({("uv", "pip"): out})
-    frozen = _freeze("/v/bin/python", run)
+    out = fake_raw(stdout="idna==3.0\nhttpcore==1.0.0\n")
+    host = _FakeHost({("uv", "pip"): out})
+    frozen = _freeze("/v/bin/python", host)
     assert frozen == ("httpcore==1.0.0", "idna==3.0")
 
 
@@ -94,9 +110,9 @@ def test_lock_hash_is_order_independent_and_stable() -> None:
 
 
 def test_install_raises_prepare_error_on_nonzero(tmp_path: Path) -> None:
-    run = _FakeRunner({("uv", "pip"): RunOut(1, "", "boom")})
+    host = _FakeHost({("uv", "pip"): fake_raw(exit_code=1, stderr="boom")})
     with pytest.raises(PrepareError, match="boom"):
-        _install(("uv pip install .",), tmp_path / "repo", tmp_path / "venv", run)
+        _install(("uv pip install .",), tmp_path / "repo", tmp_path / "venv", host)
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
@@ -124,7 +140,7 @@ def test_clone_checks_out_pinned_sha_from_local_repo(tmp_path: Path) -> None:
     ).stdout.strip()
 
     repo = tmp_path / "repo"
-    _clone(f"file://{upstream}", "v1", sha, repo, run_subprocess)
+    _clone(f"file://{upstream}", "v1", sha, repo, SYSTEM_HOST)
     assert (repo / "httpx" / "__init__.py").read_text() == "VERSION = '1'\n"
 
 
@@ -144,7 +160,7 @@ def test_clone_rejects_sha_mismatch(tmp_path: Path) -> None:
     )
     subprocess.run(["git", "-C", str(upstream), "tag", "v1"], check=True)
     with pytest.raises(PrepareError, match="SHA mismatch"):
-        _clone(f"file://{upstream}", "v1", "0" * 40, tmp_path / "repo", run_subprocess)
+        _clone(f"file://{upstream}", "v1", "0" * 40, tmp_path / "repo", SYSTEM_HOST)
 
 
 def _httpx_entry(**over: object) -> CorpusProject:
@@ -161,21 +177,30 @@ def _httpx_entry(**over: object) -> CorpusProject:
     return CorpusProject.model_validate({**base, **over})
 
 
-class _CloningRunner(_FakeRunner):
+class _CloningHost(_FakeHost):
     """Fake runner that materializes clone and venv artifacts."""
 
-    def __call__(self, argv: list[str], cwd: Path | None, env: dict[str, str] | None) -> RunOut:
-        out = super().__call__(argv, cwd, env)
-        if "checkout" in argv and "-C" in argv:
-            repo = Path(argv[argv.index("-C") + 1])
+    @override
+    def run(
+        self,
+        argv: Sequence[str],
+        *,
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+        timeout: float | None = None,
+    ) -> RawRun:
+        out = super().run(argv, cwd=cwd, env=env, timeout=timeout)
+        argv_list = list(argv)
+        if "checkout" in argv_list and "-C" in argv_list:
+            repo = Path(argv_list[argv_list.index("-C") + 1])
             pkg = repo / "pkg"
             pkg.mkdir(parents=True, exist_ok=True)
             (pkg / "a.py").write_text("x = 1\n")
             (pkg / "b.py").write_text("y = 2\n")
             (pkg / "tests").mkdir(exist_ok=True)
             (pkg / "tests" / "t.py").write_text("assert True\n")  # excluded
-        if argv[:2] == ["uv", "venv"]:
-            venv_bin = Path(argv[-1]) / "bin"
+        if argv_list[:2] == ["uv", "venv"]:
+            venv_bin = Path(argv_list[-1]) / "bin"
             venv_bin.mkdir(parents=True, exist_ok=True)
             (venv_bin / "python").write_text("#!/bin/sh\n")
         return out
@@ -185,13 +210,13 @@ def test_prepare_project_assembles_prepared_with_canonical_count(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     cache = tmp_path / "cache"
-    run = _CloningRunner({("uv", "pip"): RunOut(0, "idna==3.0\nhttpcore==1.0.0\n", "")})
+    run = _CloningHost({("uv", "pip"): fake_raw(stdout="idna==3.0\nhttpcore==1.0.0\n")})
 
-    def fake_count_code_loc(_files: list[Path]) -> int:
+    def fake_count_code_loc(_files: list[Path], *, host: object) -> int:
         return 1234
 
     monkeypatch.setattr(typebench.corpus.envman, "count_code_loc", fake_count_code_loc)
-    prepared = prepare_project(_httpx_entry(), cache, run=run)
+    prepared = prepare_project(_httpx_entry(), cache, host=run)
 
     assert prepared.name == "demo"
     assert prepared.python_platform == "linux"
@@ -208,44 +233,46 @@ def test_prepare_project_assembles_prepared_with_canonical_count(
 
 def test_prepare_project_is_idempotent_via_sidecar(tmp_path: Path) -> None:
     cache = tmp_path / "cache"
-    run1 = _CloningRunner({("uv", "pip"): RunOut(0, "idna==3.0\n", "")})
-    first = prepare_project(_httpx_entry(), cache, run=run1)
+    run1 = _CloningHost({("uv", "pip"): fake_raw(stdout="idna==3.0\n")})
+    first = prepare_project(_httpx_entry(), cache, host=run1)
     assert run1.calls
 
-    run2 = _CloningRunner({("uv", "pip"): RunOut(0, "idna==3.0\n", "")})
-    second = prepare_project(_httpx_entry(), cache, run=run2)
+    run2 = _CloningHost({("uv", "pip"): fake_raw(stdout="idna==3.0\n")})
+    second = prepare_project(_httpx_entry(), cache, host=run2)
     assert run2.calls == []
     assert second == first
 
 
 def test_prepare_project_rebuilds_when_recipe_changes(tmp_path: Path) -> None:
     cache = tmp_path / "cache"
-    run1 = _CloningRunner({("uv", "pip"): RunOut(0, "idna==3.0\n", "")})
-    first = prepare_project(_httpx_entry(), cache, run=run1)
+    run1 = _CloningHost({("uv", "pip"): fake_raw(stdout="idna==3.0\n")})
+    first = prepare_project(_httpx_entry(), cache, host=run1)
 
-    run2 = _CloningRunner({("uv", "pip"): RunOut(0, "idna==3.0\n", "")})
-    second = prepare_project(_httpx_entry(install=("uv pip install . --no-deps",)), cache, run=run2)
+    run2 = _CloningHost({("uv", "pip"): fake_raw(stdout="idna==3.0\n")})
+    second = prepare_project(
+        _httpx_entry(install=("uv pip install . --no-deps",)), cache, host=run2
+    )
     assert run2.calls
     assert second.fingerprint != first.fingerprint
 
 
 def test_prepare_project_cleans_partial_dest_on_failure(tmp_path: Path) -> None:
     cache = tmp_path / "cache"
-    bad = _CloningRunner({("uv", "pip"): RunOut(1, "", "install boom")})
+    bad = _CloningHost({("uv", "pip"): fake_raw(exit_code=1, stderr="install boom")})
     with pytest.raises(PrepareError, match="boom"):
-        prepare_project(_httpx_entry(), cache, run=bad)
+        prepare_project(_httpx_entry(), cache, host=bad)
     assert not (cache / "demo@abc123").exists()
 
-    good = _CloningRunner({("uv", "pip"): RunOut(0, "idna==3.0\n", "")})
-    prepared = prepare_project(_httpx_entry(), cache, run=good)
+    good = _CloningHost({("uv", "pip"): fake_raw(stdout="idna==3.0\n")})
+    prepared = prepare_project(_httpx_entry(), cache, host=good)
     assert prepared.canonical_files == 2
 
 
 def test_prepare_project_rejects_missing_src_root(tmp_path: Path) -> None:
     cache = tmp_path / "cache"
-    run = _CloningRunner({("uv", "pip"): RunOut(0, "idna==3.0\n", "")})
+    run = _CloningHost({("uv", "pip"): fake_raw(stdout="idna==3.0\n")})
     with pytest.raises(PrepareError, match="src_root"):
-        prepare_project(_httpx_entry(src_roots=("ghost",)), cache, run=run)
+        prepare_project(_httpx_entry(src_roots=("ghost",)), cache, host=run)
     assert not (cache / "demo@abc123").exists()
 
 
@@ -254,9 +281,9 @@ def test_prepare_project_verifies_constraints_lock(tmp_path: Path) -> None:
     lock = tmp_path / "lock.txt"
     lock.write_text("idna==9.9.9\n")
     entry = _httpx_entry(constraints=str(lock))
-    run = _CloningRunner({("uv", "pip"): RunOut(0, "idna==3.0\n", "")})
+    run = _CloningHost({("uv", "pip"): fake_raw(stdout="idna==3.0\n")})
     with pytest.raises(PrepareError, match="lock drift"):
-        prepare_project(entry, cache, run=run)
+        prepare_project(entry, cache, host=run)
 
 
 def test_fingerprint_changes_with_scope_fields() -> None:
@@ -280,12 +307,13 @@ def test_normalize_locked_freeze_matches_pep503_normalized_name() -> None:
     )
 
 
-def test_run_subprocess_missing_binary_returns_nonzero_not_raises() -> None:
-    # A missing git/uv must surface as a nonzero RunOut (-> PrepareError -> cache
-    # cleanup), never an unhandled OSError traceback.
-    out = run_subprocess(["typebench-nonexistent-binary-xyz"], None, None)
-    assert out.returncode != 0
-    assert "typebench-nonexistent-binary-xyz" in out.stderr
+def test_check_records_launch_failure_as_prepare_error() -> None:
+    # A missing git/uv surfaces as RawRun(env_error=True) from the host, then
+    # _check turns it into PrepareError so callers clean up partial cache state.
+    raw = SYSTEM_HOST.run(["typebench-nonexistent-binary-xyz"], timeout=10)
+    assert raw.env_error is True
+    with pytest.raises(PrepareError, match="typebench-nonexistent-binary-xyz"):
+        _check(raw, "helper")
 
 
 def test_prepare_project_relative_cache_root_uses_absolute_install_env(
@@ -295,8 +323,8 @@ def test_prepare_project_relative_cache_root_uses_absolute_install_env(
     # VIRTUAL_ENV/cwd; otherwise (cwd=repo) the relative venv resolves against the
     # repo dir, deps install nowhere, and the freeze comes back empty -> lock drift.
     monkeypatch.chdir(tmp_path)
-    run = _CloningRunner({("uv", "pip"): RunOut(0, "idna==3.0\n", "")})
-    prepared = prepare_project(_httpx_entry(), Path("relcache"), run=run)
+    run = _CloningHost({("uv", "pip"): fake_raw(stdout="idna==3.0\n")})
+    prepared = prepare_project(_httpx_entry(), Path("relcache"), host=run)
     install_calls = [c for c in run.calls if c[0][:3] == ["uv", "pip", "install"]]
     assert install_calls
     for _argv, cwd, env in install_calls:
@@ -309,13 +337,13 @@ def test_prepare_project_relative_cache_root_uses_absolute_install_env(
 def test_prepare_project_rebuilds_on_corrupt_sidecar(tmp_path: Path) -> None:
     cache = tmp_path / "cache"
     first = prepare_project(
-        _httpx_entry(), cache, run=_CloningRunner({("uv", "pip"): RunOut(0, "idna==3.0\n", "")})
+        _httpx_entry(), cache, host=_CloningHost({("uv", "pip"): fake_raw(stdout="idna==3.0\n")})
     )
     # Simulate an interrupted sidecar write; a re-prepare must rebuild cleanly,
     # not escape with a ValidationError.
     (cache / "demo@abc123" / _SIDECAR).write_text("{ this is not valid json")
     second = prepare_project(
-        _httpx_entry(), cache, run=_CloningRunner({("uv", "pip"): RunOut(0, "idna==3.0\n", "")})
+        _httpx_entry(), cache, host=_CloningHost({("uv", "pip"): fake_raw(stdout="idna==3.0\n")})
     )
     assert second.canonical_files == first.canonical_files == 2
 
@@ -348,11 +376,12 @@ def test_backfill_code_loc_refreshes_missing_count(
     sidecar = tmp_path / _SIDECAR
     cached = _prepared_stub(None)
     sidecar.write_text(cached.model_dump_json())
-    monkeypatch.setattr(
-        typebench.corpus.envman.shutil, "which", lambda _name: "/usr/bin/tokei", raising=True
-    )
-    monkeypatch.setattr(typebench.corpus.envman, "count_code_loc", lambda _files: 88, raising=True)
-    refreshed = _backfill_code_loc(cached, sidecar)
+
+    def fake_count_code_loc(_files: list[Path], *, host: object) -> int:
+        return 88
+
+    monkeypatch.setattr(typebench.corpus.envman, "count_code_loc", fake_count_code_loc)
+    refreshed = _backfill_code_loc(cached, sidecar, host=_FakeHost())
     assert refreshed.canonical_code_loc == 88
     assert PreparedProject.model_validate_json(sidecar.read_text()).canonical_code_loc == 88
 
@@ -361,7 +390,7 @@ def test_backfill_code_loc_noop_when_already_present(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Already-populated count is left untouched and tokei is never invoked.
-    def _boom(_files: object) -> int:
+    def _boom(_files: object, *, host: object) -> int:
         raise AssertionError("count_code_loc must not be called when code_loc is present")
 
     monkeypatch.setattr(typebench.corpus.envman, "count_code_loc", _boom, raising=True)
@@ -369,7 +398,11 @@ def test_backfill_code_loc_noop_when_already_present(
     assert _backfill_code_loc(cached, tmp_path / _SIDECAR).canonical_code_loc == 500
 
 
-def test_backfill_code_loc_stays_none_without_tokei(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(typebench.corpus.envman.shutil, "which", lambda _name: None, raising=True)
+def test_backfill_code_loc_stays_none_without_tokei() -> None:
     cached = _prepared_stub(None)
-    assert _backfill_code_loc(cached, Path("/nonexistent/prepared.json")).canonical_code_loc is None
+    assert (
+        _backfill_code_loc(
+            cached, Path("/nonexistent/prepared.json"), host=SparseHost()
+        ).canonical_code_loc
+        is None
+    )
