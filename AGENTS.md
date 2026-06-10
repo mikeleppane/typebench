@@ -90,6 +90,16 @@ uv run pytest
 `uv sync` sets up the env. Pre-commit runs `ruff check --fix`, `ruff format`, and
 `pyrefly check` (strict) on commit; never bypass with `--no-verify`.
 
+## Generated verification artifacts
+
+`results/` and `preflight/` are local verification outputs by default. Do not
+commit files from these directories, and never `git add -f` them, unless the user
+explicitly asks to publish/version that specific result artifact.
+
+For verification runs, report the command, key metrics, and sanity checks in the
+assistant response. Commit rendered/source artifacts only when they are part of the
+requested change and not ignored by default.
+
 ## Conventions
 
 - **Python 3.12+.** Type-annotate every function, tests included.
@@ -153,6 +163,10 @@ calibration, env, collector, adapters, corpus, catalog, counting, envman, suite,
 preflight, renderer, cli, docs, skills, ci, ruff`. **No AI/assistant attribution** in commit
 messages or PR bodies — commits read as the author's own work. See the
 `git-conventions` skill.
+
+Before switching branches or merging, check `git status --short`. If unrelated
+local edits exist, stash only those paths with a descriptive message, perform the
+branch operation, then pop the stash and confirm the restored status.
 
 ## Executing tasks with codex
 
