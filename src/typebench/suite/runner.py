@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from typebench.adapters.base import CheckerHandle
 from typebench.contracts.config import NormalizedConfig, config_hash
 from typebench.contracts.models import (
     FailurePhase,
@@ -88,16 +89,11 @@ def shard(cells: list[SuiteCell], index: int, total: int) -> list[SuiteCell]:
     return [cell for position, cell in enumerate(cells) if position % total == index]
 
 
-def _tool_of(checker_id: str) -> str:
-    """The bare tool name out of a checker_id (`mypy@1.18.2+rc` -> `mypy`)."""
-    return checker_id.split("@", 1)[0]
-
-
 def _excluded_record(
     cell: SuiteCell,
+    checker: CheckerHandle,
     prepared: PreparedProject | None,
     entry: CorpusProject | None,
-    install_source: str,
     detail: str,
     calibration: CalibrationStats | None,
     policy: Policy,
@@ -117,7 +113,7 @@ def _excluded_record(
         else None
     )
     return RunResult(
-        tool=_tool_of(cell.checker_id),
+        tool=checker.tool,
         tool_version="unknown",
         checker_id=cell.checker_id,
         policy=policy,
@@ -131,7 +127,7 @@ def _excluded_record(
         project_sha=prepared.sha if prepared else (entry.sha if entry else None),
         lock_hash=prepared.lock_hash if prepared else None,
         config_hash=ch,
-        tool_install_source=install_source,
+        tool_install_source=checker.install_source,
         canonical_files=prepared.canonical_files if prepared else None,
         canonical_loc=prepared.canonical_loc if prepared else None,
         canonical_code_loc=prepared.canonical_code_loc if prepared else None,
@@ -238,22 +234,21 @@ def _resolve_runtimes(
     cache_root: Path,
     adapter_factory: Callable[[str], Adapter],
     prepare_checker_fn: Callable[..., CheckerRuntime],
-) -> tuple[list[CheckerRuntime], list[tuple[CheckerSpec, str]]]:
+) -> tuple[list[CheckerHandle], list[tuple[CheckerSpec, str]]]:
     """Resolve each spec to a runtime up front. A per-spec failure becomes a visible
     record (returned as a failed-spec), never an abort — one bad pin must not drop
     every other checker's results."""
-    runtimes: list[CheckerRuntime] = []
+    handles: list[CheckerHandle] = []
     failed: list[tuple[CheckerSpec, str]] = []
     for spec in checkers:
+        adapter = adapter_factory(spec.tool)
         try:
-            runtime = prepare_checker_fn(
-                spec, cache_root, install_source=adapter_factory(spec.tool).install_source
-            )
+            runtime = prepare_checker_fn(spec, cache_root, install_source=adapter.install_source)
         except Exception as exc:  # resolve failures become visible records, never abort
             failed.append((spec, f"checker resolve failed: {exc}"))
         else:
-            runtimes.append(runtime)
-    return runtimes, failed
+            handles.append(CheckerHandle(spec=spec, adapter=adapter, runtime=runtime))
+    return handles, failed
 
 
 def _failed_checker_records(
@@ -329,11 +324,11 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
 
     all_projects = projects if projects is not None else load_projects(suite_path)
     suite_version = load_version(suite_path)
-    runtimes, failed_specs = _resolve_runtimes(
+    handles, failed_specs = _resolve_runtimes(
         checkers, cache_root, adapter_factory, prepare_checker_fn
     )
-    checker_ids = [rt.checker_id for rt in runtimes]
-    runtime_by_id = {rt.checker_id: rt for rt in runtimes}
+    checker_ids = [handle.checker_id for handle in handles]
+    handle_by_id = {handle.checker_id: handle for handle in handles}
     cells = shard(
         build_matrix(all_projects, checker_ids, thread_modes, cores), shard_index, shard_total
     )
@@ -365,9 +360,9 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
     )
     for project, project_cells in by_project.items():
         entry = lookup_entry(suite_path, project)
-        project_tools = sorted({_tool_of(c.checker_id) for c in project_cells})
-        adapters = [adapter_factory(name) for name in project_tools]
-        adapter_by_name = {a.name: a for a in adapters}
+        project_handles = list(
+            {cell.checker_id: handle_by_id[cell.checker_id] for cell in project_cells}.values()
+        )
 
         try:
             prepared = prepare(entry, cache_root)
@@ -375,15 +370,13 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
         # kind must still emit records for the project's cells, never abort the suite.
         except Exception as exc:
             for cell in project_cells:
-                src = getattr(
-                    adapter_by_name.get(_tool_of(cell.checker_id)), "install_source", "unknown"
-                )
+                handle = handle_by_id[cell.checker_id]
                 results.append(
                     _excluded_record(
                         cell,
+                        handle,
                         None,
                         entry,
-                        src,
                         f"prepare failed: {exc}",
                         calibration,
                         policy,
@@ -396,13 +389,13 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
             prewarm_sources(prepared)
         except Exception as exc:
             for cell in project_cells:
-                src = adapter_by_name[_tool_of(cell.checker_id)].install_source
+                handle = handle_by_id[cell.checker_id]
                 results.append(
                     _excluded_record(
                         cell,
+                        handle,
                         prepared,
                         entry,
-                        src,
                         f"source pre-warm failed: {exc}",
                         calibration,
                         policy,
@@ -413,11 +406,9 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
 
         report = preflight(
             prepared,
-            adapters,
+            project_handles,
             timeout=timeout,
-            specs={spec.tool: spec for spec in checkers},
             policy=policy,
-            binaries={rt.tool: rt.binary for rt in runtimes},
         )
         if not report.ready:
             detail = "; ".join(
@@ -426,13 +417,13 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
                 if not (t.result_class.is_measured_success and t.scope_ok)
             )
             for cell in project_cells:
-                src = adapter_by_name[_tool_of(cell.checker_id)].install_source
+                handle = handle_by_id[cell.checker_id]
                 results.append(
                     _excluded_record(
                         cell,
+                        handle,
                         prepared,
                         entry,
-                        src,
                         detail or "preflight not ready",
                         calibration,
                         policy,
@@ -441,7 +432,7 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
                 )
             continue
 
-        over_by_tool = {t.tool: t.over_reports for t in report.tools}
+        over_by_checker = {t.checker_id: t.over_reports for t in report.tools}
         ch = config_hash(
             entry.src_roots,
             entry.effective_excludes(),
@@ -449,8 +440,7 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
             entry.python_platform,
         )
         for cell in project_cells:
-            runtime = runtime_by_id[cell.checker_id]
-            adapter = adapter_by_name[runtime.tool]
+            handle = handle_by_id[cell.checker_id]
             cell_cores = cell.cores if cell.cores is not None else 1
             config = _suite_config(prepared, cell_cores)
             manifest = RunManifest(
@@ -460,12 +450,12 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
                 canonical_files=prepared.canonical_files,
                 canonical_loc=prepared.canonical_loc,
                 canonical_code_loc=prepared.canonical_code_loc,
-                tool_install_source=runtime.install_source,
-                over_reports=over_by_tool.get(_tool_of(cell.checker_id), False),
+                tool_install_source=handle.install_source,
+                over_reports=over_by_checker.get(handle.checker_id, False),
             )
             results.append(
                 run_one(
-                    adapter,
+                    handle.adapter,
                     project=project,
                     config=config,
                     thread_mode=cell.thread_mode,
@@ -476,8 +466,8 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
                     measure_enabled=measure_enabled,
                     calibration=calibration,
                     manifest=manifest,
-                    binary=runtime.binary,
-                    checker_id=cell.checker_id,
+                    binary=handle.binary,
+                    checker_id=handle.checker_id,
                     policy=policy,
                     headline_eligible=policy is Policy.STANDARD,
                 )
@@ -485,13 +475,13 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
 
     resolved_checkers = tuple(
         ResolvedChecker(
-            checker_id=rt.checker_id,
-            tool=rt.tool,
-            version=rt.version,
-            lock_hash=rt.lock_hash,
-            install_source=rt.install_source,
+            checker_id=handle.checker_id,
+            tool=handle.tool,
+            version=handle.runtime.version if handle.runtime is not None else "unknown",
+            lock_hash=handle.runtime.lock_hash if handle.runtime is not None else "",
+            install_source=handle.install_source,
         )
-        for rt in runtimes
+        for handle in handles
     )
     return ResultsEnvelope(
         suite_version=suite_version,

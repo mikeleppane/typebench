@@ -9,20 +9,18 @@ import shutil
 import socket
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 
+from typebench.adapters.base import CheckerHandle
 from typebench.adapters.mypy import MypyAdapter
 from typebench.adapters.pyrefly import PyreflyAdapter
 from typebench.adapters.pyright import PyrightAdapter
 from typebench.adapters.ty import TyAdapter
+from typebench.contracts.identity import CheckerSpec
 from typebench.corpus.catalog import CorpusProject, load_suite
 from typebench.corpus.envman import prepare_project
 from typebench.suite.preflight import preflight_project
-
-if TYPE_CHECKING:
-    from typebench.adapters.base import Adapter
 
 _SUITE = Path(__file__).resolve().parents[2] / "corpus" / "suite.toml"
 _FIRST_PARTY_SCOPED = {"pyright", "ty", "pyrefly"}
@@ -85,11 +83,15 @@ def test_httpx_preflight_records_per_tool_divergence(tmp_path: Path) -> None:
         (TyAdapter(), "ty"),
         (PyreflyAdapter(), "pyrefly"),
     )
-    adapters: list[Adapter] = [adapter for adapter, name in pairs if shutil.which(name) is not None]
-    if not adapters:
+    checkers = [
+        CheckerHandle(spec=CheckerSpec(tool=name), adapter=adapter)
+        for adapter, name in pairs
+        if shutil.which(name) is not None
+    ]
+    if not checkers:
         pytest.skip("no real checkers installed")
 
-    report = preflight_project(prepared, adapters, timeout=300)
+    report = preflight_project(prepared, checkers, timeout=300)
 
     assert report.ready, [
         (tool.tool, tool.result_class.value, tool.scope_ok) for tool in report.tools

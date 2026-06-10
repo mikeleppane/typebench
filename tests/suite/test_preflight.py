@@ -5,14 +5,15 @@ from typing import override
 import pytest
 from pydantic import ValidationError
 
-from typebench.adapters.base import Adapter, ParallelismCap
+from typebench._internal.test_fakes import FakeHost, fake_raw
+from typebench.adapters.base import Adapter, CheckerHandle, ParallelismCap
 from typebench.adapters.mypy import MypyAdapter
 from typebench.adapters.pyrefly import PyreflyAdapter
 from typebench.adapters.pyright import PyrightAdapter
 from typebench.adapters.stub import StubAdapter
 from typebench.adapters.ty import TyAdapter
 from typebench.contracts.config import DEFAULT_EXCLUDES, NormalizedConfig
-from typebench.contracts.identity import CheckerSpec
+from typebench.contracts.identity import CheckerRuntime, CheckerSpec
 from typebench.contracts.models import (
     PreflightReport,
     PreparedProject,
@@ -21,8 +22,8 @@ from typebench.contracts.models import (
     ToolPreflight,
 )
 from typebench.contracts.policy import Policy
+from typebench.contracts.proc import RawRun
 from typebench.corpus.counting import count_first_party
-from typebench.engine.wrapper import RawRun
 from typebench.suite.preflight import preflight_project
 
 
@@ -183,22 +184,6 @@ class _BrokenCommandAdapter(_CannedAdapter):
         raise OSError(msg)
 
 
-def _fake_probe(argv: list[str], timeout: float, env: dict[str, str] | None = None) -> RawRun:
-    return RawRun(exit_code=0, signal=None, timed_out=False, oom=False, stdout="", stderr="")
-
-
-def _failed_probe(argv: list[str], timeout: float, env: dict[str, str] | None = None) -> RawRun:
-    return RawRun(
-        exit_code=-1,
-        signal=None,
-        timed_out=False,
-        oom=False,
-        stdout="",
-        stderr="ModuleNotFoundError: httpcore",
-        env_error=True,
-    )
-
-
 def _prepared_at(src: Path) -> PreparedProject:
     return PreparedProject(
         name="demo",
@@ -217,14 +202,33 @@ def _prepared_at(src: Path) -> PreparedProject:
     )
 
 
+def _handle(
+    adapter: Adapter, *, version: str | None = None, binary: str | None = None
+) -> CheckerHandle:
+    spec = CheckerSpec(tool=adapter.name, version=version)
+    runtime = (
+        CheckerRuntime(
+            checker_id=spec.checker_id(),
+            tool=adapter.name,
+            binary=binary,
+            version=version or "1.0",
+            lock_hash="L",
+            install_source=adapter.install_source,
+        )
+        if binary is not None
+        else None
+    )
+    return CheckerHandle(spec=spec, adapter=adapter, runtime=runtime)
+
+
 def test_preflight_records_divergence_and_ready(tmp_path: Path) -> None:
     prepared = _prepared_at(tmp_path)
-    adapters: list[Adapter] = [
-        _CannedAdapter("mypy", ResultClass.DIAGNOSTICS, files=500),
-        _CannedAdapter("pyright", ResultClass.CLEAN, files=10),
-        _CannedAdapter("ty", ResultClass.CLEAN, files=None),
+    checkers = [
+        _handle(_CannedAdapter("mypy", ResultClass.DIAGNOSTICS, files=500)),
+        _handle(_CannedAdapter("pyright", ResultClass.CLEAN, files=10)),
+        _handle(_CannedAdapter("ty", ResultClass.CLEAN, files=None)),
     ]
-    report = preflight_project(prepared, adapters, timeout=30, probe=_fake_probe)
+    report = preflight_project(prepared, checkers, timeout=30, host=FakeHost())
     assert report.ready is True
     assert report.throughput_review_required is True
     by = {tool.tool: tool for tool in report.tools}
@@ -240,11 +244,11 @@ def test_preflight_records_divergence_and_ready(tmp_path: Path) -> None:
 
 def test_preflight_mis_scope_blocks_ready(tmp_path: Path) -> None:
     prepared = _prepared_at(tmp_path)
-    adapters: list[Adapter] = [
-        _CannedAdapter("pyright", ResultClass.CLEAN, files=10),
-        _CannedAdapter("ty", ResultClass.CLEAN, files=5),
+    checkers = [
+        _handle(_CannedAdapter("pyright", ResultClass.CLEAN, files=10)),
+        _handle(_CannedAdapter("ty", ResultClass.CLEAN, files=5)),
     ]
-    report = preflight_project(prepared, adapters, timeout=30, probe=_fake_probe)
+    report = preflight_project(prepared, checkers, timeout=30, host=FakeHost())
     assert report.ready is False
     by = {tool.tool: tool for tool in report.tools}
     assert by["ty"].scope_ok is False
@@ -254,11 +258,14 @@ def test_preflight_mis_scope_blocks_ready(tmp_path: Path) -> None:
 
 def test_preflight_not_ready_when_a_tool_fails(tmp_path: Path) -> None:
     prepared = _prepared_at(tmp_path)
-    adapters: list[Adapter] = [
-        _CannedAdapter("pyright", ResultClass.CLEAN, files=10),
-        _CannedAdapter("ty", ResultClass.FAILED_ENV, files=None),
+    checkers = [
+        _handle(_CannedAdapter("pyright", ResultClass.CLEAN, files=10)),
+        _handle(_CannedAdapter("ty", ResultClass.FAILED_ENV, files=None)),
     ]
-    report = preflight_project(prepared, adapters, timeout=30, probe=_failed_probe)
+    host = FakeHost(
+        default=fake_raw(stderr="ModuleNotFoundError: httpcore", env_error=True, exit_code=-1)
+    )
+    report = preflight_project(prepared, checkers, timeout=30, host=host)
     assert report.ready is False
     by = {tool.tool: tool for tool in report.tools}
     assert by["ty"].result_class is ResultClass.FAILED_ENV
@@ -268,8 +275,8 @@ def test_preflight_not_ready_when_a_tool_fails(tmp_path: Path) -> None:
 
 def test_preflight_records_command_construction_failure(tmp_path: Path) -> None:
     prepared = _prepared_at(tmp_path)
-    adapters: list[Adapter] = [_BrokenCommandAdapter("pyright", ResultClass.CLEAN, files=10)]
-    report = preflight_project(prepared, adapters, timeout=30, probe=_fake_probe)
+    checkers = [_handle(_BrokenCommandAdapter("pyright", ResultClass.CLEAN, files=10))]
+    report = preflight_project(prepared, checkers, timeout=30, host=FakeHost())
     assert report.ready is False
     tool_preflight = report.tools[0]
     assert tool_preflight.result_class is ResultClass.FAILED_ENV
@@ -279,24 +286,18 @@ def test_preflight_records_command_construction_failure(tmp_path: Path) -> None:
 
 def test_preflight_records_checker_id_policy_and_uses_binary(tmp_path: Path) -> None:
     prepared = _prepared_at(tmp_path)
-    seen_argv: list[str] = []
-
-    def fake_probe(argv: list[str], timeout: float, env: dict[str, str] | None = None) -> RawRun:
-        seen_argv.extend(argv)
-        return RawRun(exit_code=0, signal=None, timed_out=False, oom=False, stdout="", stderr="")
+    host = FakeHost()
 
     report = preflight_project(
         prepared,
-        [StubAdapter()],
+        [_handle(StubAdapter(), version="1.0", binary="/b/stub")],
         timeout=1.0,
-        probe=fake_probe,
-        specs={"stub": CheckerSpec(tool="stub", version="1.0")},
         policy=Policy.STANDARD,
-        binaries={"stub": "/b/stub"},
+        host=host,
     )
 
     tool_preflight = report.tools[0]
-    assert seen_argv[0] == "/b/stub"
+    assert host.calls[0].argv[0] == "/b/stub"
     assert tool_preflight.checker_id == "stub@1.0"
     assert tool_preflight.policy is Policy.STANDARD
 
@@ -325,10 +326,10 @@ def test_preflight_real_tools_on_clean_fixture(tmp_path: Path, fixtures_dir: Pat
         (TyAdapter(), "ty"),
         (PyreflyAdapter(), "pyrefly"),
     )
-    adapters: list[Adapter] = [adapter for adapter, name in pairs if shutil.which(name) is not None]
-    if not adapters:
+    checkers = [_handle(adapter) for adapter, name in pairs if shutil.which(name) is not None]
+    if not checkers:
         pytest.skip("no real checkers installed")
-    report = preflight_project(prepared, adapters, timeout=120)
+    report = preflight_project(prepared, checkers, timeout=120)
     assert report.ready is True
     assert all(tool.result_class.is_measured_success for tool in report.tools)
     assert all(tool.scope_ok for tool in report.tools)

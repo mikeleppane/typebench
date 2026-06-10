@@ -8,23 +8,17 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from typebench.contracts.config import NormalizedConfig
 from typebench.contracts.models import PreflightReport, ResultClass, ThreadMode, ToolPreflight
 from typebench.contracts.policy import Policy
-from typebench.engine.wrapper import RawRun, run_command
+from typebench.engine.proc import SYSTEM_HOST
 
 if TYPE_CHECKING:
-    from typebench.adapters.base import Adapter
-    from typebench.contracts.identity import CheckerSpec
+    from typebench.adapters.base import CheckerHandle
     from typebench.contracts.models import PreparedProject
-
-
-class Probe(Protocol):
-    def __call__(self, argv: list[str], timeout: float, env: dict[str, str] | None = ...) -> RawRun:
-        """Run a preflight probe command."""
-        ...
+    from typebench.contracts.proc import ProcessHost
 
 
 def _config_for(prepared: PreparedProject) -> NormalizedConfig:
@@ -38,32 +32,31 @@ def _config_for(prepared: PreparedProject) -> NormalizedConfig:
 
 
 def _probe_one(
-    adapter: Adapter,
+    checker: CheckerHandle,
     prepared: PreparedProject,
     config: NormalizedConfig,
     timeout: float,
-    probe: Probe,
-    spec: CheckerSpec | None,
     policy: Policy,
-    binary: str | None,
+    host: ProcessHost,
 ) -> ToolPreflight:
     """Probe one adapter and assemble its ToolPreflight."""
+    adapter = checker.adapter
     with tempfile.TemporaryDirectory(prefix="typebench-preflight-") as tmp:
         try:
             argv, env = adapter.command(
-                prepared.name, config, ThreadMode.CONSTRAINED, Path(tmp), binary=binary
+                prepared.name, config, ThreadMode.CONSTRAINED, Path(tmp), binary=checker.binary
             )
         except (OSError, ValueError) as exc:
             return ToolPreflight(
                 tool=adapter.name,
-                checker_id=spec.checker_id() if spec is not None else None,
+                checker_id=checker.checker_id,
                 policy=policy,
-                version=adapter.version(binary),
+                version=adapter.version(checker.binary),
                 result_class=ResultClass.FAILED_ENV,
                 real_exit_code=-1,
                 error_detail=f"command construction failed: {exc}".strip()[-500:],
             )
-        raw = probe(argv, timeout, env)
+        raw = host.run(argv, timeout=timeout, env=env)
 
     result_class = adapter.classify(raw)
     self_files: int | None = None
@@ -82,9 +75,9 @@ def _probe_one(
 
     return ToolPreflight(
         tool=adapter.name,
-        checker_id=spec.checker_id() if spec is not None else None,
+        checker_id=checker.checker_id,
         policy=policy,
-        version=adapter.version(binary),
+        version=adapter.version(checker.binary),
         result_class=result_class,
         real_exit_code=raw.exit_code,
         signal=raw.signal,
@@ -100,30 +93,24 @@ def _probe_one(
 
 def preflight_project(
     prepared: PreparedProject,
-    adapters: list[Adapter],
+    checkers: list[CheckerHandle],
     *,
     timeout: float,
-    probe: Probe = run_command,
-    specs: dict[str, CheckerSpec] | None = None,
     policy: Policy = Policy.STANDARD,
-    binaries: dict[str, str] | None = None,
+    host: ProcessHost = SYSTEM_HOST,
 ) -> PreflightReport:
     """Probe each adapter once on the prepared project."""
     config = _config_for(prepared)
-    spec_by_tool = specs or {}
-    binary_by_tool = binaries or {}
     tools = [
         _probe_one(
-            adapter,
+            checker,
             prepared,
             config,
             timeout,
-            probe,
-            spec_by_tool.get(adapter.name),
             policy,
-            binary_by_tool.get(adapter.name),
+            host,
         )
-        for adapter in adapters
+        for checker in checkers
     ]
     return PreflightReport(
         project=prepared.name,

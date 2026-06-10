@@ -15,11 +15,14 @@ from typing import TYPE_CHECKING, Annotated
 import typer
 from pydantic import ValidationError
 
-from typebench.adapters.mypy import MypyAdapter
-from typebench.adapters.pyrefly import PyreflyAdapter
-from typebench.adapters.pyright import PyrightAdapter
-from typebench.adapters.stub import StubAdapter
-from typebench.adapters.ty import TyAdapter
+from typebench.adapters.base import CheckerHandle
+from typebench.adapters.registry import (
+    UnknownToolError,
+    create_adapter,
+    default_checker_specs,
+    default_tools,
+    validate_specs,
+)
 from typebench.contracts.config import DEFAULT_EXCLUDES, NormalizedConfig, config_hash
 from typebench.contracts.configfile import discover_config, load_config, merge_cli, resolve_corpus
 from typebench.contracts.identity import CheckerSpec
@@ -39,9 +42,6 @@ from typebench.suite.runner import run_suite
 from typebench.suite.selection import SelectionError, resolve_selection
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from typebench.adapters.base import Adapter
     from typebench.contracts.models import PreparedProject
     from typebench.corpus.catalog import CorpusProject
 
@@ -58,7 +58,7 @@ app.add_typer(config_app, name="config")
 DEFAULT_CACHE_ROOT = Path("typebench-cache")
 _README_BEGIN = "<!-- TYPEBENCH:BEGIN -->"
 _README_END = "<!-- TYPEBENCH:END -->"
-_DEFAULT_TOOLS = ("mypy", "pyright", "pyrefly", "ty")
+_DEFAULT_TOOLS = default_tools()
 _MIN_COMPARE_CHECKERS = 2
 _INIT_FALLBACKS = {
     "mypy": "1.18.2",
@@ -99,15 +99,6 @@ runs = 10
 warmup = 3
 mem_runs = 3
 """
-
-# Adapter registry. All four real checkers + the controllable stub.
-_ADAPTERS: dict[str, Callable[[], Adapter]] = {
-    "mypy": MypyAdapter,
-    "pyright": PyrightAdapter,
-    "pyrefly": PyreflyAdapter,
-    "stub": StubAdapter,
-    "ty": TyAdapter,
-}
 
 
 def _available_cores() -> int:
@@ -190,10 +181,10 @@ def _version_token(text: str, fallback: str) -> str:
     return fallback
 
 
-def _probe_init_version(factory: Callable[[], Adapter], fallback: str) -> str:
+def _probe_init_version(tool: str, fallback: str) -> str:
     """Probe one adapter version for config init, falling back offline."""
     try:
-        return _version_token(factory().version(), fallback)
+        return _version_token(create_adapter(tool).version(), fallback)
     except Exception:
         return fallback
 
@@ -213,12 +204,7 @@ def config_init(
     path: Annotated[Path, typer.Argument(help="Where to write typebench.toml.")],
 ) -> None:
     """Scaffold a commented typebench.toml pinning the four standard checkers."""
-    versions = {
-        "mypy": _probe_init_version(MypyAdapter, _INIT_FALLBACKS["mypy"]),
-        "pyright": _probe_init_version(PyrightAdapter, _INIT_FALLBACKS["pyright"]),
-        "pyrefly": _probe_init_version(PyreflyAdapter, _INIT_FALLBACKS["pyrefly"]),
-        "ty": _probe_init_version(TyAdapter, _INIT_FALLBACKS["ty"]),
-    }
+    versions = {tool: _probe_init_version(tool, _INIT_FALLBACKS[tool]) for tool in _DEFAULT_TOOLS}
     path.write_text(_INIT_TEMPLATE.format(**versions), encoding="utf-8")
     typer.echo(str(path))
 
@@ -249,18 +235,6 @@ def config_show(
     else:
         selection = "(whole corpus)"
     typer.echo(f"selection: {selection}")
-
-
-def _adapters_for(tools: list[str]) -> list[Adapter]:
-    """Resolve tool names to adapter instances, erroring on an unknown tool."""
-    out: list[Adapter] = []
-    for name in tools:
-        factory = _ADAPTERS.get(name)
-        if factory is None:
-            typer.echo(f"Unknown tool: {name!r}. Known: {sorted(_ADAPTERS)}", err=True)
-            raise typer.Exit(code=2)
-        out.append(factory())
-    return out
 
 
 def _validate_timing(runs: int, warmup: int, timeout: float) -> None:
@@ -420,10 +394,11 @@ def run(  # noqa: PLR0912, PLR0913, PLR0915 — many user-facing CLI options + l
         typer.echo(f"thread_mode: {thread_mode.value}  cores: {cores}")
         raise typer.Exit(code=0)
 
-    factory = _ADAPTERS.get(tool)
-    if factory is None:
-        typer.echo(f"Unknown tool: {tool!r}. Known: {sorted(_ADAPTERS)}", err=True)
-        raise typer.Exit(code=2)
+    try:
+        adapter = create_adapter(tool)
+    except UnknownToolError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
 
     # Fail fast on a bad --output: a single run can take many minutes, so a
     # non-existent or read-only output directory must not surface only after all
@@ -486,7 +461,6 @@ def run(  # noqa: PLR0912, PLR0913, PLR0915 — many user-facing CLI options + l
         venv_python=os.path.abspath(venv) if venv is not None else None,  # noqa: PTH100 - need non-symlink-following abspath; Path.resolve() follows symlinks
         cores=cores,
     )
-    adapter = factory()
     manifest: RunManifest | None = None
     if prepared is not None and corpus_project is not None and entry is not None:
         manifest = RunManifest(
@@ -600,7 +574,11 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
     base = (
         _load_config_or_exit(config_path)
         if config_path is not None
-        else RunConfig(checkers=tuple(CheckerSpec(tool=t) for t in (tool or _DEFAULT_TOOLS)))
+        else RunConfig(
+            checkers=merge_tool_override(default_checker_specs(), tool)
+            if tool is not None
+            else default_checker_specs()
+        )
     )
     cores_sweep = _parse_cores_list(cores_list) if cores_list else None
     # Scalar --cores back-compat: --cores-list wins; then explicit scalar; else file/default sweep.
@@ -613,6 +591,11 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
         thread_modes=thread_mode,
         cores=effective_cores,
     )
+    try:
+        validate_specs(run_config.checkers)
+    except UnknownToolError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
     # strict posture is deferred this slice: adapters render STANDARD only, so a
     # strict run would stamp policy="strict" onto records that actually ran standard.
     # Reject it before any record is produced (covers --dry-run too).
@@ -621,9 +604,6 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
             f"policy '{run_config.policy.value}' is not supported yet (standard only).", err=True
         )
         raise typer.Exit(code=2)
-    # Reject an unknown checker tool up front (exit 2) rather than cloning projects and
-    # failing late inside run_suite — matches `compare`/`run` fail-fast behavior.
-    _adapters_for([spec.tool for spec in run_config.checkers])
     # Run-knob layering (defaults < file [run] < CLI): a CLI flag overrides; otherwise
     # the file/default value from RunConfig wins (RunConfig already range-validated them).
     effective_runs = runs if runs is not None else run_config.runs
@@ -664,7 +644,7 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
         projects=selected,
         run_config=run_config,
         lookup_entry=_lookup_project,
-        adapter_factory=lambda name: _adapters_for([name])[0],
+        adapter_factory=create_adapter,
         calibrate_fn=calibrate if calibrate_baseline else None,
     )
     output.write_text(envelope.model_dump_json(indent=2))
@@ -725,12 +705,16 @@ def compare(  # noqa: PLR0913 — distinct user-facing CLI options for one comma
     cores = _validate_cores(cores)
 
     try:
-        specs = merge_tool_override((), checker)
+        specs = merge_tool_override(default_checker_specs(), checker)
         buckets = tuple(SizeBucket(value) for value in (bucket or ()))
     except ValueError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
-    _adapters_for([spec.tool for spec in specs])  # reject an unknown checker tool up front (exit 2)
+    try:
+        validate_specs(specs)
+    except UnknownToolError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
     run_config = RunConfig(
         checkers=specs,
         projects=tuple(project or ()),
@@ -770,7 +754,7 @@ def compare(  # noqa: PLR0913 — distinct user-facing CLI options for one comma
         projects=selected,
         run_config=run_config,
         lookup_entry=_lookup_project,
-        adapter_factory=lambda name: _adapters_for([name])[0],
+        adapter_factory=create_adapter,
         calibrate_fn=calibrate if calibrate_baseline else None,
     )
     output.write_text(envelope.model_dump_json(indent=2), encoding="utf-8")
@@ -832,8 +816,14 @@ def preflight(
 ) -> None:
     """Prepare a corpus project and probe each tool once."""
     entry = _lookup_project(corpus, project)
-    tools = tool or ["mypy", "pyright", "ty", "pyrefly"]
-    adapters = _adapters_for(tools)
+    tools = tool or list(_DEFAULT_TOOLS)
+    specs = tuple(CheckerSpec(tool=name) for name in tools)
+    try:
+        validate_specs(specs)
+    except UnknownToolError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    checkers = tuple(CheckerHandle(spec=spec, adapter=create_adapter(spec.tool)) for spec in specs)
     out_dir = output.parent
     if not out_dir.exists() or not os.access(out_dir, os.W_OK):
         typer.echo(f"Output directory not writable: {out_dir}", err=True)
@@ -843,7 +833,7 @@ def preflight(
     except PrepareError as exc:
         typer.echo(f"preflight: prepare failed for {project!r}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
-    report = preflight_project(prepared, adapters, timeout=timeout)
+    report = preflight_project(prepared, list(checkers), timeout=timeout)
     output.write_text(report.model_dump_json(indent=2))
     status = "ready" if report.ready else "NOT READY"
     typer.echo(f"preflight {project} -> {status} ({report.canonical_files} files) -> {output}")

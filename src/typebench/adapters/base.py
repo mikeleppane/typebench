@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from typebench.contracts.config import NormalizedConfig
+    from typebench.contracts.identity import CheckerRuntime, CheckerSpec
     from typebench.contracts.models import ResultClass, ThreadMode
     from typebench.contracts.proc import RawRun
 
@@ -30,6 +31,33 @@ class ParallelismCap:
 
     mechanism: str
     hard_cap: bool
+
+
+@dataclass(frozen=True)
+class CheckerHandle:
+    """A declared checker spec bundled with its adapter and optional runtime."""
+
+    spec: CheckerSpec
+    adapter: Adapter
+    runtime: CheckerRuntime | None = None
+
+    @property
+    def tool(self) -> str:
+        return self.spec.tool
+
+    @property
+    def checker_id(self) -> str:
+        return self.runtime.checker_id if self.runtime is not None else self.spec.checker_id()
+
+    @property
+    def binary(self) -> str | None:
+        return self.runtime.binary if self.runtime is not None else None
+
+    @property
+    def install_source(self) -> str:
+        return (
+            self.runtime.install_source if self.runtime is not None else self.adapter.install_source
+        )
 
 
 @runtime_checkable
