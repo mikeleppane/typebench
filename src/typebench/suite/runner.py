@@ -150,7 +150,8 @@ def _checker_resolve_failed_record(
         headline_eligible=False,
         project=cell.project,
         thread_mode=cell.thread_mode,
-        cores=cell.cores,
+        # cores stays None: no command ran, no affinity was enforced — the same
+        # honesty contract as _excluded_record (never claim a pin that did not run).
         result_class=ResultClass.FAILED_ENV,
         failure_phase=FailurePhase.PROBE,
         real_exit_code=-1,

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pathlib  # noqa: TC003 - pydantic resolves postponed annotations at runtime.
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from typebench.contracts.identity import CheckerSpec, Source
 from typebench.contracts.policy import Policy
@@ -34,6 +34,21 @@ class RunConfig(BaseModel):
     runs: int = 10
     warmup: int = 3
     mem_runs: int = 3
+
+    @model_validator(mode="after")
+    def _validate_ranges(self) -> RunConfig:
+        """Reject invalid knobs at the substrate so a config file cannot smuggle in
+        what the CLI's own clamps reject (e.g. `tracks.cores = [0]` -> `--threads 0`)."""
+        if not self.cores or any(c < 1 for c in self.cores):
+            msg = f"cores must be a non-empty list of values >= 1, got {list(self.cores)}"
+            raise ValueError(msg)
+        if self.runs < 1:
+            raise ValueError(f"runs must be >= 1, got {self.runs}")
+        if self.warmup < 0:
+            raise ValueError(f"warmup must be >= 0, got {self.warmup}")
+        if self.mem_runs < 1:
+            raise ValueError(f"mem_runs must be >= 1, got {self.mem_runs}")
+        return self
 
 
 def _parse_spec(token: str) -> CheckerSpec:

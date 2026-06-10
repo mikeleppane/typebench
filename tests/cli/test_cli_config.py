@@ -27,6 +27,9 @@ class SuiteCapture:
     projects: list[str]
     policy: Policy
     run_config: RunConfig | None
+    runs: int
+    warmup: int
+    mem_runs: int
 
 
 class RunSuiteKwargs(TypedDict):
@@ -85,6 +88,9 @@ def _capture_run_suite(captures: list[SuiteCapture]) -> Callable[..., ResultsEnv
                 projects=kwargs["projects"],
                 policy=kwargs["policy"],
                 run_config=kwargs["run_config"],
+                runs=kwargs["runs"],
+                warmup=kwargs["warmup"],
+                mem_runs=kwargs["mem_runs"],
             )
         )
         return ResultsEnvelope(suite_version="v", generated_at=kwargs["generated_at"], runs=[])
@@ -215,3 +221,58 @@ def test_run_config_without_dry_run_is_preview_only(tmp_path: Path) -> None:
 
     assert result.exit_code == 2
     assert "run -c is preview-only" in result.output
+
+
+def test_suite_rejects_strict_policy_before_running(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    def boom() -> ResultsEnvelope:
+        raise AssertionError("run_suite must not run under an unsupported policy")
+
+    monkeypatch.setattr(cli, "run_suite", boom)
+    suite = tmp_path / "suite.toml"
+    suite.write_text(_suite_toml(), encoding="utf-8")
+    config = tmp_path / "typebench.toml"
+    config.write_text(
+        'policy = "strict"\n[[checker]]\ntool = "stub"\nversion = "0"\n', encoding="utf-8"
+    )
+    out = tmp_path / "r.json"
+
+    result = _invoke(["suite", "--corpus", str(suite), "--output", str(out), "-c", str(config)])
+
+    assert result.exit_code == 2
+    assert "strict" in result.output
+    assert not out.exists()
+
+
+def test_suite_reads_run_knobs_from_config_when_cli_absent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    suite = tmp_path / "suite.toml"
+    suite.write_text(_suite_toml(), encoding="utf-8")
+    config = tmp_path / "typebench.toml"
+    config.write_text(
+        '[[checker]]\ntool = "stub"\nversion = "0"\n[run]\nruns = 5\nwarmup = 2\nmem_runs = 1\n',
+        encoding="utf-8",
+    )
+    out = tmp_path / "r.json"
+    captures: list[SuiteCapture] = []
+    monkeypatch.setattr(cli, "run_suite", _capture_run_suite(captures))
+
+    result = _invoke(
+        [
+            "suite",
+            "--corpus",
+            str(suite),
+            "--output",
+            str(out),
+            "-c",
+            str(config),
+            "--no-calibrate",
+            "--no-measure",
+        ]
+    )
+
+    assert result.exit_code == 0, result.output
+    # The file's [run] layer wins when the CLI flag is absent (defaults < file < CLI).
+    assert (captures[0].runs, captures[0].warmup, captures[0].mem_runs) == (5, 2, 1)

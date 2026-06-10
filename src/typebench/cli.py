@@ -555,9 +555,15 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
         bool, typer.Option("--dry-run", help="Print the effective plan; execute nothing.")
     ] = False,
     shard: Annotated[str, typer.Option(help="Shard selector 'index/total' (e.g. 0/4).")] = "0/1",
-    runs: Annotated[int, typer.Option(help="hyperfine timed runs.")] = 10,
-    warmup: Annotated[int, typer.Option(help="hyperfine warmup runs.")] = 3,
-    mem_runs: Annotated[int, typer.Option(help="Resource-pass repeats (>=1; >=3 official).")] = 3,
+    runs: Annotated[
+        int | None, typer.Option(help="hyperfine timed runs (else config [run].runs).")
+    ] = None,
+    warmup: Annotated[
+        int | None, typer.Option(help="hyperfine warmup runs (else config [run].warmup).")
+    ] = None,
+    mem_runs: Annotated[
+        int | None, typer.Option(help="Resource-pass repeats (>=1; else config [run].mem_runs).")
+    ] = None,
     measure: Annotated[bool, typer.Option(help="Run the cgroup memory/CPU pass.")] = True,
     calibrate_baseline: Annotated[
         bool, typer.Option("--calibrate/--no-calibrate", help="Time the calibration workload.")
@@ -584,10 +590,9 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
     if not out_dir.exists() or not os.access(out_dir, os.W_OK):
         typer.echo(f"Output directory not writable: {out_dir}", err=True)
         raise typer.Exit(code=2)
-    if mem_runs < 1 or calib_runs < 1:
-        typer.echo("--mem-runs and --calib-runs must be >= 1.", err=True)
+    if calib_runs < 1:
+        typer.echo("--calib-runs must be >= 1.", err=True)
         raise typer.Exit(code=2)
-    _validate_timing(runs, warmup, timeout)
 
     config_path = config or discover_config(Path.cwd())
     base = (
@@ -606,6 +611,23 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
         thread_modes=thread_mode,
         cores=effective_cores,
     )
+    # strict posture is deferred this slice: adapters render STANDARD only, so a
+    # strict run would stamp policy="strict" onto records that actually ran standard.
+    # Reject it before any record is produced (covers --dry-run too).
+    if run_config.policy is not Policy.STANDARD:
+        typer.echo(
+            f"policy '{run_config.policy.value}' is not supported yet (standard only).", err=True
+        )
+        raise typer.Exit(code=2)
+    # Run-knob layering (defaults < file [run] < CLI): a CLI flag overrides; otherwise
+    # the file/default value from RunConfig wins (RunConfig already range-validated them).
+    effective_runs = runs if runs is not None else run_config.runs
+    effective_warmup = warmup if warmup is not None else run_config.warmup
+    effective_mem_runs = mem_runs if mem_runs is not None else run_config.mem_runs
+    if effective_mem_runs < 1:
+        typer.echo("--mem-runs must be >= 1.", err=True)
+        raise typer.Exit(code=2)
+    _validate_timing(effective_runs, effective_warmup, timeout)
     effective_corpus = resolve_corpus(run_config, corpus, Path("corpus/suite.toml"))
     corpus_entries = _load_suite_or_exit(effective_corpus)
     try:
@@ -625,10 +647,10 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
         policy=run_config.policy,
         thread_modes=list(run_config.thread_modes),
         generated_at=datetime.now(UTC).isoformat(),
-        runs=runs,
-        warmup=warmup,
+        runs=effective_runs,
+        warmup=effective_warmup,
         timeout=timeout,
-        mem_runs=mem_runs,
+        mem_runs=effective_mem_runs,
         measure_enabled=measure,
         calib_runs=calib_runs,
         cores=run_config.cores,

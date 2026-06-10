@@ -357,4 +357,5 @@ def test_run_suite_checker_resolve_failure_emits_failed_records(
     assert failed[0].checker_id == "pyright@1.1.0"
     assert failed[0].failure_phase is FailurePhase.PROBE
     assert failed[0].headline_eligible is False
+    assert failed[0].cores is None  # no command ran -> never claim a core pin
     assert "checker resolve failed: no matching wheel" in (failed[0].error_detail or "")

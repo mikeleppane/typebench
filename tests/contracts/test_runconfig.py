@@ -7,6 +7,23 @@ from typebench.contracts.runconfig import RunConfig, merge_tool_override
 from typebench.contracts.taxonomy import ThreadMode
 
 
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"cores": (0,)},  # a config `tracks.cores = [0]` would render `--threads 0`
+        {"cores": (1, 0)},
+        {"cores": ()},  # empty sweep produces no constrained cells
+        {"runs": 0},
+        {"warmup": -1},
+        {"mem_runs": 0},
+    ],
+)
+def test_runconfig_rejects_out_of_range_knobs(overrides: dict[str, object]) -> None:
+    payload: dict[str, object] = {"checkers": (CheckerSpec(tool="mypy"),), **overrides}
+    with pytest.raises(ValidationError):
+        RunConfig.model_validate(payload)
+
+
 def test_runconfig_defaults_match_current_cli() -> None:
     cfg = RunConfig(checkers=(CheckerSpec(tool="mypy"),))
     # Both tracks by default (matches the current CLI suite default).
