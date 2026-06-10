@@ -13,6 +13,7 @@ import pathlib  # noqa: TC003 - pydantic resolves postponed annotations at runti
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from typebench.contracts.config import MeasurementPlan
 from typebench.contracts.identity import CheckerSpec, Source
 from typebench.contracts.policy import Policy
 from typebench.contracts.taxonomy import SizeBucket, ThreadMode
@@ -33,7 +34,11 @@ class RunConfig(BaseModel):
     cores: tuple[int, ...] = (1,)
     runs: int = 10
     warmup: int = 3
+    timeout: float = 900.0
     mem_runs: int = 3
+    measure: bool = True
+    calibrate: bool = True
+    calib_runs: int = 5
 
     @model_validator(mode="after")
     def _validate_ranges(self) -> RunConfig:
@@ -46,9 +51,23 @@ class RunConfig(BaseModel):
             raise ValueError(f"runs must be >= 1, got {self.runs}")
         if self.warmup < 0:
             raise ValueError(f"warmup must be >= 0, got {self.warmup}")
+        if self.timeout <= 0:
+            raise ValueError(f"timeout must be > 0, got {self.timeout}")
         if self.mem_runs < 1:
             raise ValueError(f"mem_runs must be >= 1, got {self.mem_runs}")
+        if self.calib_runs < 1:
+            raise ValueError(f"calib_runs must be >= 1, got {self.calib_runs}")
         return self
+
+    def measurement_plan(self) -> MeasurementPlan:
+        """Return the engine-facing measurement knobs for one suite cell."""
+        return MeasurementPlan(
+            runs=self.runs,
+            warmup=self.warmup,
+            timeout_s=self.timeout,
+            mem_runs=self.mem_runs,
+            measure=self.measure,
+        )
 
 
 def _parse_spec(token: str) -> CheckerSpec:

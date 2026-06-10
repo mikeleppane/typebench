@@ -2,7 +2,13 @@ from pathlib import Path
 
 import pytest
 
-from typebench.contracts.configfile import discover_config, load_config, merge_cli, resolve_corpus
+from typebench.contracts.configfile import (
+    RunCliOverrides,
+    discover_config,
+    load_config,
+    merge_cli,
+    resolve_corpus,
+)
 from typebench.contracts.identity import CheckerSpec
 from typebench.contracts.policy import Policy
 from typebench.contracts.runconfig import RunConfig
@@ -35,6 +41,10 @@ version = "1.1.410"
 runs = 5
 warmup = 2
 mem_runs = 1
+timeout = 42.5
+measure = false
+calibrate = false
+calib_runs = 2
 """
 
 
@@ -54,6 +64,8 @@ def test_load_config_parses_array_of_tables(tmp_path: Path) -> None:
     assert cfg.thread_modes == (ThreadMode.CONSTRAINED,)
     assert cfg.cores == (1, 4, 8)
     assert cfg.runs == 5 and cfg.warmup == 2 and cfg.mem_runs == 1
+    assert cfg.timeout == 42.5 and cfg.measure is False
+    assert cfg.calibrate is False and cfg.calib_runs == 2
 
 
 def test_load_config_rejects_unknown_top_level_key(tmp_path: Path) -> None:
@@ -88,6 +100,22 @@ def test_load_config_rejects_unknown_run_key(tmp_path: Path) -> None:
     path = tmp_path / "typebench.toml"
     path.write_text('[[checker]]\ntool = "mypy"\n[run]\nbogus = 1\n', encoding="utf-8")
     with pytest.raises(ValueError, match="bogus"):
+        load_config(path)
+
+
+@pytest.mark.parametrize(
+    "body, match",
+    [
+        ("timeout = true", "timeout"),
+        ('measure = "yes"', "measure"),
+        ("calibrate = 1", "calibrate"),
+        ("calib_runs = 1.5", "calib_runs"),
+    ],
+)
+def test_load_config_rejects_invalid_run_values(tmp_path: Path, body: str, match: str) -> None:
+    path = tmp_path / "typebench.toml"
+    path.write_text(f'[[checker]]\ntool = "mypy"\n[run]\n{body}\n', encoding="utf-8")
+    with pytest.raises(ValueError, match=match):
         load_config(path)
 
 
@@ -140,6 +168,31 @@ def test_merge_cli_thread_modes_override(tmp_path: Path) -> None:
         thread_modes=[ThreadMode.CONSTRAINED],
     )
     assert merged.thread_modes == (ThreadMode.CONSTRAINED,)
+
+
+def test_merge_cli_run_knob_overrides(tmp_path: Path) -> None:
+    path = tmp_path / "typebench.toml"
+    path.write_text(_TOML, encoding="utf-8")
+    cfg = load_config(path)
+    merged = merge_cli(
+        cfg,
+        tools=None,
+        projects=None,
+        buckets=None,
+        cores=None,
+        run_overrides=RunCliOverrides(
+            runs=7,
+            warmup=0,
+            mem_runs=4,
+            timeout=60.0,
+            measure=True,
+            calibrate=True,
+            calib_runs=9,
+        ),
+    )
+    assert merged.runs == 7 and merged.warmup == 0 and merged.mem_runs == 4
+    assert merged.timeout == 60.0 and merged.measure is True
+    assert merged.calibrate is True and merged.calib_runs == 9
 
 
 def test_resolve_corpus_uses_cli_over_file_over_default(tmp_path: Path) -> None:

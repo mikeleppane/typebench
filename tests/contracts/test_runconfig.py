@@ -1,6 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
+from typebench.contracts.config import MeasurementPlan
 from typebench.contracts.identity import CheckerSpec
 from typebench.contracts.policy import Policy
 from typebench.contracts.runconfig import RunConfig, merge_tool_override
@@ -16,6 +17,9 @@ from typebench.contracts.taxonomy import ThreadMode
         {"runs": 0},
         {"warmup": -1},
         {"mem_runs": 0},
+        {"timeout": 0},
+        {"timeout": -1.0},
+        {"calib_runs": 0},
     ],
 )
 def test_runconfig_rejects_out_of_range_knobs(overrides: dict[str, object]) -> None:
@@ -31,8 +35,33 @@ def test_runconfig_defaults_match_current_cli() -> None:
     assert cfg.cores == (1,)  # single-core constrained floor
     assert cfg.policy is Policy.STANDARD
     assert cfg.runs == 10 and cfg.warmup == 3 and cfg.mem_runs == 3
+    assert cfg.timeout == 900.0 and cfg.measure is True
+    assert cfg.calibrate is True and cfg.calib_runs == 5
     assert cfg.projects == () and cfg.buckets == ()  # empty selection = whole corpus
     assert cfg.corpus is None  # None -> resolved repo-root-anchored at load, NOT cwd
+
+
+def test_runconfig_builds_measurement_plan() -> None:
+    cfg = RunConfig(
+        checkers=(CheckerSpec(tool="mypy"),),
+        runs=4,
+        warmup=1,
+        timeout=30.5,
+        mem_runs=2,
+        measure=False,
+    )
+    assert cfg.measurement_plan() == MeasurementPlan(
+        runs=4,
+        warmup=1,
+        timeout_s=30.5,
+        mem_runs=2,
+        measure=False,
+    )
+
+
+def test_measurement_plan_rejects_invalid_ranges() -> None:
+    with pytest.raises(ValueError, match="timeout_s"):
+        MeasurementPlan(timeout_s=0)
 
 
 def test_runconfig_forbids_unknown_keys() -> None:

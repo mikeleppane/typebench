@@ -52,6 +52,32 @@ def config_hash(
 
 
 @dataclass(frozen=True)
+class MeasurementPlan:
+    """Execution knobs for one measured cell.
+
+    This is intentionally pydantic-free: the persisted `RunConfig` validates the
+    values at config boundaries, and the suite passes this small value object to
+    the engine/service layer.
+    """
+
+    runs: int = 10
+    warmup: int = 3
+    timeout_s: float = 900.0
+    mem_runs: int = 3
+    measure: bool = True
+
+    def __post_init__(self) -> None:
+        if self.runs < 1:
+            raise ValueError(f"runs must be >= 1, got {self.runs}")
+        if self.warmup < 0:
+            raise ValueError(f"warmup must be >= 0, got {self.warmup}")
+        if self.timeout_s <= 0:
+            raise ValueError(f"timeout_s must be > 0, got {self.timeout_s}")
+        if self.mem_runs < 1:
+            raise ValueError(f"mem_runs must be >= 1, got {self.mem_runs}")
+
+
+@dataclass(frozen=True)
 class NormalizedConfig:
     """Equalized checker inputs.
 

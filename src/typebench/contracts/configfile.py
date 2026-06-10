@@ -8,6 +8,7 @@ helper into execution in Task 7.
 from __future__ import annotations
 
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
@@ -22,7 +23,25 @@ _CONFIG_NAME = "typebench.toml"
 _TOP_LEVEL_KEYS = frozenset({"policy", "corpus", "projects", "buckets", "checker", "tracks", "run"})
 _CHECKER_KEYS = frozenset({"tool", "version", "label", "source"})
 _TRACKS_KEYS = frozenset({"thread_modes", "cores"})
-_RUN_KEYS = frozenset({"runs", "warmup", "mem_runs"})
+_RUN_KEYS = frozenset(
+    {"runs", "warmup", "timeout", "mem_runs", "measure", "calibrate", "calib_runs"}
+)
+
+
+@dataclass(frozen=True, kw_only=True)
+class RunCliOverrides:
+    """CLI-provided run knob overrides.
+
+    `None` means "keep the file/default value", matching the other merge inputs.
+    """
+
+    runs: int | None = None
+    warmup: int | None = None
+    mem_runs: int | None = None
+    timeout: float | None = None
+    measure: bool | None = None
+    calibrate: bool | None = None
+    calib_runs: int | None = None
 
 
 def discover_config(cwd: Path) -> Path | None:
@@ -136,6 +155,26 @@ def _run_int(table: dict[str, object], key: str) -> int | None:
     return value
 
 
+def _run_float(table: dict[str, object], key: str) -> float | None:
+    value = table.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, int | float) or isinstance(value, bool):
+        msg = f"run.{key} must be a number, got {value!r}"
+        raise ValueError(msg)
+    return float(value)
+
+
+def _run_bool(table: dict[str, object], key: str) -> bool | None:
+    value = table.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        msg = f"run.{key} must be a boolean, got {value!r}"
+        raise ValueError(msg)
+    return value
+
+
 def load_config(path: Path) -> RunConfig:
     """Parse `typebench.toml` into a validated RunConfig."""
     raw = cast("dict[str, object]", tomllib.loads(path.read_text(encoding="utf-8")))
@@ -167,8 +206,15 @@ def load_config(path: Path) -> RunConfig:
         payload["thread_modes"] = _thread_modes(tracks["thread_modes"])
     if "cores" in tracks:
         payload["cores"] = _int_list(tracks["cores"], "tracks.cores")
-    for key in ("runs", "warmup", "mem_runs"):
+    for key in ("runs", "warmup", "mem_runs", "calib_runs"):
         value = _run_int(run, key)
+        if value is not None:
+            payload[key] = value
+    timeout = _run_float(run, "timeout")
+    if timeout is not None:
+        payload["timeout"] = timeout
+    for key in ("measure", "calibrate"):
+        value = _run_bool(run, key)
         if value is not None:
             payload[key] = value
 
@@ -189,6 +235,7 @@ def merge_cli(
     buckets: list[str] | None,
     cores: list[int] | None,
     thread_modes: list[ThreadMode] | None = None,
+    run_overrides: RunCliOverrides | None = None,
 ) -> RunConfig:
     """Apply CLI overrides onto a file/default RunConfig."""
     updates: dict[str, object] = {}
@@ -201,7 +248,19 @@ def merge_cli(
         updates["cores"] = tuple(cores)
     if thread_modes is not None:
         updates["thread_modes"] = tuple(thread_modes)
-    return config.model_copy(update=updates)
+    if run_overrides is not None:
+        for key, value in (
+            ("runs", run_overrides.runs),
+            ("warmup", run_overrides.warmup),
+            ("mem_runs", run_overrides.mem_runs),
+            ("timeout", run_overrides.timeout),
+            ("measure", run_overrides.measure),
+            ("calibrate", run_overrides.calibrate),
+            ("calib_runs", run_overrides.calib_runs),
+        ):
+            if value is not None:
+                updates[key] = value
+    return RunConfig.model_validate(config.model_dump() | updates)
 
 
 def resolve_corpus(config: RunConfig, cli_corpus: Path | None, default: Path) -> Path:
