@@ -1,15 +1,16 @@
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
 
+from typebench._internal.test_fakes import FakeHost
 from typebench.adapters.stub import StubAdapter
 from typebench.contracts.config import NormalizedConfig
 from typebench.contracts.models import FailurePhase, ResultClass, ThreadMode, TimingStats
 from typebench.engine import collector, measure
 from typebench.engine.collector import RunManifest, run_single
 from typebench.engine.measure import MemorySummary, ResourceResult
+from typebench.engine.timing import TimingCommandError
 from typebench.engine.wrapper import RawRun
 
 
@@ -129,10 +130,14 @@ def test_run_single_timing_crash_marks_timing_phase(monkeypatch: pytest.MonkeyPa
     # Probe is clean (exit 0) but the timed run crashes under hyperfine. The
     # record must be failed{crash} AND failure_phase=timing so real_exit_code (the
     # clean probe's 0) cannot be misread as "clean command, failed result".
-    monkeypatch.setattr(collector.shutil, "which", lambda _name: "/usr/bin/hyperfine")
+    monkeypatch.setattr(
+        collector,
+        "_process_host",
+        FakeHost(which={"hyperfine": "/usr/bin/hyperfine"}),
+    )
 
     def _boom(*_a: object, **_k: object) -> object:
-        raise subprocess.CalledProcessError(1, "hyperfine", stderr="timed run died")
+        raise TimingCommandError("timed run died")
 
     monkeypatch.setattr(collector, "run_timing", _boom)
     result = run_single(
@@ -155,7 +160,11 @@ def test_run_single_timing_crash_marks_timing_phase(monkeypatch: pytest.MonkeyPa
 def test_run_single_timing_harness_error_is_failed_env(monkeypatch: pytest.MonkeyPatch) -> None:
     # A garbled/empty hyperfine JSON (ValueError) or vanished export file (OSError)
     # is a HARNESS failure, not a checker crash. Record failed{env}, never drop it.
-    monkeypatch.setattr(collector.shutil, "which", lambda _name: "/usr/bin/hyperfine")
+    monkeypatch.setattr(
+        collector,
+        "_process_host",
+        FakeHost(which={"hyperfine": "/usr/bin/hyperfine"}),
+    )
 
     def _boom(*_a: object, **_k: object) -> object:
         raise ValueError("hyperfine JSON has no results")
@@ -267,7 +276,11 @@ def test_affinity_spec_maps_cores_to_cpu_list() -> None:
 
 
 def test_taskset_multi_core_requires_full_mask(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(collector.shutil, "which", lambda _n: "/usr/bin/taskset")
+    monkeypatch.setattr(
+        collector,
+        "_process_host",
+        FakeHost(which={"taskset": "/usr/bin/taskset"}),
+    )
     # cores 0-3 all present -> pinnable.
     monkeypatch.setattr(collector.os, "sched_getaffinity", lambda _pid: {0, 1, 2, 3, 4})
     assert collector._taskset_available(4) is True
@@ -365,10 +378,14 @@ def test_resource_pass_populates_memory_cpu_efficiency(
     monkeypatch.setattr(collector, "_scoped_probe", fake_scoped_probe)
 
     # parallel_efficiency = cpu_time / wall is computed ONLY when timing ran, and
-    # the collector gates timing on `shutil.which("hyperfine")`. Patch which so the
+    # the collector gates timing through ProcessHost.which("hyperfine"). Patch it so the
     # stubbed run_timing is actually invoked on hosts WITHOUT hyperfine (else this
     # test silently passes only where hyperfine happens to be installed).
-    monkeypatch.setattr(collector.shutil, "which", lambda _name: "/usr/bin/hyperfine")
+    monkeypatch.setattr(
+        collector,
+        "_process_host",
+        FakeHost(which={"hyperfine": "/usr/bin/hyperfine"}),
+    )
     monkeypatch.setattr(
         collector,
         "run_timing",
@@ -451,7 +468,11 @@ def test_resource_pass_falls_back_to_plain_probe_on_measure_error(
         raise measure.MeasureError("no usable payload")
 
     monkeypatch.setattr(collector, "_scoped_probe", boom_scoped_probe)
-    monkeypatch.setattr(collector.shutil, "which", lambda _name: None)  # skip timing
+    monkeypatch.setattr(
+        collector,
+        "_process_host",
+        FakeHost(which={"hyperfine": None}),
+    )  # skip timing
 
     adapter = StubAdapter(exit_code=0, diagnostics=0, files=5)
     result = run_single(
@@ -474,13 +495,21 @@ def test_taskset_unavailable_when_core0_not_in_affinity(monkeypatch: pytest.Monk
     # Review finding: taskset installed but core 0 outside the cpuset (containers /
     # restricted CI) -> `taskset -c 0` would exit 1 BEFORE the checker runs, which
     # reads as diagnostics and fakes thread_mode_enforced. Guard on the affinity mask.
-    monkeypatch.setattr(collector.shutil, "which", lambda _n: "/usr/bin/taskset")
+    monkeypatch.setattr(
+        collector,
+        "_process_host",
+        FakeHost(which={"taskset": "/usr/bin/taskset"}),
+    )
     monkeypatch.setattr(collector.os, "sched_getaffinity", lambda _pid: {1, 2, 3})
     assert collector._taskset_available(1) is False
 
 
 def test_taskset_available_when_core0_in_affinity(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(collector.shutil, "which", lambda _n: "/usr/bin/taskset")
+    monkeypatch.setattr(
+        collector,
+        "_process_host",
+        FakeHost(which={"taskset": "/usr/bin/taskset"}),
+    )
     monkeypatch.setattr(collector.os, "sched_getaffinity", lambda _pid: {0, 1, 2})
     assert collector._taskset_available(1) is True
 

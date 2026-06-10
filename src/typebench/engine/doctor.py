@@ -12,16 +12,18 @@ the cli layer.
 
 from __future__ import annotations
 
-import shutil
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
 from typebench.engine import measure
 from typebench.engine.env import cmd_version
+from typebench.engine.proc import SYSTEM_HOST
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from typebench.contracts.proc import ProcessHost
 
 
 class Tier(StrEnum):
@@ -159,8 +161,9 @@ _INVENTORY: Final[tuple[_Spec, ...]] = (
 
 def run_doctor(
     *,
-    which: Callable[[str], str | None] = shutil.which,
-    probe: Callable[[list[str]], str | None] = cmd_version,
+    host: ProcessHost = SYSTEM_HOST,
+    which: Callable[[str], str | None] | None = None,
+    probe: Callable[[list[str]], str | None] | None = None,
     resource_capable: Callable[[], bool] = measure.capable,
 ) -> list[ToolCheck]:
     """Resolve every inventory row through the injected seams.
@@ -169,8 +172,10 @@ def run_doctor(
     diverge only for pyright: a pyright binary with no node runtime is present but
     not healthy, so it can never render `ok`.
     """
-    node_present = which("node") is not None
-    node_version = probe(["node", "--version"]) if node_present else None
+    which_fn = which or host.which
+    probe_fn = probe or (lambda argv: cmd_version(argv, host=host))
+    node_present = which_fn("node") is not None
+    node_version = probe_fn(["node", "--version"]) if node_present else None
     checks: list[ToolCheck] = []
     for spec in _INVENTORY:
         if spec.binary is None:
@@ -188,8 +193,8 @@ def run_doctor(
                 )
             )
             continue
-        present = which(spec.binary) is not None
-        version = probe(list(spec.probe_argv)) if present and spec.probe_argv else None
+        present = which_fn(spec.binary) is not None
+        version = probe_fn(list(spec.probe_argv)) if present and spec.probe_argv else None
         # A probe-backed tool whose `--version` fails is on PATH but not usable: it
         # must not render `ok` or satisfy `--check`. which() success alone is not
         # enough — a broken/incompatible binary still resolves on PATH.

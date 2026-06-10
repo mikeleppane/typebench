@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import os
 import platform
-import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from typebench.contracts.models import EnvFingerprint
+from typebench.engine.proc import SYSTEM_HOST
+
+if TYPE_CHECKING:
+    from typebench.contracts.proc import ProcessHost
 
 _MEMINFO = Path("/proc/meminfo")
 _CGROUP_CONTROLLERS = Path("/sys/fs/cgroup/cgroup.controllers")
@@ -22,12 +26,11 @@ def _cpu_model() -> str:
     return platform.processor() or "unknown"
 
 
-def cmd_version(argv: list[str]) -> str | None:
+def cmd_version(argv: list[str], *, host: ProcessHost = SYSTEM_HOST) -> str | None:
     """First line of `<tool> --version`, or None if the tool is missing. No-raise:
     detect_env runs during RunResult assembly and must never crash a record."""
-    try:
-        out = subprocess.run(argv, capture_output=True, text=True, check=False, timeout=10)
-    except (OSError, subprocess.SubprocessError):
+    out = host.run(argv, timeout=10)
+    if out.env_error:
         return None
     text = out.stdout.strip() or out.stderr.strip()
     return text.splitlines()[0] if text else None

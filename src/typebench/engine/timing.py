@@ -19,6 +19,14 @@ from typing import Any
 from typebench.contracts.models import TimingStats
 
 
+class TimingCommandError(RuntimeError):
+    """hyperfine itself exited non-zero while running the timing pass."""
+
+    def __init__(self, stderr: str) -> None:
+        self.stderr = stderr
+        super().__init__(stderr or "timing run failed under hyperfine")
+
+
 def parse_hyperfine_json(data: dict[str, Any]) -> TimingStats:
     results = data.get("results") or []
     if not results:
@@ -79,6 +87,10 @@ def run_timing(
         if prepare_cmd:
             cmd += ["--prepare", prepare_cmd]
         cmd.append(_wrapped_command_string(argv, timeout))
-        subprocess.run(cmd, check=True, capture_output=True, text=True, env=run_env)
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True, env=run_env)
+        except subprocess.CalledProcessError as exc:
+            stderr = exc.stderr if isinstance(exc.stderr, str) else ""
+            raise TimingCommandError(stderr) from exc
         data: dict[str, Any] = json.loads(json_path.read_text())
         return parse_hyperfine_json(data)

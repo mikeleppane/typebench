@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import os
-import shutil
-import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,7 +20,8 @@ from typebench.contracts.policy import Policy
 from typebench.contracts.taxonomy import is_constrained
 from typebench.engine import measure
 from typebench.engine.env import detect_env
-from typebench.engine.timing import run_timing
+from typebench.engine.proc import SYSTEM_HOST
+from typebench.engine.timing import TimingCommandError, run_timing
 from typebench.engine.wrapper import run_command
 
 if TYPE_CHECKING:
@@ -52,6 +51,7 @@ class RunManifest:
 # Module seams (overridable in tests + by capability):
 _resource_capable = measure.capable
 _scoped_probe = measure.scoped_probe
+_process_host = SYSTEM_HOST
 
 
 def _affinity_spec(cores: int) -> str:
@@ -68,7 +68,7 @@ def _taskset_available(cores: int) -> bool:
     success, recording a bogus fast timing AND a false thread_mode_enforced for a
     command that never ran. Only claim the pin we can actually apply, so the
     honesty flag never asserts a constraint the OS rejected."""
-    if cores < 1 or shutil.which("taskset") is None:
+    if cores < 1 or _process_host.which("taskset") is None:
         return False
     getaffinity = getattr(os, "sched_getaffinity", None)
     if getaffinity is None:  # non-Linux without the affinity API (taskset is Linux-only anyway)
@@ -192,7 +192,6 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
                 OSError,
                 ValueError,
                 KeyError,
-                subprocess.SubprocessError,
             ):
                 # Defense-in-depth: scoped_probe is built not to escape a malformed
                 # payload, but ANY resource-pass failure must fall back to a plain
@@ -217,7 +216,7 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
         # None for stateless tools like the stub.
         timing = None
         timing_error: str | None = None
-        if result_class.is_measured_success and shutil.which("hyperfine"):
+        if result_class.is_measured_success and _process_host.which("hyperfine"):
             try:
                 timing = run_timing(
                     argv,
@@ -227,7 +226,7 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
                     timeout=timeout,
                     extra_env=extra_env,
                 )
-            except subprocess.CalledProcessError as exc:
+            except TimingCommandError as exc:
                 # The probe was measured-success but a TIMED run failed under
                 # hyperfine (flaky crash/oom/timeout). Record a
                 # failure, never crash or drop the record. Precise reclassification
@@ -239,11 +238,10 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
                 failure_phase = FailurePhase.TIMING
                 timing = None
                 diagnostics = files = None
-                stderr = exc.stderr if isinstance(exc.stderr, str) else ""
-                timing_error = stderr.strip()[-500:] or "timing run failed under hyperfine"
+                timing_error = exc.stderr.strip()[-500:] or "timing run failed under hyperfine"
             except (OSError, ValueError, KeyError) as exc:
                 # hyperfine emitted no/garbled JSON, or its export file vanished
-                # (a shutil.which TOCTOU): a HARNESS failure, not a checker result.
+                # after the ProcessHost.which gate: a HARNESS failure, not a checker result.
                 # Record failed{env} so the record is never dropped.
                 result_class = ResultClass.FAILED_ENV
                 failure_phase = FailurePhase.TIMING

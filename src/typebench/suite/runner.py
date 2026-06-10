@@ -6,8 +6,6 @@ measured path; pydantic via `models` is fine here.
 
 from __future__ import annotations
 
-import shutil
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,7 +25,8 @@ from typebench.corpus.counting import first_party_files
 from typebench.engine import measure
 from typebench.engine.collector import RunManifest
 from typebench.engine.env import detect_env
-from typebench.engine.timing import run_timing
+from typebench.engine.proc import SYSTEM_HOST
+from typebench.engine.timing import TimingCommandError, run_timing
 
 if TYPE_CHECKING:
     from typebench.adapters.base import CheckerHandle
@@ -37,6 +36,8 @@ if TYPE_CHECKING:
     from typebench.corpus.catalog import CorpusProject
     from typebench.engine.calibration import CalibrationStats
     from typebench.suite.ports import BenchEngine, CheckerResolver, CorpusSource
+
+_process_host = SYSTEM_HOST
 
 
 @dataclass(frozen=True)
@@ -203,8 +204,8 @@ def _measure_harness_baselines(
                 mem_baseline = resource.memory.peak_bytes_median
 
     wall_overhead: float | None = None
-    true_bin = shutil.which("true")
-    if true_bin is not None and shutil.which("hyperfine") is not None:
+    true_bin = _process_host.which("true")
+    if true_bin is not None and _process_host.which("hyperfine") is not None:
         try:
             timing = run_timing(
                 [true_bin],
@@ -214,7 +215,7 @@ def _measure_harness_baselines(
                 timeout=timeout,
                 extra_env={},
             )
-        except (subprocess.CalledProcessError, OSError, ValueError, KeyError):
+        except (TimingCommandError, OSError, ValueError, KeyError):
             wall_overhead = None
         else:
             wall_overhead = timing.median_s
