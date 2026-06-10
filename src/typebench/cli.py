@@ -21,9 +21,12 @@ from typebench.adapters.pyright import PyrightAdapter
 from typebench.adapters.stub import StubAdapter
 from typebench.adapters.ty import TyAdapter
 from typebench.contracts.config import DEFAULT_EXCLUDES, NormalizedConfig, config_hash
-from typebench.contracts.configfile import load_config
+from typebench.contracts.configfile import discover_config, load_config, merge_cli, resolve_corpus
 from typebench.contracts.identity import CheckerSpec
-from typebench.contracts.models import ResultsEnvelope, ThreadMode
+from typebench.contracts.models import ResultsEnvelope
+from typebench.contracts.policy import Policy
+from typebench.contracts.runconfig import RunConfig, merge_tool_override
+from typebench.contracts.taxonomy import ThreadMode
 from typebench.corpus.catalog import load_suite
 from typebench.corpus.checkerenv import cache_status as checker_cache_status
 from typebench.corpus.envman import PrepareError, prepare_project
@@ -33,16 +36,18 @@ from typebench.engine.doctor import Tier, run_doctor
 from typebench.suite.preflight import preflight_project
 from typebench.suite.renderer import build_trends, render_readme
 from typebench.suite.runner import run_suite
+from typebench.suite.selection import SelectionError, resolve_selection
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from typebench.adapters.base import Adapter
     from typebench.contracts.models import PreparedProject
-    from typebench.contracts.runconfig import RunConfig
     from typebench.corpus.catalog import CorpusProject
 
 app = typer.Typer(help="Neutral Python type-checker performance benchmark.")
+config_app = typer.Typer(help="Inspect and scaffold typebench configuration.")
+app.add_typer(config_app, name="config")
 
 # Default location for prepared clones/venvs. MUST be a non-hidden directory:
 # pyrefly skips dot-directories during file discovery, so a hidden cache (e.g.
@@ -53,6 +58,46 @@ app = typer.Typer(help="Neutral Python type-checker performance benchmark.")
 DEFAULT_CACHE_ROOT = Path("typebench-cache")
 _README_BEGIN = "<!-- TYPEBENCH:BEGIN -->"
 _README_END = "<!-- TYPEBENCH:END -->"
+_DEFAULT_TOOLS = ("mypy", "pyright", "pyrefly", "ty")
+_INIT_FALLBACKS = {
+    "mypy": "1.18.2",
+    "pyright": "1.1.410",
+    "pyrefly": "0.36.2",
+    "ty": "0.0.1",
+}
+_INIT_TEMPLATE = """\
+# typebench run configuration. Layered: built-in defaults < this file < CLI flags.
+policy = "standard"
+# corpus = "corpus/suite.toml"   # optional; default resolves to corpus/suite.toml
+
+# projects = ["httpx", "sqlalchemy"]   # explicit names
+# buckets = ["large"]                  # OR/ALSO whole buckets; both empty = whole corpus
+
+[tracks]
+thread_modes = ["all-cores", "constrained"]
+cores = [1]                            # constrained sweep, e.g. [1, 4, 8]
+
+[[checker]]
+tool = "mypy"
+version = "{mypy}"
+
+[[checker]]
+tool = "pyright"
+version = "{pyright}"
+
+[[checker]]
+tool = "pyrefly"
+version = "{pyrefly}"
+
+[[checker]]
+tool = "ty"
+version = "{ty}"
+
+[run]
+runs = 10
+warmup = 3
+mem_runs = 3
+"""
 
 # Adapter registry. All four real checkers + the controllable stub.
 _ADAPTERS: dict[str, Callable[[], Adapter]] = {
@@ -94,6 +139,64 @@ def _validate_cores(cores: int) -> int:
     return cores
 
 
+def _parse_cores_list(spec: str) -> list[int]:
+    """Parse a comma-separated constrained-core sweep."""
+    try:
+        values = [int(piece.strip()) for piece in spec.split(",") if piece.strip()]
+    except ValueError:
+        typer.echo(
+            f"--cores-list must be comma-separated ints (e.g. 1,4,8), got {spec!r}",
+            err=True,
+        )
+        raise typer.Exit(code=2) from None
+    if not values or any(value < 1 for value in values):
+        typer.echo("--cores-list values must each be >= 1.", err=True)
+        raise typer.Exit(code=2)
+    return [_validate_cores(value) for value in values]
+
+
+def _print_dry_run(run_config: RunConfig, selected: list[str], corpus: Path) -> None:
+    """Print the effective plan without executing the suite."""
+    checker_ids = [spec.checker_id() for spec in run_config.checkers]
+    per_pair = sum(
+        1 if mode is ThreadMode.ALL_CORES else len(run_config.cores)
+        for mode in run_config.thread_modes
+    )
+    matrix = len(selected) * len(checker_ids) * per_pair
+    typer.echo(f"policy: {run_config.policy.value}")
+    typer.echo(f"corpus: {corpus}")
+    typer.echo(f"checkers: {checker_ids}")
+    typer.echo(f"selection ({len(selected)}): {selected}")
+    typer.echo(
+        f"thread_modes: {[mode.value for mode in run_config.thread_modes]}  "
+        f"cores: {list(run_config.cores)}"
+    )
+    typer.echo(f"matrix size: {matrix} cells")
+    typer.echo(f"headline-eligible: {run_config.policy is Policy.STANDARD}")
+    typer.echo("checker caches:")
+    for spec in run_config.checkers:
+        state, version = checker_cache_status(spec, DEFAULT_CACHE_ROOT)
+        resolved = f" (resolved {version})" if version else ""
+        typer.echo(f"  {spec.checker_id():<24}  {state}{resolved}")
+
+
+def _version_token(text: str, fallback: str) -> str:
+    """Best-effort extraction for checker `--version` output."""
+    for token in text.split():
+        stripped = token.strip("(),")
+        if stripped and stripped[0].isdigit():
+            return stripped
+    return fallback
+
+
+def _probe_init_version(factory: Callable[[], Adapter], fallback: str) -> str:
+    """Probe one adapter version for config init, falling back offline."""
+    try:
+        return _version_token(factory().version(), fallback)
+    except Exception:
+        return fallback
+
+
 @app.callback()
 def main() -> None:
     """Neutral Python type-checker performance benchmark.
@@ -102,6 +205,49 @@ def main() -> None:
     it, a single-command app collapses the command name away and rejects an
     explicit `typebench run ...` invocation as an extra argument.
     """
+
+
+@config_app.command("init")
+def config_init(
+    path: Annotated[Path, typer.Argument(help="Where to write typebench.toml.")],
+) -> None:
+    """Scaffold a commented typebench.toml pinning the four standard checkers."""
+    versions = {
+        "mypy": _probe_init_version(MypyAdapter, _INIT_FALLBACKS["mypy"]),
+        "pyright": _probe_init_version(PyrightAdapter, _INIT_FALLBACKS["pyright"]),
+        "pyrefly": _probe_init_version(PyreflyAdapter, _INIT_FALLBACKS["pyrefly"]),
+        "ty": _probe_init_version(TyAdapter, _INIT_FALLBACKS["ty"]),
+    }
+    path.write_text(_INIT_TEMPLATE.format(**versions), encoding="utf-8")
+    typer.echo(str(path))
+
+
+@config_app.command("show")
+def config_show(
+    config: Annotated[
+        Path | None,
+        typer.Option("-c", "--config", help="typebench.toml to show; defaults to cwd discovery."),
+    ] = None,
+) -> None:
+    """Print the effective file config."""
+    path = config or discover_config(Path.cwd())
+    if path is None:
+        typer.echo("No typebench.toml found; pass -c/--config.", err=True)
+        raise typer.Exit(code=2)
+    run_config = _load_config_or_exit(path)
+    typer.echo(f"policy: {run_config.policy.value}")
+    typer.echo("checkers:")
+    for spec in run_config.checkers:
+        typer.echo(f"  {spec.checker_id()}")
+    typer.echo(f"thread_modes: {[mode.value for mode in run_config.thread_modes]}")
+    typer.echo(f"cores: {list(run_config.cores)}")
+    if run_config.projects:
+        selection = list(run_config.projects)
+    elif run_config.buckets:
+        selection = [bucket.value for bucket in run_config.buckets]
+    else:
+        selection = "(whole corpus)"
+    typer.echo(f"selection: {selection}")
 
 
 def _adapters_for(tools: list[str]) -> list[Adapter]:
@@ -186,9 +332,16 @@ def _replace_readme_block(readme_text: str, block: str) -> str:
 
 
 @app.command()
-def run(  # noqa: PLR0913, PLR0915 — many user-facing CLI options + linear arg-validation/manifest/run setup; one command by design
+def run(  # noqa: PLR0912, PLR0913, PLR0915 — many user-facing CLI options + linear arg-validation/manifest/run setup; one command by design
     tool: Annotated[str, typer.Option(help="Checker to run (e.g. stub).")],
     output: Annotated[Path, typer.Option(help="Where to write the results JSON.")],
+    config: Annotated[
+        Path | None,
+        typer.Option("-c", "--config", help="typebench.toml (checker version source)."),
+    ] = None,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Print the effective plan; execute nothing.")
+    ] = False,
     project: Annotated[
         str | None,
         typer.Option(help="Project name/path (omit when using --corpus-project)."),
@@ -245,11 +398,30 @@ def run(  # noqa: PLR0913, PLR0915 — many user-facing CLI options + linear arg
         ),
     ] = 1,
 ) -> None:
+    cores = _validate_cores(cores)
+    if config is not None and not dry_run:
+        typer.echo(
+            "run -c is preview-only for now: pass --dry-run, or use `suite`/`compare` "
+            "for version-resolved execution.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    # `run` only reads -c in the preview path, so it deliberately has no cwd discovery seam.
+    if dry_run:
+        base = _load_config_or_exit(config) if config is not None else RunConfig(checkers=())
+        spec = merge_tool_override(base.checkers, [tool])[0]
+        state, version = checker_cache_status(spec, cache_root)
+        resolved = f" (resolved {version})" if version else ""
+        typer.echo(f"checker: {spec.checker_id()}  {state}{resolved}")
+        typer.echo(f"project: {project or corpus_project or '(none)'}")
+        typer.echo(f"thread_mode: {thread_mode.value}  cores: {cores}")
+        raise typer.Exit(code=0)
+
     factory = _ADAPTERS.get(tool)
     if factory is None:
         typer.echo(f"Unknown tool: {tool!r}. Known: {sorted(_ADAPTERS)}", err=True)
         raise typer.Exit(code=2)
-    cores = _validate_cores(cores)
 
     # Fail fast on a bad --output: a single run can take many minutes, so a
     # non-existent or read-only output directory must not surface only after all
@@ -300,7 +472,7 @@ def run(  # noqa: PLR0913, PLR0915 — many user-facing CLI options + linear arg
         typer.echo("--src-root is required for real tools (got none).", err=True)
         raise typer.Exit(code=2)
 
-    config = NormalizedConfig(
+    normalized_config = NormalizedConfig(
         src_roots=tuple(str(Path(s).resolve()) for s in src_roots),
         exclude_globs=(prepared.exclude_globs if prepared is not None else DEFAULT_EXCLUDES),
         python_version=python_version,
@@ -334,7 +506,7 @@ def run(  # noqa: PLR0913, PLR0915 — many user-facing CLI options + linear arg
     result = run_single(
         adapter,
         project=project,
-        config=config,
+        config=normalized_config,
         thread_mode=thread_mode,
         warmup=warmup,
         runs=runs,
@@ -350,16 +522,38 @@ def run(  # noqa: PLR0913, PLR0915 — many user-facing CLI options + linear arg
 
 @app.command()
 def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI option
-    corpus: Annotated[Path, typer.Option(help="Path to suite.toml.")],
     output: Annotated[Path, typer.Option(help="Where to write the results envelope JSON.")],
+    corpus: Annotated[
+        Path | None,
+        typer.Option(help="Path to suite.toml (else config `corpus`, else corpus/suite.toml)."),
+    ] = None,
+    config: Annotated[
+        Path | None,
+        typer.Option("-c", "--config", help="typebench.toml (else auto-discovered in cwd)."),
+    ] = None,
     tool: Annotated[
         list[str] | None,
         typer.Option(help="Tools to run (repeatable). Default: all four real checkers."),
+    ] = None,
+    project: Annotated[
+        list[str] | None,
+        typer.Option(help="Project name(s); replaces file selection."),
+    ] = None,
+    bucket: Annotated[
+        list[str] | None,
+        typer.Option(help="Size bucket(s); replaces file selection."),
     ] = None,
     thread_mode: Annotated[
         list[ThreadMode] | None,
         typer.Option(help="Thread tracks (repeatable). Default: both."),
     ] = None,
+    cores_list: Annotated[
+        str | None,
+        typer.Option("--cores-list", help="Comma-separated constrained cores sweep, e.g. 1,4,8."),
+    ] = None,
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Print the effective plan; execute nothing.")
+    ] = False,
     shard: Annotated[str, typer.Option(help="Shard selector 'index/total' (e.g. 0/4).")] = "0/1",
     runs: Annotated[int, typer.Option(help="hyperfine timed runs.")] = 10,
     warmup: Annotated[int, typer.Option(help="hyperfine warmup runs.")] = 3,
@@ -374,7 +568,7 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
         Path, typer.Option(help="Where prepared clones/venvs are cached.")
     ] = DEFAULT_CACHE_ROOT,
     cores: Annotated[
-        int,
+        int | None,
         typer.Option(
             help=(
                 "CPU cores for the 'constrained' thread track. Default 1 = single-threaded; "
@@ -383,7 +577,7 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
                 "'all-cores' track ignores this and uses every core."
             )
         ),
-    ] = 1,
+    ] = None,
 ) -> None:
     """Run the (project x tool x thread-mode) matrix and write a results envelope."""
     out_dir = output.parent
@@ -394,16 +588,42 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
         typer.echo("--mem-runs and --calib-runs must be >= 1.", err=True)
         raise typer.Exit(code=2)
     _validate_timing(runs, warmup, timeout)
-    _load_suite_or_exit(corpus)  # fail fast on a bad corpus path before any work
-    cores = _validate_cores(cores)
+
+    config_path = config or discover_config(Path.cwd())
+    base = (
+        _load_config_or_exit(config_path)
+        if config_path is not None
+        else RunConfig(checkers=tuple(CheckerSpec(tool=t) for t in (tool or _DEFAULT_TOOLS)))
+    )
+    cores_sweep = _parse_cores_list(cores_list) if cores_list else None
+    # Scalar --cores back-compat: --cores-list wins; then explicit scalar; else file/default sweep.
+    effective_cores = cores_sweep or ([_validate_cores(cores)] if cores is not None else None)
+    run_config = merge_cli(
+        base,
+        tools=tool,
+        projects=project,
+        buckets=bucket,
+        thread_modes=thread_mode,
+        cores=effective_cores,
+    )
+    effective_corpus = resolve_corpus(run_config, corpus, Path("corpus/suite.toml"))
+    corpus_entries = _load_suite_or_exit(effective_corpus)
+    try:
+        selected = resolve_selection(run_config, corpus_entries)
+    except SelectionError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+    if dry_run:
+        _print_dry_run(run_config, selected, effective_corpus)
+        raise typer.Exit(code=0)
+
     shard_index, shard_total = _parse_shard(shard)
-    tools = tool or ["mypy", "pyright", "pyrefly", "ty"]
-    modes = thread_mode or [ThreadMode.ALL_CORES, ThreadMode.CONSTRAINED]
     envelope = run_suite(
-        suite_path=corpus,
+        suite_path=effective_corpus,
         cache_root=cache_root,
-        checkers=tuple(CheckerSpec(tool=t) for t in tools),
-        thread_modes=modes,
+        checkers=run_config.checkers,
+        policy=run_config.policy,
+        thread_modes=list(run_config.thread_modes),
         generated_at=datetime.now(UTC).isoformat(),
         runs=runs,
         warmup=warmup,
@@ -411,9 +631,11 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
         mem_runs=mem_runs,
         measure_enabled=measure,
         calib_runs=calib_runs,
-        cores=(cores,),
+        cores=run_config.cores,
         shard_index=shard_index,
         shard_total=shard_total,
+        projects=selected,
+        run_config=run_config,
         lookup_entry=_lookup_project,
         adapter_factory=lambda name: _adapters_for([name])[0],
         calibrate_fn=calibrate if calibrate_baseline else None,
