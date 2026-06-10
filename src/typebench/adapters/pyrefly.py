@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from typebench.adapters._support import confirm_clean, probe_version
 from typebench.adapters.base import ParallelismCap, coerce_count
 from typebench.contracts.models import ResultClass, ThreadMode
+from typebench.contracts.policy import PRESETS, CheckerPosture, Policy
 from typebench.contracts.taxonomy import is_constrained
 from typebench.engine.wrapper import universal_failure_prefix
 
@@ -35,6 +36,18 @@ _EXIT_CRASH = 101
 
 def _toml_str_list(values: tuple[str, ...]) -> str:
     return "[" + ", ".join(json.dumps(v) for v in values) + "]"
+
+
+def _posture_lines(posture: CheckerPosture) -> list[str]:
+    """Render pyrefly config lines for the equalized checker posture."""
+    if posture.strict:
+        msg = "strict posture not yet implemented for pyrefly"
+        raise NotImplementedError(msg)
+    unannotated = "true" if posture.analyze_untyped_defs else "false"
+    return [
+        'preset = "default"',
+        f"check-unannotated-defs = {unannotated}",
+    ]
 
 
 class PyreflyAdapter:
@@ -69,14 +82,16 @@ class PyreflyAdapter:
         # project -> spurious `missing-import` diagnostics + skewed timing (a
         # neutrality leak the other tools don't have). Pinning search-path to the
         # source tree makes first-party imports resolve from where the code lives.
+        posture_lines = _posture_lines(PRESETS[Policy.STANDARD])
+        preset_line, unannotated_line = posture_lines[0], posture_lines[1]
         lines = [
-            'preset = "default"',
+            preset_line,
             f"project-includes = {_toml_str_list(config.src_roots)}",
             f"search-path = {_toml_str_list(config.src_roots)}",
             f"project-excludes = {_toml_str_list(excludes)}",
             f'python-version = "{config.python_version}"',
             f'python-platform = "{config.python_platform}"',
-            "check-unannotated-defs = true",
+            unannotated_line,
             'infer-return-types = "checked"',
         ]
         if config.venv_python is not None:
