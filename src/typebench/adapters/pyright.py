@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from typebench.adapters._support import confirm_clean, probe_version
 from typebench.adapters.base import ParallelismCap, coerce_count
 from typebench.contracts.models import ResultClass, ThreadMode
+from typebench.contracts.policy import PRESETS, CheckerPosture, Policy
 from typebench.contracts.taxonomy import is_constrained
 from typebench.engine.wrapper import classify_with_map
 
@@ -57,6 +58,17 @@ def _node_version() -> str:
     return out.stdout.strip() or "unknown"
 
 
+def _posture_config(posture: CheckerPosture) -> dict[str, object]:
+    """Render pyright config keys for the equalized checker posture."""
+    if posture.strict:
+        msg = "strict posture not yet implemented for pyright"
+        raise NotImplementedError(msg)
+    return {
+        "typeCheckingMode": "standard",
+        "useLibraryCodeForTypes": posture.resolve_deps_report_first_party,
+    }
+
+
 class PyrightAdapter:
     name = "pyright"
     install_source = "npm + Node"
@@ -98,8 +110,7 @@ class PyrightAdapter:
         pyright_config: dict[str, object] = {
             "include": includes,
             "exclude": excludes,
-            "typeCheckingMode": "standard",  # stock default
-            "useLibraryCodeForTypes": True,  # resolve deps, report first-party only
+            **_posture_config(PRESETS[Policy.STANDARD]),
             "pythonVersion": config.python_version,
             "pythonPlatform": platform,  # threaded from normalized config, not hardcoded
         }
