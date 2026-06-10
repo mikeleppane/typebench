@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from typebench.adapters._support import confirm_clean, probe_version
 from typebench.adapters.base import ParallelismCap, coerce_count
 from typebench.contracts.models import ResultClass, ThreadMode
+from typebench.contracts.policy import PRESETS, CheckerPosture, Policy
 from typebench.contracts.taxonomy import is_constrained
 from typebench.engine.wrapper import classify_with_map
 
@@ -33,6 +34,14 @@ _EXIT_MAP: dict[int, ResultClass] = {
     2: ResultClass.FAILED_ENV,
     101: ResultClass.FAILED_CRASH,
 }
+
+
+def _posture_args(posture: CheckerPosture) -> list[str]:
+    """Render ty's native flags for the equalized checker posture."""
+    if posture.strict:
+        msg = "strict posture not yet implemented for ty"
+        raise NotImplementedError(msg)
+    return []
 
 
 class TyAdapter:
@@ -103,6 +112,7 @@ class TyAdapter:
         if config.venv_python is not None:
             argv += ["--python", config.venv_python]  # resolve third-party from venv
 
+        argv += _posture_args(PRESETS[Policy.STANDARD])
         env: dict[str, str] = {}
         if is_constrained(thread_mode):
             # SOFT cap to the configured core count (ty may still spawn threads).
