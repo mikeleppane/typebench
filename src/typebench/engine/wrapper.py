@@ -12,25 +12,19 @@ import argparse
 import os
 import subprocess
 import sys
-from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
+from typebench.contracts.proc import RawRun
 from typebench.contracts.taxonomy import ResultClass
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+    from pathlib import Path
 
 # OOM-killer signal. A bare SIGKILL is the OOM heuristic on the fallback
 # non-cgroup probe path. The cgroup-scoped resource pass sets RawRun.oom
 # authoritatively from memory.events.oom_kill when available.
 _SIGKILL = 9
-
-
-@dataclass(frozen=True)
-class RawRun:
-    exit_code: int
-    signal: int | None
-    timed_out: bool
-    oom: bool
-    stdout: str
-    stderr: str
-    env_error: bool = False
 
 
 def _terminate_tree(proc: subprocess.Popen[str]) -> None:
@@ -47,7 +41,12 @@ def _terminate_tree(proc: subprocess.Popen[str]) -> None:
     proc.kill()
 
 
-def run_command(argv: list[str], timeout: float, env: dict[str, str] | None = None) -> RawRun:
+def run_command(
+    argv: list[str],
+    timeout: float | None,
+    env: Mapping[str, str] | None = None,
+    cwd: Path | None = None,
+) -> RawRun:
     """Run argv to completion, capturing the real outcome. Never raises: a
     nonzero exit, a timeout, a signal death, AND an environment error (missing
     binary / not executable) are all captured as a RawRun so the caller can
@@ -64,6 +63,7 @@ def run_command(argv: list[str], timeout: float, env: dict[str, str] | None = No
             stderr=subprocess.PIPE,
             text=True,
             env=run_env,
+            cwd=cwd,
             start_new_session=os.name == "posix",
         )
     except OSError as exc:
