@@ -48,8 +48,8 @@ class TyAdapter:
     name = "ty"
     install_source = "PyPI wheel (Rust)"
 
-    def version(self) -> str:
-        return probe_version(["ty", "--version"], runner=subprocess.run)
+    def version(self, binary: str | None = None) -> str:
+        return probe_version([binary or "ty", "--version"], runner=subprocess.run)
 
     def install(self) -> str:
         return self.version()
@@ -60,6 +60,7 @@ class TyAdapter:
         config: NormalizedConfig,
         thread_mode: ThreadMode,
         workdir: Path,
+        binary: str | None = None,
     ) -> tuple[list[str], dict[str, str]]:
         # Hand-render the tiny ty.toml (tomllib is read-only — no writer; the test
         # reads it back, the adapter only writes it). [environment] carries
@@ -79,7 +80,7 @@ class TyAdapter:
         config_path.write_text("\n".join(lines) + "\n")
 
         argv = [
-            "ty",
+            binary or "ty",
             "check",
             *config.src_roots,
             "--config-file",
@@ -119,7 +120,9 @@ class TyAdapter:
             env["TY_MAX_PARALLELISM"] = str(config.cores)
         return (argv, env)
 
-    def parallelism_cap(self, thread_mode: ThreadMode, cores: int) -> ParallelismCap:
+    def parallelism_cap(
+        self, thread_mode: ThreadMode, cores: int, binary: str | None = None
+    ) -> ParallelismCap:
         # TY_MAX_PARALLELISM is a soft task cap, not a hard thread cap. Always set in
         # CONSTRAINED (incl. cores=1), so the mechanism is cores-independent.
         return ParallelismCap(mechanism="TY_MAX_PARALLELISM + cpu-affinity", hard_cap=False)

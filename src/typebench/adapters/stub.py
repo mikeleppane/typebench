@@ -42,7 +42,7 @@ class StubAdapter:
         self._fail_after_runs = fail_after_runs
         self._state_file = state_file
 
-    def version(self) -> str:
+    def version(self, binary: str | None = None) -> str:
         return "stub-1.0"
 
     def install(self) -> str:
@@ -55,12 +55,13 @@ class StubAdapter:
         config: NormalizedConfig,
         thread_mode: ThreadMode,
         workdir: Path,
+        binary: str | None = None,
     ) -> tuple[list[str], dict[str, str]]:
         if self._missing_binary:
             # Nonexistent executable -> run_command raises OSError -> failed{env}.
             return (["typebench-nonexistent-checker-xyz"], {})
         argv = [
-            sys.executable,
+            binary or sys.executable,
             "-m",
             "typebench._internal.fake_checker",
             "--exit-code",
@@ -83,7 +84,9 @@ class StubAdapter:
             argv += ["--signal", str(self._signal)]
         return (argv, {})
 
-    def parallelism_cap(self, thread_mode: ThreadMode, cores: int) -> ParallelismCap:
+    def parallelism_cap(
+        self, thread_mode: ThreadMode, cores: int, binary: str | None = None
+    ) -> ParallelismCap:
         # Single process: CPU affinity is the only lever and is a true cap.
         return ParallelismCap(mechanism="cpu-affinity", hard_cap=True)
 

@@ -130,7 +130,7 @@ class _CannedAdapter:
         self._rc = result_class
         self._files = files
 
-    def version(self) -> str:
+    def version(self, binary: str | None = None) -> str:
         return f"{self.name} 1.0"
 
     def install(self) -> str:
@@ -142,10 +142,13 @@ class _CannedAdapter:
         config: NormalizedConfig,
         thread_mode: ThreadMode,
         workdir: Path,
+        binary: str | None = None,
     ) -> tuple[list[str], dict[str, str]]:
         return (["true"], {})
 
-    def parallelism_cap(self, thread_mode: ThreadMode, cores: int) -> ParallelismCap:
+    def parallelism_cap(
+        self, thread_mode: ThreadMode, cores: int, binary: str | None = None
+    ) -> ParallelismCap:
         return ParallelismCap(mechanism="x", hard_cap=False)
 
     def parse(self, stdout: str, stderr: str, exit_code: int) -> tuple[int | None, int | None]:
@@ -171,6 +174,7 @@ class _BrokenCommandAdapter(_CannedAdapter):
         config: NormalizedConfig,
         thread_mode: ThreadMode,
         workdir: Path,
+        binary: str | None = None,
     ) -> tuple[list[str], dict[str, str]]:
         msg = "cannot write config"
         raise OSError(msg)

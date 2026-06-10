@@ -93,19 +93,20 @@ class MypyAdapter:
     name = "mypy"
     install_source = "PyPI wheel (mypyc-compiled)"
 
-    def version(self) -> str:
-        return probe_version(["mypy", "--version"], runner=subprocess.run)
+    def version(self, binary: str | None = None) -> str:
+        return probe_version([binary or "mypy", "--version"], runner=subprocess.run)
 
     def install(self) -> str:
         # Records the version string, which carries "(compiled: yes)" for the lock
         # manifest (mypyc-compiled wheels are the default distribution).
         return self.version()
 
-    def _supports_parallel(self) -> bool:
+    def _supports_parallel(self, binary: str | None = None) -> bool:
         """True when this mypy is >= 2.0 (the version that added --num-workers).
         Parses the resolved --version; an unparsable/unknown version reads as
         no-support so we never pass an unknown flag to an older binary."""
-        major = _major_version(self.version())
+        version = self.version(binary) if binary is not None else self.version()
+        major = _major_version(version)
         return major is not None and major >= _MIN_PARALLEL_MAJOR
 
     def _num_workers(self, cores: int, thread_mode: ThreadMode) -> int:
@@ -122,9 +123,10 @@ class MypyAdapter:
         config: NormalizedConfig,
         thread_mode: ThreadMode,
         workdir: Path,
+        binary: str | None = None,
     ) -> tuple[list[str], dict[str, str]]:
         argv = [
-            "mypy",
+            binary or "mypy",
             "--python-version",
             config.python_version,
             "--platform",
@@ -135,7 +137,9 @@ class MypyAdapter:
         # every logical CPU. Only parallelize when workers > 1: -n1 is single-
         # process like the default but pays parallel-runtime overhead, and the
         # cores=1 default must stay byte-identical to the pre-parallel command.
-        workers = self._num_workers(config.cores, thread_mode) if self._supports_parallel() else 1
+        workers = (
+            self._num_workers(config.cores, thread_mode) if self._supports_parallel(binary) else 1
+        )
         if workers > 1:
             # mypy parallel mode REQUIRES the cache ("Cache must be enabled in
             # parallel mode") — incompatible with --no-incremental / --cache-dir=
@@ -155,14 +159,16 @@ class MypyAdapter:
         argv += list(config.src_roots)
         return (argv, {})
 
-    def parallelism_cap(self, thread_mode: ThreadMode, cores: int) -> ParallelismCap:
+    def parallelism_cap(
+        self, thread_mode: ThreadMode, cores: int, binary: str | None = None
+    ) -> ParallelismCap:
         # Report the mechanism actually applied for this (thread_mode, cores) — the
         # honesty contract. command() emits --num-workers ONLY when workers > 1, so
         # mypy >= 2.0 with workers > 1 is the "--num-workers" hard cap; otherwise
         # (cores=1, or pre-2.0) it runs single-process — also a hard cap. Mirrors
         # the exact predicate in command() so the recorded mechanism never claims a
         # worker cap that was not passed (e.g. the default constrained N=1 headline).
-        if self._supports_parallel() and self._num_workers(cores, thread_mode) > 1:
+        if self._supports_parallel(binary) and self._num_workers(cores, thread_mode) > 1:
             return ParallelismCap(mechanism="--num-workers + cpu-affinity", hard_cap=True)
         return ParallelismCap(mechanism="single-process + cpu-affinity", hard_cap=True)
 

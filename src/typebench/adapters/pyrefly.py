@@ -54,8 +54,8 @@ class PyreflyAdapter:
     name = "pyrefly"
     install_source = "PyPI wheel (Rust)"
 
-    def version(self) -> str:
-        return probe_version(["pyrefly", "--version"], runner=subprocess.run)
+    def version(self, binary: str | None = None) -> str:
+        return probe_version([binary or "pyrefly", "--version"], runner=subprocess.run)
 
     def install(self) -> str:
         return self.version()
@@ -66,6 +66,7 @@ class PyreflyAdapter:
         config: NormalizedConfig,
         thread_mode: ThreadMode,
         workdir: Path,
+        binary: str | None = None,
     ) -> tuple[list[str], dict[str, str]]:
         # kebab-case keys. preset="default" is the stock-neutral
         # policy — NOT basic (under-reports -> false-clean) and NOT strict
@@ -100,7 +101,7 @@ class PyreflyAdapter:
         config_path.write_text("\n".join(lines) + "\n")
 
         argv = [
-            "pyrefly",
+            binary or "pyrefly",
             "check",
             "--config",
             str(config_path),  # short-circuits discovery (suppress project cfg)
@@ -112,7 +113,9 @@ class PyreflyAdapter:
             argv += ["--threads", str(config.cores)]  # HARD cap (rayon pool = N)
         return (argv, {})
 
-    def parallelism_cap(self, thread_mode: ThreadMode, cores: int) -> ParallelismCap:
+    def parallelism_cap(
+        self, thread_mode: ThreadMode, cores: int, binary: str | None = None
+    ) -> ParallelismCap:
         # --threads N is a HARD cap (rayon num_threads(N)); RAYON_NUM_THREADS is
         # NOT honored. Always set in CONSTRAINED (incl. cores=1), so the mechanism
         # is cores-independent. Affinity pins the cores on top.

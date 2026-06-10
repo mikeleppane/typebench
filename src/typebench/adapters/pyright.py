@@ -73,8 +73,8 @@ class PyrightAdapter:
     name = "pyright"
     install_source = "npm + Node"
 
-    def version(self) -> str:
-        return probe_version(["pyright", "--version"], runner=subprocess.run)
+    def version(self, binary: str | None = None) -> str:
+        return probe_version([binary or "pyright", "--version"], runner=subprocess.run)
 
     def install(self) -> str:
         # `pyright --version` omits Node; record both for reproducibility. Node
@@ -92,6 +92,7 @@ class PyrightAdapter:
         config: NormalizedConfig,
         thread_mode: ThreadMode,
         workdir: Path,
+        binary: str | None = None,
     ) -> tuple[list[str], dict[str, str]]:
         platform = self._platform(config)
         # pyright resolves config `include` paths RELATIVE to the config-file dir
@@ -128,7 +129,7 @@ class PyrightAdapter:
         (workdir / "pyrightconfig.json").write_text(json.dumps(pyright_config, indent=2))
 
         argv = [
-            "pyright",
+            binary or "pyright",
             "--project",
             str(workdir),
             "--outputjson",
@@ -142,7 +143,9 @@ class PyrightAdapter:
         # CONSTRAINED: omit --threads (default single main thread); affinity is uniform.
         return (argv, {})
 
-    def parallelism_cap(self, thread_mode: ThreadMode, cores: int) -> ParallelismCap:
+    def parallelism_cap(
+        self, thread_mode: ThreadMode, cores: int, binary: str | None = None
+    ) -> ParallelismCap:
         # pyright stays single-main-thread in CONSTRAINED regardless of cores;
         # affinity makes the cap hard. cores-independent mechanism.
         return ParallelismCap(mechanism="cpu-affinity + single-thread", hard_cap=False)
