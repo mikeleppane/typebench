@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 from typebench.adapters._support import confirm_clean, probe_version
 from typebench.adapters.base import ParallelismCap
 from typebench.contracts.models import ResultClass, ThreadMode
+from typebench.contracts.policy import PRESETS, CheckerPosture, Policy
 from typebench.contracts.taxonomy import is_constrained
 from typebench.engine.wrapper import universal_failure_prefix
 
@@ -73,6 +74,21 @@ def _globs_to_exclude_regex(globs: tuple[str, ...]) -> str:
     return r"(^|/)(" + "|".join(re.escape(n) for n in names) + r")(/|$)"
 
 
+def _posture_args(posture: CheckerPosture) -> list[str]:
+    """Render mypy's native flags for the equalized checker posture."""
+    if posture.strict:
+        msg = "strict posture not yet implemented for mypy"
+        raise NotImplementedError(msg)
+    args: list[str] = []
+    if posture.analyze_untyped_defs:
+        args.append("--check-untyped-defs")  # analyze all bodies
+    if posture.resolve_deps_report_first_party:
+        args.append("--follow-imports=silent")  # resolve dep types, report first-party only
+    if posture.suppress_project_config:
+        args.append("--config-file=")  # empty value suppresses the project's own config
+    return args
+
+
 class MypyAdapter:
     name = "mypy"
     install_source = "PyPI wheel (mypyc-compiled)"
@@ -113,9 +129,7 @@ class MypyAdapter:
             config.python_version,
             "--platform",
             config.python_platform,
-            "--check-untyped-defs",  # analyze all bodies
-            "--follow-imports=silent",  # resolve dep types, report first-party only
-            "--config-file=",  # empty value suppresses the project's own config
+            *_posture_args(PRESETS[Policy.STANDARD]),
         ]
         # Parallel pass (mypy >= 2.0). CONSTRAINED -> config.cores, ALL_CORES ->
         # every logical CPU. Only parallelize when workers > 1: -n1 is single-
