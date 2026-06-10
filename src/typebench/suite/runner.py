@@ -1,4 +1,4 @@
-"""Suite orchestration for the project x tool x thread-mode matrix.
+"""Suite orchestration for the project x checker-id x thread-mode matrix.
 
 Runs the matrix behind the preflight gate and writes a ResultsEnvelope. Off the
 measured path; pydantic via `models` is fine here.
@@ -16,6 +16,7 @@ from typebench.contracts.models import (
     ResultClass,
     ResultsEnvelope,
     RunResult,
+    ThreadMode,
 )
 from typebench.corpus.catalog import load_suite, load_suite_version
 from typebench.corpus.envman import prepare_project
@@ -28,28 +29,35 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from typebench.adapters.base import Adapter
-    from typebench.contracts.models import PreparedProject, ThreadMode
+    from typebench.contracts.models import PreparedProject
     from typebench.corpus.catalog import CorpusProject
     from typebench.engine.calibration import CalibrationStats
 
 
 @dataclass(frozen=True)
 class SuiteCell:
-    """One unit of the benchmark matrix."""
+    """One unit of the benchmark matrix, keyed by resolved checker identity."""
 
     project: str
-    tool: str
+    checker_id: str  # was: tool — two versions of one tool are distinct cells
     thread_mode: ThreadMode
+    cores: int | None  # CONSTRAINED's pinned core count; None for ALL_CORES
 
 
 def build_matrix(
-    projects: list[str], tools: list[str], thread_modes: list[ThreadMode]
+    projects: list[str],
+    checker_ids: list[str],
+    thread_modes: list[ThreadMode],
+    cores: int = 1,
 ) -> list[SuiteCell]:
-    """Project-major matrix so a project's clone/venv is reused across its cells."""
+    """Project-major matrix so a project's clone/venv is reused across its cells.
+    ALL_CORES cells carry cores=None (unconstrained); CONSTRAINED cells carry the
+    scalar `cores`. The cores-LIST sweep (one constrained cell per cores value) is
+    added in A3; A2 threads a single scalar."""
     return [
-        SuiteCell(project, tool, mode)
+        SuiteCell(project, checker_id, mode, None if mode is ThreadMode.ALL_CORES else cores)
         for project in projects
-        for tool in tools
+        for checker_id in checker_ids
         for mode in thread_modes
     ]
 
@@ -64,6 +72,11 @@ def shard(cells: list[SuiteCell], index: int, total: int) -> list[SuiteCell]:
     if not 0 <= index < total:
         raise ValueError(f"shard index {index} out of range for total {total}")
     return [cell for position, cell in enumerate(cells) if position % total == index]
+
+
+def _tool_of(checker_id: str) -> str:
+    """The bare tool name out of a checker_id (`mypy@1.18.2+rc` -> `mypy`)."""
+    return checker_id.split("@", 1)[0]
 
 
 def _excluded_record(
@@ -88,8 +101,9 @@ def _excluded_record(
         else None
     )
     return RunResult(
-        tool=cell.tool,
+        tool=_tool_of(cell.checker_id),
         tool_version="unknown",
+        checker_id=cell.checker_id,
         project=cell.project,
         thread_mode=cell.thread_mode,
         result_class=ResultClass.FAILED_ENV,
@@ -159,7 +173,10 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
 
     all_projects = projects if projects is not None else load_projects(suite_path)
     suite_version = load_version(suite_path)
-    cells = shard(build_matrix(all_projects, tools, thread_modes), shard_index, shard_total)
+    checker_ids = [f"{tool}@latest" for tool in tools]
+    cells = shard(
+        build_matrix(all_projects, checker_ids, thread_modes, cores), shard_index, shard_total
+    )
 
     calibration: CalibrationStats | None = None
     if calibrate_fn is not None:
@@ -173,7 +190,7 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
     results: list[RunResult] = []
     for project, project_cells in by_project.items():
         entry = lookup_entry(suite_path, project)
-        project_tools = sorted({c.tool for c in project_cells})
+        project_tools = sorted({_tool_of(c.checker_id) for c in project_cells})
         adapters = [adapter_factory(name) for name in project_tools]
         adapter_by_name = {a.name: a for a in adapters}
 
@@ -183,7 +200,9 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
         # kind must still emit records for the project's cells, never abort the suite.
         except Exception as exc:
             for cell in project_cells:
-                src = getattr(adapter_by_name.get(cell.tool), "install_source", "unknown")
+                src = getattr(
+                    adapter_by_name.get(_tool_of(cell.checker_id)), "install_source", "unknown"
+                )
                 results.append(
                     _excluded_record(
                         cell,
@@ -204,7 +223,7 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
                 if not (t.result_class.is_measured_success and t.scope_ok)
             )
             for cell in project_cells:
-                src = adapter_by_name[cell.tool].install_source
+                src = adapter_by_name[_tool_of(cell.checker_id)].install_source
                 results.append(
                     _excluded_record(
                         cell,
@@ -224,9 +243,14 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
             entry.python_version,
             entry.python_platform,
         )
-        config = _suite_config(prepared, cores)
+        # A2 boundary: stamp checker_id only on excluded records. Measured records
+        # still keep checker_id=None because run_single has not received the A3
+        # resolved-spec wiring yet, so an A2 envelope can mix @latest excluded
+        # cells with None measured cells. A3 replaces both with resolved ids.
         for cell in project_cells:
-            adapter = adapter_by_name[cell.tool]
+            adapter = adapter_by_name[_tool_of(cell.checker_id)]
+            cell_cores = cell.cores if cell.cores is not None else cores
+            config = _suite_config(prepared, cell_cores)
             manifest = RunManifest(
                 project_sha=prepared.sha,
                 lock_hash=prepared.lock_hash,
@@ -235,7 +259,7 @@ def run_suite(  # noqa: PLR0913 — distinct orchestration knobs + injectable se
                 canonical_loc=prepared.canonical_loc,
                 canonical_code_loc=prepared.canonical_code_loc,
                 tool_install_source=adapter.install_source,
-                over_reports=over_by_tool.get(cell.tool, False),
+                over_reports=over_by_tool.get(_tool_of(cell.checker_id), False),
             )
             results.append(
                 run_one(

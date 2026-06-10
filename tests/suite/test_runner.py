@@ -22,9 +22,12 @@ type EnvFactory = Callable[..., EnvFingerprint]
 
 
 def test_build_matrix_is_project_major() -> None:
-    cells = build_matrix(["a", "b"], ["mypy", "ty"], [ThreadMode.ALL_CORES, ThreadMode.CONSTRAINED])
+    cells = build_matrix(
+        ["a", "b"], ["mypy@latest", "ty@latest"], [ThreadMode.ALL_CORES, ThreadMode.CONSTRAINED]
+    )
     assert len(cells) == 8
-    assert cells[0] == SuiteCell("a", "mypy", ThreadMode.ALL_CORES)
+    # checker_id is the cell key (was: tool); ALL_CORES carries cores=None.
+    assert cells[0] == SuiteCell("a", "mypy@latest", ThreadMode.ALL_CORES, None)
     assert all(isinstance(c, SuiteCell) for c in cells)
 
 
