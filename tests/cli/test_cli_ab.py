@@ -46,6 +46,8 @@ def test_ab_command_prints_wall_delta_and_writes_envelope(
     target = tmp_path / "demo"
     target.mkdir()
     out = tmp_path / "env.json"
+    candidate_bin = tmp_path / "bin"
+    candidate_bin.write_text("x")
 
     def fake_run_ab(**kwargs: object) -> ResultsEnvelope:
         return ResultsEnvelope(
@@ -82,7 +84,7 @@ def test_ab_command_prints_wall_delta_and_writes_envelope(
             "--checker",
             "pyrefly",
             "--candidate-bin",
-            str(tmp_path / "bin"),
+            str(candidate_bin),
             "--baseline",
             "==0.36",
             "--candidate-label",
@@ -100,3 +102,49 @@ def test_ab_command_prints_wall_delta_and_writes_envelope(
     assert "-25.0%" in result.output
     assert out.exists()
     assert ResultsEnvelope.model_validate_json(out.read_text()).suite_version == "ab-2026-06-11"
+
+
+def test_ab_rejects_missing_candidate_bin(tmp_path: Path) -> None:
+    target = tmp_path / "demo"
+    target.mkdir()
+    result = runner.invoke(
+        app,
+        [
+            "ab",
+            "--checker",
+            "mypy",
+            "--candidate-bin",
+            str(tmp_path / "does-not-exist"),
+            "--target",
+            str(target),
+            "--output",
+            str(tmp_path / "env.json"),
+        ],
+    )
+    assert result.exit_code == 2
+    assert "candidate-bin is not a file" in result.output
+
+
+def test_ab_rejects_path_prefixed_baseline(tmp_path: Path) -> None:
+    target = tmp_path / "demo"
+    target.mkdir()
+    cand = tmp_path / "bin"
+    cand.write_text("x")
+    result = runner.invoke(
+        app,
+        [
+            "ab",
+            "--checker",
+            "mypy",
+            "--candidate-bin",
+            str(cand),
+            "--baseline",
+            "path:/some/binary",
+            "--target",
+            str(target),
+            "--output",
+            str(tmp_path / "env.json"),
+        ],
+    )
+    assert result.exit_code == 2
+    assert "use --baseline-bin" in result.output
