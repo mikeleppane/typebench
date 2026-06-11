@@ -24,7 +24,12 @@ from typebench.adapters.registry import (
     default_tools,
     validate_specs,
 )
-from typebench.contracts.config import DEFAULT_EXCLUDES, NormalizedConfig, config_hash
+from typebench.contracts.config import (
+    DEFAULT_EXCLUDES,
+    MeasurementPlan,
+    NormalizedConfig,
+    config_hash,
+)
 from typebench.contracts.configfile import (
     RunCliOverrides,
     discover_config,
@@ -32,7 +37,7 @@ from typebench.contracts.configfile import (
     merge_cli,
     resolve_corpus,
 )
-from typebench.contracts.identity import CheckerSpec
+from typebench.contracts.identity import CheckerSpec, Source
 from typebench.contracts.models import ResultsEnvelope
 from typebench.contracts.policy import Policy
 from typebench.contracts.runconfig import RunConfig, merge_tool_override
@@ -43,21 +48,29 @@ from typebench.corpus.envman import PrepareError, prepare_project
 from typebench.engine.calibration import calibrate
 from typebench.engine.collector import RunManifest, run_single
 from typebench.engine.doctor import Tier, run_doctor
+from typebench.suite.ab import run_ab
 from typebench.suite.preflight import preflight_project
 from typebench.suite.renderer import (
     build_report_html,
     build_trends,
+    render_ab,
     render_compare,
     render_readme,
     render_terminal,
 )
 from typebench.suite.runner import run_suite
 from typebench.suite.selection import SelectionError, resolve_selection
-from typebench.suite.services import CorpusCache, LocalBenchEngine, UvCheckerResolver
+from typebench.suite.services import (
+    CorpusCache,
+    LocalBenchEngine,
+    PathResolver,
+    UvCheckerResolver,
+)
 
 if TYPE_CHECKING:
     from typebench.contracts.models import PreparedProject
     from typebench.corpus.catalog import CorpusProject
+    from typebench.suite.ports import CheckerResolver
 
 app = typer.Typer(help="Neutral Python type-checker performance benchmark.")
 config_app = typer.Typer(help="Inspect and scaffold typebench configuration.")
@@ -74,6 +87,8 @@ _README_BEGIN = "<!-- TYPEBENCH:BEGIN -->"
 _README_END = "<!-- TYPEBENCH:END -->"
 _DEFAULT_TOOLS = default_tools()
 _MIN_COMPARE_CHECKERS = 2
+# run_ab emits resolved_checkers as (candidate, baseline); index 1 is the baseline.
+_AB_ARMS = 2
 _INIT_FALLBACKS = {
     "mypy": "1.18.2",
     "pyright": "1.1.410",
@@ -786,6 +801,88 @@ def compare(  # noqa: PLR0913 — distinct user-facing CLI options for one comma
         else specs[0].checker_id()
     )
     typer.echo(render_compare(envelope, baseline=baseline_id))
+
+
+def _parse_baseline(baseline: str) -> str | None:
+    """'latest' (or empty) -> None (uv installs newest). '==X.Y' or 'X.Y' -> 'X.Y'."""
+    token = baseline.strip()
+    if token in ("", "latest"):
+        return None
+    return token[2:].strip() if token.startswith("==") else token
+
+
+@app.command()
+def ab(  # noqa: PLR0913 — distinct user-facing CLI options for one command
+    checker: Annotated[str, typer.Option(help="Adapter id (pyrefly|ty|mypy|pyright).")],
+    candidate_bin: Annotated[Path, typer.Option(help="Path to the PR-built checker binary.")],
+    output: Annotated[Path, typer.Option(help="Where to write the A/B results envelope JSON.")],
+    target: Annotated[
+        list[Path], typer.Option(help="Project path to type-check (repeatable; >=1).")
+    ],
+    baseline: Annotated[
+        str, typer.Option(help="Baseline uv spec: 'latest' or '==X.Y'.")
+    ] = "latest",
+    baseline_bin: Annotated[
+        Path | None,
+        typer.Option(help="Baseline binary path (offline; overrides --baseline / uv)."),
+    ] = None,
+    candidate_label: Annotated[str, typer.Option(help="Candidate row label.")] = "pr",
+    baseline_label: Annotated[str, typer.Option(help="Baseline row label.")] = "release",
+    runs: Annotated[int, typer.Option(help="hyperfine timed runs.")] = 5,
+    warmup: Annotated[int, typer.Option(help="hyperfine warmup runs.")] = 1,
+    timeout: Annotated[float, typer.Option(help="Per-invocation timeout (seconds).")] = 900.0,
+    thread_mode: Annotated[ThreadMode, typer.Option(help="Thread track.")] = ThreadMode.ALL_CORES,
+    cores: Annotated[int, typer.Option(help="Constrained-track core pin.")] = 1,
+    measure: Annotated[
+        bool, typer.Option("--measure/--no-measure", help="Run the cgroup memory pass.")
+    ] = False,
+    cache_root: Annotated[
+        Path, typer.Option(help="Where the baseline uv checker cache lives.")
+    ] = DEFAULT_CACHE_ROOT,
+) -> None:
+    """A/B-compare a candidate checker binary against a released baseline (wall-only)."""
+    if not target:
+        typer.echo("ab needs >=1 --target.", err=True)
+        raise typer.Exit(code=2)
+    out_dir = output.parent
+    if not out_dir.exists() or not os.access(out_dir, os.W_OK):
+        typer.echo(f"Output directory not writable: {out_dir}", err=True)
+        raise typer.Exit(code=2)
+    try:
+        create_adapter(checker)
+    except UnknownToolError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+    if baseline_bin is not None:
+        baseline_spec = CheckerSpec(tool=checker, label=baseline_label, source=Source.PATH)
+        baseline_resolver: CheckerResolver = PathResolver(str(baseline_bin))
+    else:
+        baseline_spec = CheckerSpec(
+            tool=checker, version=_parse_baseline(baseline), label=baseline_label
+        )
+        baseline_resolver = UvCheckerResolver(cache_root)
+
+    plan = MeasurementPlan(runs=runs, warmup=warmup, timeout_s=timeout, measure=measure)
+    envelope = run_ab(
+        checker=checker,
+        candidate_bin=str(candidate_bin),
+        candidate_label=candidate_label,
+        baseline_spec=baseline_spec,
+        targets=list(target),
+        plan=plan,
+        thread_mode=thread_mode,
+        cores=cores,
+        generated_at=datetime.now(UTC).isoformat(),
+        baseline_resolver=baseline_resolver,
+    )
+    output.write_text(envelope.model_dump_json(indent=2))
+    baseline_id = (
+        envelope.resolved_checkers[1].checker_id
+        if len(envelope.resolved_checkers) >= _AB_ARMS
+        else None
+    )
+    typer.echo(render_ab(envelope, baseline=baseline_id))
 
 
 def _load_results_history(results_dir: Path) -> list[ResultsEnvelope]:
