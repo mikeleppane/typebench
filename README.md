@@ -210,6 +210,24 @@ opt-in. Raise it (e.g. `--cores 8`) to pin the checker to N cores and let it use
 to N workers — mypy ≥ 2.0 (`--num-workers`), pyrefly (`--threads`), and ty
 (`TY_MAX_PARALLELISM`) all scale; pyright stays effectively single-main-thread.
 
+### Viewing results locally
+
+A `typebench suite` run prints the same grouped, fastest-first tables you see in the
+README — one per project / thread-mode / cores — as soon as it finishes, so you get
+the numbers on screen without opening the JSON.
+
+For the interactive trend charts without publishing anything, build a self-contained
+HTML report from your own results history:
+
+```bash
+uv run typebench report --results-dir results --open
+```
+
+This folds the site assets and your local trends into a single portable file
+(`typebench-report.html` by default) and opens it in your browser. It touches
+neither `README.md` nor the published site — those are maintainer-only and handled
+by `typebench render` plus CI (see [Publishing flow](#publishing-flow)).
+
 ### Preflight
 
 Preflight checks whether a corpus project is usable by the selected checkers before

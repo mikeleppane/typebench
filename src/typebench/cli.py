@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import webbrowser
 from datetime import UTC, datetime
 
 # Runtime import (not TYPE_CHECKING): typer resolves option annotations at
@@ -43,7 +44,13 @@ from typebench.engine.calibration import calibrate
 from typebench.engine.collector import RunManifest, run_single
 from typebench.engine.doctor import Tier, run_doctor
 from typebench.suite.preflight import preflight_project
-from typebench.suite.renderer import build_trends, render_compare, render_readme
+from typebench.suite.renderer import (
+    build_report_html,
+    build_trends,
+    render_compare,
+    render_readme,
+    render_terminal,
+)
 from typebench.suite.runner import run_suite
 from typebench.suite.selection import SelectionError, resolve_selection
 from typebench.suite.services import CorpusCache, LocalBenchEngine, UvCheckerResolver
@@ -669,6 +676,8 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
     )
     output.write_text(envelope.model_dump_json(indent=2))
     measured = sum(1 for r in envelope.runs if r.result_class.is_measured_success)
+    if envelope.runs:
+        typer.echo(render_terminal(envelope))
     typer.echo(f"suite {shard} -> {measured}/{len(envelope.runs)} measured -> {output}")
 
 
@@ -779,6 +788,22 @@ def compare(  # noqa: PLR0913 — distinct user-facing CLI options for one comma
     typer.echo(render_compare(envelope, baseline=baseline_id))
 
 
+def _load_results_history(results_dir: Path) -> list[ResultsEnvelope]:
+    """Load every results/<date>.json envelope, oldest-first by generated_at.
+    A single corrupt/half-written envelope fails loudly (exit 1) rather than
+    silently emitting garbage; an empty dir is not an error and returns []."""
+    history: list[ResultsEnvelope] = []
+    for file in sorted(results_dir.glob("*.json")):
+        try:
+            history.append(ResultsEnvelope.model_validate_json(file.read_text()))
+        except (ValidationError, ValueError, OSError) as exc:
+            reason = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+            typer.echo(f"Malformed results envelope {file}: {reason}", err=True)
+            raise typer.Exit(code=1) from exc
+    history.sort(key=lambda envelope: envelope.generated_at)
+    return history
+
+
 @app.command()
 def render(
     results_dir: Annotated[Path, typer.Option(help="Directory of results/<date>.json envelopes.")],
@@ -786,19 +811,7 @@ def render(
     trends: Annotated[Path, typer.Option(help="Where to write site/data/trends.json.")],
 ) -> None:
     """Regenerate the README table (latest envelope) and trends.json (full history)."""
-    files = sorted(results_dir.glob("*.json"))
-    history: list[ResultsEnvelope] = []
-    for file in files:
-        try:
-            history.append(ResultsEnvelope.model_validate_json(file.read_text()))
-        except (ValidationError, ValueError, OSError) as exc:
-            # One corrupt/half-written envelope must not dump a raw pydantic
-            # traceback at the user; fail loudly with the offending file + a
-            # one-line reason (spec: fail loudly rather than emit garbage).
-            reason = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
-            typer.echo(f"Malformed results envelope {file}: {reason}", err=True)
-            raise typer.Exit(code=1) from exc
-    history.sort(key=lambda envelope: envelope.generated_at)
+    history = _load_results_history(results_dir)
 
     # An empty store is not an error: the publish workflow runs before the first
     # official envelope exists. Emit a placeholder README block + empty trends so
@@ -810,6 +823,47 @@ def render(
     trends.write_text(json.dumps(build_trends(history), indent=2))
     summary = f"{len(history)} envelopes" if history else "no official results yet"
     typer.echo(f"render -> {readme} (latest) + {trends} ({summary})")
+
+
+@app.command()
+def report(
+    output: Annotated[
+        Path, typer.Option(help="Where to write the self-contained HTML report.")
+    ] = Path("typebench-report.html"),
+    results_dir: Annotated[
+        Path, typer.Option(help="Directory of results/<date>.json envelopes.")
+    ] = Path("results"),
+    site_dir: Annotated[
+        Path, typer.Option(help="Site assets to inline (index.html, app.js, vendor/).")
+    ] = Path("site"),
+    open_browser: Annotated[
+        bool, typer.Option("--open/--no-open", help="Open the report in your browser when done.")
+    ] = False,
+) -> None:
+    """Build a self-contained local HTML report from your own results history.
+
+    Unlike `render`, this touches neither README.md nor the published site — it
+    folds the site assets + your local trends into one portable file you can open
+    with no server. Use it to view your own runs without publishing anything."""
+    history = _load_results_history(results_dir)
+    index_html = site_dir / "index.html"
+    app_js = site_dir / "app.js"
+    chart_js = site_dir / "vendor" / "chart.umd.min.js"
+    missing = [str(asset) for asset in (index_html, app_js, chart_js) if not asset.exists()]
+    if missing:
+        typer.echo(f"Missing site asset(s): {', '.join(missing)}", err=True)
+        raise typer.Exit(code=2)
+
+    html = build_report_html(
+        index_html.read_text(),
+        app_js=app_js.read_text(),
+        chart_js=chart_js.read_text(),
+        trends=build_trends(history),
+    )
+    output.write_text(html)
+    typer.echo(f"report -> {output} ({len(history)} envelopes)")
+    if open_browser:
+        webbrowser.open(output.resolve().as_uri())
 
 
 @app.command()

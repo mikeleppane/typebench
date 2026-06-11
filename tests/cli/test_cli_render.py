@@ -113,3 +113,40 @@ def test_render_empty_store_writes_placeholder_not_error(tmp_path: Path) -> None
         "points": [],
         "corpus_markers": [],
     }
+
+
+def _fake_site(root: Path) -> Path:
+    site = root / "site"
+    (site / "vendor").mkdir(parents=True)
+    (site / "index.html").write_text(
+        '<script src="./vendor/chart.umd.min.js"></script>\n<script src="./app.js"></script>\n'
+    )
+    (site / "app.js").write_text("console.log('app')")
+    (site / "vendor" / "chart.umd.min.js").write_text("/*chart*/")
+    return site
+
+
+def test_report_builds_self_contained_html(tmp_path: Path, make_env: EnvFactory) -> None:
+    results = tmp_path / "results"
+    results.mkdir()
+    _envelope_file(results / "2026-06-08.json", "2026-06-08T00:00:00Z", make_env)
+    site = _fake_site(tmp_path)
+    out = tmp_path / "report.html"
+    result = runner.invoke(
+        app,
+        [
+            "report",
+            "--results-dir",
+            str(results),
+            "--site-dir",
+            str(site),
+            "--output",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    html = out.read_text()
+    assert "/*chart*/" in html  # chart.js vendored inline
+    assert 'src="./vendor' not in html  # no external asset refs
+    assert "console.log('app')" in html  # app.js inline
+    assert "mypy@1.0" in html  # the envelope's data is embedded
