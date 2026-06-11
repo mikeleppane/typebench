@@ -86,6 +86,15 @@ def _checker_id(record: RunResult) -> str:
     return f"{record.tool}@{record.tool_version}"
 
 
+def _ab_display(checker_id: str) -> str:
+    """Friendly A/B identity '<tool> (<label>)' from '<tool>@<version>+<label>',
+    dropping the noisy raw --version string from the display. Falls back to the
+    full id when there is no label."""
+    tool = checker_id.split("@", 1)[0]
+    label = checker_id.rsplit("+", 1)[1] if "+" in checker_id else ""
+    return f"{tool} ({label})" if label else checker_id
+
+
 def _cores_label(cores: int | None) -> str:
     return "all-cores" if cores is None else f"cores={cores}"
 
@@ -343,7 +352,7 @@ def render_ab(envelope: ResultsEnvelope, baseline: str | None = None) -> str:
             record
         )
 
-    parts = [f"_A/B · baseline `{base_id}` · wall-time only_\n"]
+    parts = [f"_A/B · baseline {_ab_display(base_id)} · wall-time only_\n"]
     for project, mode, cores in sorted(
         groups, key=lambda group: (group[0], group[1], -1 if group[2] is None else group[2])
     ):
@@ -376,7 +385,9 @@ def render_ab(envelope: ResultsEnvelope, baseline: str | None = None) -> str:
             else:
                 runs_text = "—"
                 spread = "—"
-            rows.append(f"| {checker_id} | {wall_text} | {delta} | {runs_text} | {spread} |")
+            rows.append(
+                f"| {_ab_display(checker_id)} | {wall_text} | {delta} | {runs_text} | {spread} |"
+            )
         parts.append("\n".join(rows) + "\n")
     parts.append(
         "\n> Wall-time deltas on a shared CI runner. Treat small deltas (≲ a few %) as "

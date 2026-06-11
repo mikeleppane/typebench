@@ -135,8 +135,15 @@ runs:
           "${targs[@]}" \
           --output ab-results.json | tee ab-table.md
         echo "envelope-path=ab-results.json" >> "$GITHUB_OUTPUT"
+        case "${{ inputs.baseline }}" in
+          latest) bdesc="latest release" ;;
+          path:*) bdesc="local build" ;;
+          ==*) v="${{ inputs.baseline }}" ; bdesc="v${v#==}" ;;
+          *) bdesc="${{ inputs.baseline }}" ;;
+        esac
+        echo "baseline-desc=$bdesc" >> "$GITHUB_OUTPUT"
         {
-          echo "## typebench A/B — ${{ inputs.checker }} (PR vs ${{ inputs.baseline }})"
+          echo "## typebench A/B — ${{ inputs.checker }}: PR build vs ${bdesc} (wall-time)"
           cat ab-table.md
         } >> "$GITHUB_STEP_SUMMARY"
 
@@ -154,7 +161,7 @@ runs:
           const fs = require('fs');
           const marker = `<!-- typebench-ab:${{ inputs.checker }} -->`;
           const table = fs.readFileSync('ab-table.md', 'utf8');
-          const body = `${marker}\n## typebench A/B — ${{ inputs.checker }} (PR vs ${{ inputs.baseline }})\n${table}`;
+          const body = `${marker}\n## typebench A/B — ${{ inputs.checker }}: PR build vs ${{ steps.ab.outputs.baseline-desc }} (wall-time)\n${table}`;
           const { owner, repo } = context.repo;
           const issue_number = context.issue.number;
           try {
