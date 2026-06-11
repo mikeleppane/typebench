@@ -15,6 +15,9 @@ from typing import TYPE_CHECKING, Annotated
 
 import typer
 from pydantic import ValidationError
+from rich import box
+from rich.console import Console
+from rich.table import Table
 
 from typebench.adapters.base import CheckerHandle
 from typebench.adapters.registry import (
@@ -1032,25 +1035,40 @@ def doctor(
     only warn.
     """
     checks = run_doctor()
-    # Two-space separators GUARANTEE a gap even when a field overruns its width
-    # (e.g. tokei's --version is a full sentence); a bare `{x:<N}` pads short but
-    # never truncates, so long versions would otherwise collide with the next column.
-    typer.echo(f"{'tool':<12}  {'status':<26}  {'role':<24}  if absent")
-    for c in checks:
-        if not c.present:
-            status = "MISSING"
-        elif c.healthy:
-            status = f"ok {c.version}" if c.version else "ok"
-        else:
-            status = f"DEGRADED {c.version}" if c.version else "DEGRADED"
-        typer.echo(f"{c.name:<12}  {status:<26}  {c.role:<24}  {c.if_absent}")
+    console = Console()
+    # One table per tier, in escalating-importance order, so a REQUIRED miss
+    # (breaks the run) is never buried among OPTIONAL ones (degrade gracefully).
+    for tier in (Tier.REQUIRED, Tier.PER_TOOL, Tier.OPTIONAL):
+        rows = [c for c in checks if c.tier is tier]
+        if not rows:
+            continue
+        table = Table(title=str(tier), title_justify="left", box=box.SIMPLE, title_style="bold")
+        table.add_column("tool", no_wrap=True)
+        table.add_column("status", no_wrap=True)
+        table.add_column("version")
+        table.add_column("role")
+        for c in rows:
+            if not c.present:
+                status = "[red]✗ MISSING[/red]"
+            elif c.healthy:
+                status = "[green]✓ OK[/green]"
+            else:
+                status = "[yellow]⚠ DEGRADED[/yellow]"
+            table.add_row(c.name, status, c.version or "—", c.role)
+        console.print(table)
+
+    n_healthy = sum(1 for c in checks if c.healthy)
+    n_degraded = sum(1 for c in checks if c.present and not c.healthy)
+    n_missing = sum(1 for c in checks if not c.present)
+    console.print(f"{n_healthy} healthy · {n_degraded} degraded · {n_missing} missing")
 
     # Remediation: a doctor that says MISSING but not how to fix it is half a tool.
+    # Carry the consequence here too, since the per-tier tables stay uncluttered.
     unhealthy = [c for c in checks if not c.healthy]
     if unhealthy:
         typer.echo("\nto fix:")
         for c in unhealthy:
-            typer.echo(f"  {c.name:<12}  {c.install_hint}")
+            typer.echo(f"  {c.name:<12}  {c.install_hint}   (else: {c.if_absent})")
 
     unhealthy_required = [c.name for c in checks if c.tier is Tier.REQUIRED and not c.healthy]
     if unhealthy_required:
