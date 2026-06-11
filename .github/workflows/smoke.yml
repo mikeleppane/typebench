@@ -1,0 +1,95 @@
+name: smoke
+
+# Protects the harness from rot on every PR and push to main. Two jobs:
+#
+#  - quality:  the full local quality floor (ruff, ruff-format, pyrefly strict,
+#              pytest) run in a clean environment. Nothing else runs the test
+#              suite in CI, so this is the gate.
+#  - pipeline: exercises the real engine end-to-end via the stub checker (no
+#              binary, venv, network, or corpus clone needed) and prints the
+#              `doctor` capability report, which reveals whether systemd-run/cgroup
+#              memory measurement actually works on a hosted runner.
+#
+# It deliberately produces NO performance numbers — hosted runners are too noisy
+# (see docs/plans/2026-06-10-results-representation.md). Official numbers come
+# from the maintainer's benchmark PC.
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Sync project
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run ruff check
+
+      - name: Format check
+        run: uv run ruff format --check
+
+      - name: Type check (strict)
+        run: uv run pyrefly check
+
+      - name: Tests
+        run: uv run pytest -q
+
+  pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # Installs the pinned toolchain (hyperfine, tokei, node, uv) from mise.toml
+      # so the run exercises the real timing/LOC paths, not just the null fallbacks.
+      - name: Install pinned toolchain
+        uses: jdx/mise-action@v2
+
+      - name: Sync project
+        run: uv sync --frozen
+
+      - name: Capability report
+        run: uv run typebench doctor
+
+      - name: Stub run exercises the engine end-to-end
+        run: |
+          mkdir -p results
+          uv run typebench run \
+            --tool stub \
+            --project demo \
+            --runs 2 \
+            --warmup 1 \
+            --output results/smoke.json
+
+      - name: Validate the results schema
+        run: |
+          uv run python - <<'PY'
+          from typebench.contracts.models import RunResult
+
+          record = RunResult.model_validate_json(open("results/smoke.json").read())
+          assert record.tool == "stub", record.tool
+          assert record.result_class.is_measured_success, record.result_class
+          print(
+              "OK:", record.tool, record.result_class.value,
+              "| timing:", record.timing is not None,
+              "| memory:", record.memory is not None,
+          )
+          PY
