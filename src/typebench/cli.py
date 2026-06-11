@@ -318,6 +318,17 @@ def _replace_readme_block(readme_text: str, block: str) -> str:
     return readme_text.rstrip() + "\n\n## Latest results\n\n" + block + "\n"
 
 
+def _empty_readme_block() -> str:
+    """Placeholder block for when no official envelopes exist yet, so the publish
+    flow (and CI) stays green from day one instead of failing on an empty store."""
+    return (
+        f"{_README_BEGIN}\n\n"
+        "_No official results published yet. Run a suite and add the envelope "
+        "to `data/official/`._\n\n"
+        f"{_README_END}"
+    )
+
+
 @app.command()
 def run(  # noqa: PLR0912, PLR0913, PLR0915 — many user-facing CLI options + linear arg-validation/manifest/run setup; one command by design
     tool: Annotated[str, typer.Option(help="Checker to run (e.g. stub).")],
@@ -776,9 +787,6 @@ def render(
 ) -> None:
     """Regenerate the README table (latest envelope) and trends.json (full history)."""
     files = sorted(results_dir.glob("*.json"))
-    if not files:
-        typer.echo(f"No results/*.json found under {results_dir}", err=True)
-        raise typer.Exit(code=1)
     history: list[ResultsEnvelope] = []
     for file in files:
         try:
@@ -792,12 +800,16 @@ def render(
             raise typer.Exit(code=1) from exc
     history.sort(key=lambda envelope: envelope.generated_at)
 
-    block = render_readme(history[-1])
+    # An empty store is not an error: the publish workflow runs before the first
+    # official envelope exists. Emit a placeholder README block + empty trends so
+    # CI stays green and the site renders an honest "nothing yet" state.
+    block = render_readme(history[-1]) if history else _empty_readme_block()
     readme.write_text(_replace_readme_block(readme.read_text(), block))
 
     trends.parent.mkdir(parents=True, exist_ok=True)
     trends.write_text(json.dumps(build_trends(history), indent=2))
-    typer.echo(f"render -> {readme} (latest) + {trends} ({len(history)} envelopes)")
+    summary = f"{len(history)} envelopes" if history else "no official results yet"
+    typer.echo(f"render -> {readme} (latest) + {trends} ({summary})")
 
 
 @app.command()

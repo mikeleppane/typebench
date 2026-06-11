@@ -78,3 +78,38 @@ def test_render_updates_readme_markers_and_writes_trends(
     data = json.loads(trends.read_text())
     assert data["points"][0]["tool"] == "mypy"
     assert data["points"][0]["checker_id"] == "mypy@1.0"
+
+
+def test_render_empty_store_writes_placeholder_not_error(tmp_path: Path) -> None:
+    # The publish workflow runs before the first official envelope exists; an
+    # empty store must render a placeholder + empty trends, not exit non-zero.
+    results = tmp_path / "data" / "official"
+    results.mkdir(parents=True)
+    readme = tmp_path / "README.md"
+    readme.write_text(
+        "# typebench\n\nIntro prose.\n\n<!-- TYPEBENCH:BEGIN -->\n"
+        "OLD\n<!-- TYPEBENCH:END -->\n\nFooter prose.\n"
+    )
+    trends = tmp_path / "site" / "data" / "trends.json"
+    result = runner.invoke(
+        app,
+        [
+            "render",
+            "--results-dir",
+            str(results),
+            "--readme",
+            str(readme),
+            "--trends",
+            str(trends),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    text = readme.read_text()
+    assert "Intro prose." in text and "Footer prose." in text
+    assert "OLD" not in text
+    assert "No official results published yet" in text
+    assert json.loads(trends.read_text()) == {
+        "cpu_models": [],
+        "points": [],
+        "corpus_markers": [],
+    }
