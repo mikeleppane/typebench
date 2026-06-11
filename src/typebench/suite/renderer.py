@@ -8,6 +8,7 @@ cross-pass (cold-cpu ÷ warm-wall), not a within-run figure.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, assert_never
 
 from typebench.contracts.taxonomy import LocDenominator
@@ -121,21 +122,27 @@ def _table(
     return header + "\n".join(rows) + "\n"
 
 
-def render_readme(envelope: ResultsEnvelope) -> str:
-    """Markdown block (between the TYPEBENCH markers) — one table per
-    (project, thread-mode), ordered fastest-first (ranking by the measured metric,
-    not diagnostics). Includes the suite version, generated timestamp, and the
-    caveat footnotes."""
+_FOOTNOTE = (
+    "\n> kLOC/s denominator is the canonical analyzed code-LOC (tokei; blanks+"
+    "comments excluded), identical across tools. `—*` = throughput withheld "
+    "because the tool over-reports its analyzed set vs the canonical denominator. "
+    "`!` = swap observed during the memory pass, so peak memory may be understated. "
+    "Parallel efficiency is cross-pass (cold cgroup CPU-time ÷ warm hyperfine wall). "
+    "Checker issue counts are intentionally omitted — they are not comparable across "
+    "tools and are not a ranking.\n"
+)
+
+
+def _result_tables(envelope: ResultsEnvelope) -> list[str]:
+    """Per-(project, thread-mode, cores) heading + table parts, ordered fastest-
+    first (ranking by the measured metric, not diagnostics). Shared by the README
+    block and the terminal summary so the two never drift."""
     groups: dict[tuple[str, str, int | None], list[RunResult]] = {}
     for record in envelope.runs:
         groups.setdefault((record.project, record.thread_mode.value, record.cores), []).append(
             record
         )
-
-    parts = [
-        _README_BEGIN,
-        f"\n_Suite `{envelope.suite_version}` · generated {envelope.generated_at}_\n",
-    ]
+    parts: list[str] = []
     for project, mode, cores in sorted(
         groups, key=lambda group: (group[0], group[1], -1 if group[2] is None else group[2])
     ):
@@ -147,17 +154,63 @@ def render_readme(envelope: ResultsEnvelope) -> str:
                 harness_wall_overhead_s=envelope.harness_wall_overhead_s,
             )
         )
-    parts.append(
-        "\n> kLOC/s denominator is the canonical analyzed code-LOC (tokei; blanks+"
-        "comments excluded), identical across tools. `—*` = throughput withheld "
-        "because the tool over-reports its analyzed set vs the canonical denominator. "
-        "`!` = swap observed during the memory pass, so peak memory may be understated. "
-        "Parallel efficiency is cross-pass (cold cgroup CPU-time ÷ warm hyperfine wall). "
-        "Checker issue counts are intentionally omitted — they are not comparable across "
-        "tools and are not a ranking.\n"
-    )
-    parts.append(_README_END)
+    return parts
+
+
+def render_readme(envelope: ResultsEnvelope) -> str:
+    """Markdown block (between the TYPEBENCH markers) — one table per
+    (project, thread-mode), ordered fastest-first. Includes the suite version,
+    generated timestamp, and the caveat footnotes."""
+    parts = [
+        _README_BEGIN,
+        f"\n_Suite `{envelope.suite_version}` · generated {envelope.generated_at}_\n",
+        *_result_tables(envelope),
+        _FOOTNOTE,
+        _README_END,
+    ]
     return "\n".join(parts)
+
+
+def render_terminal(envelope: ResultsEnvelope) -> str:
+    """The README's grouped tables + footnote without the HTML markers, for
+    printing a readable summary at the end of a `suite` run (markdown renders
+    fine as plain text in a terminal)."""
+    parts = [
+        f"_Suite `{envelope.suite_version}` · generated {envelope.generated_at}_\n",
+        *_result_tables(envelope),
+        _FOOTNOTE,
+    ]
+    return "\n".join(parts)
+
+
+def build_report_html(
+    template: str,
+    *,
+    app_js: str,
+    chart_js: str,
+    trends: dict[str, object],
+) -> str:
+    """Fold the site assets + trend data into one self-contained HTML file.
+
+    The published site fetches `./data/trends.json` and loads `./app.js` plus the
+    vendored Chart.js over the network. A local report has no server, so all three
+    are inlined and the data is handed to app.js via a global it prefers over
+    fetch. A raw `</script>` inside the inlined JS or JSON would close the wrapping
+    `<script>` early, so it is neutralized (harmless: `<\\/script>` is identical to
+    `</script>` inside JS strings/regex and a valid `/` escape in JSON)."""
+
+    def _safe(text: str) -> str:
+        return text.replace("</script", "<\\/script")
+
+    html = template.replace(
+        '<script src="./vendor/chart.umd.min.js"></script>',
+        f"<script>{_safe(chart_js)}</script>",
+    )
+    return html.replace(
+        '<script src="./app.js"></script>',
+        f"<script>window.__TYPEBENCH_TRENDS__ = {_safe(json.dumps(trends))};\n"
+        f"{_safe(app_js)}</script>",
+    )
 
 
 def _calib_median(record: RunResult) -> float | None:

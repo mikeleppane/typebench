@@ -14,10 +14,12 @@ from typebench.contracts.models import (
 from typebench.contracts.taxonomy import LocDenominator, ResultClass, ThreadMode
 from typebench.suite.renderer import (
     _code_loc_or_withheld,
+    build_report_html,
     build_trends,
     cpu_model_anchors,
     render_compare,
     render_readme,
+    render_terminal,
 )
 
 type EnvFactory = Callable[..., EnvFingerprint]
@@ -506,3 +508,58 @@ def test_render_compare_empty_envelope_has_plain_terminal_message() -> None:
 
     assert md == "_no records to compare_"
     assert "TYPEBENCH:BEGIN" not in md
+
+
+def test_render_terminal_has_tables_without_readme_markers(make_env: EnvFactory) -> None:
+    env = ResultsEnvelope(
+        suite_version="2026-06-08",
+        generated_at="2026-06-08T00:00:00Z",
+        runs=[
+            _record("mypy", 2.0, 200_000_000, make_env),
+            _record("ty", 0.5, 400_000_000, make_env),
+        ],
+    )
+    out = render_terminal(env)
+    # Same grouped tables + footnote as the README, minus the HTML markers that
+    # are noise in a terminal.
+    assert "TYPEBENCH:BEGIN" not in out
+    assert "TYPEBENCH:END" not in out
+    assert "| ty@" in out and "| mypy@" in out
+    assert out.index("| ty@") < out.index("| mypy@")  # fastest-first preserved
+    assert "httpx" in out  # project heading
+    assert "cross-pass" in out.lower()  # shared footnote
+
+
+def test_build_report_html_inlines_assets_and_data() -> None:
+    template = (
+        "<html><body>\n"
+        '<script src="./vendor/chart.umd.min.js"></script>\n'
+        '<script src="./app.js"></script>\n'
+        "</body></html>"
+    )
+    html = build_report_html(
+        template,
+        app_js="console.log('app');",
+        chart_js="/*chart*/ var Chart = {};",
+        trends={"points": [{"checker_id": "ty@1.0"}]},
+    )
+    # No external asset references survive — the report is one portable file.
+    assert 'src="./vendor' not in html
+    assert 'src="./app.js"' not in html
+    assert "/*chart*/" in html
+    assert "console.log('app');" in html
+    # Data is embedded as a global the app reads instead of fetching.
+    assert "window.__TYPEBENCH_TRENDS__" in html
+    assert '"ty@1.0"' in html
+
+
+def test_build_report_html_neutralizes_closing_script_tag() -> None:
+    # A raw </script> inside inlined JS would terminate the <script> block early.
+    template = '<script src="./vendor/chart.umd.min.js"></script><script src="./app.js"></script>'
+    html = build_report_html(
+        template,
+        app_js="x",
+        chart_js="var s='</script>';",
+        trends={"points": []},
+    )
+    assert "var s='<\\/script>';" in html

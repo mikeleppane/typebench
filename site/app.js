@@ -68,12 +68,16 @@ function applyChartTheme() {
 async function main() {
   applyChartTheme();
 
-  let data = { points: [] };
-  try {
-    const res = await fetch("./data/trends.json");
-    if (res.ok) data = await res.json();
-  } catch {
-    // No committed trends yet — the empty state covers this.
+  // The self-contained local report (typebench report) injects the data as a
+  // global; the published site has no such global and fetches the committed file.
+  let data = window.__TYPEBENCH_TRENDS__ || { points: [] };
+  if (!window.__TYPEBENCH_TRENDS__) {
+    try {
+      const res = await fetch("./data/trends.json");
+      if (res.ok) data = await res.json();
+    } catch {
+      // No committed trends yet — the empty state covers this.
+    }
   }
   const points = data.points || [];
 
