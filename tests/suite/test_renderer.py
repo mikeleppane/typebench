@@ -625,3 +625,43 @@ def test_render_ab_marks_degraded_when_file_counts_disagree(make_env: EnvFactory
     out = render_ab(env, baseline="pyrefly@0.36+release")
 
     assert "degraded" in out
+
+
+def test_render_ab_two_targets_render_two_sections(make_env: EnvFactory) -> None:
+    # Two distinct (project, mode, cores) groups -> two table sections.
+    a_base = _record("pyrefly", 2.0, 1, make_env).model_copy(
+        update={"checker_id": "pyrefly@0.36+release", "files": 10, "cores": 1}
+    )
+    a_cand = _record("pyrefly", 1.5, 1, make_env).model_copy(
+        update={"checker_id": "pyrefly@path+pr", "files": 10, "cores": 1}
+    )
+    b_base = _record("pyrefly", 2.0, 1, make_env).model_copy(
+        update={"checker_id": "pyrefly@0.36+release", "files": 8, "cores": 4}
+    )
+    b_cand = _record("pyrefly", 1.0, 1, make_env).model_copy(
+        update={"checker_id": "pyrefly@path+pr", "files": 8, "cores": 4}
+    )
+    env = ResultsEnvelope(
+        suite_version="ab", generated_at="t", runs=[a_base, a_cand, b_base, b_cand]
+    )
+
+    out = render_ab(env, baseline="pyrefly@0.36+release")
+
+    assert out.count("####") == 2  # one section per group
+
+
+def test_render_ab_unmatched_baseline_renders_dashes_not_crash(make_env: EnvFactory) -> None:
+    # A baseline id that matches no record (e.g. the unresolved 'latest') must not
+    # crash; deltas degrade to em-dashes and no row is marked baseline.
+    base = _record("pyrefly", 2.0, 1, make_env).model_copy(
+        update={"checker_id": "pyrefly@0.36.2+release", "files": 10}
+    )
+    cand = _record("pyrefly", 1.5, 1, make_env).model_copy(
+        update={"checker_id": "pyrefly@path+pr", "files": 10}
+    )
+    env = ResultsEnvelope(suite_version="ab", generated_at="t", runs=[base, cand])
+
+    out = render_ab(env, baseline="pyrefly@latest+release")  # no such record
+
+    assert "| baseline |" not in out  # no row is tagged as the baseline (caption aside)
+    assert "—" in out  # deltas fell back to em-dashes
