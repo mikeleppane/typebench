@@ -96,58 +96,126 @@ function fillStats(points, markers, cpuModels) {
   }
 }
 
-// Latest-date comparison: one bar per checker, sorted best-first, with the
-// slowdown (or throughput gap) relative to the best as a multiplier.
-function renderSnapshot(sel, metricKey, meta, budgetLabel) {
+// Presentation-only tiers, ordered small -> large. The cutoffs live in Python
+// (renderer._size_tier); the site only orders the labels it is handed.
+const TIER_ORDER = { Small: 0, Medium: 1, Large: 2 };
+
+// Per-row rank tint: t in [0,1] maps best (green) -> worst (red). The best cell
+// also gets an accent ring via CSS, so the winner never blends into the ramp.
+function rankTint(t) {
+  const h = 152 + (6 - 152) * t;
+  const s = 55 + (65 - 55) * t;
+  const l = 46 + (52 - 46) * t;
+  return `hsla(${h}, ${s}%, ${l}%, 0.3)`;
+}
+
+// Latest-date comparison as a projects × checkers matrix for one metric + budget:
+// rows are every project (tiered small -> large), columns the checkers, each cell
+// the metric value. The best cell in a row is highlighted; cells are rank-tinted.
+// Clicking a row calls onSelect(project) so the trend chart below can follow it.
+function renderMatrix(sel, metricKey, meta, budgetLabel, selected, onSelect) {
   const card = document.getElementById("snap-card");
-  const barsEl = document.getElementById("snap-bars");
+  const headEl = document.getElementById("snap-head");
+  const bodyEl = document.getElementById("snap-body");
   const dates = [...new Set(sel.map((p) => p.date))].sort();
   const latest = dates[dates.length - 1];
+  // Build rows, columns, and cells from the latest date only. Checker versions or
+  // corpus projects that existed solely in earlier runs must not leave stale,
+  // all-dashes lines in the snapshot once history accrues.
+  const latestRows = sel.filter((p) => p.date === latest);
 
-  const rows = [...new Set(sel.map((p) => p.checker_id))]
-    .map((id) => {
-      const hit = sel.find((p) => p.date === latest && p.checker_id === id);
-      const value = hit ? hit[metricKey] : null;
-      return value === null || value === undefined ? null : { id, value };
-    })
-    .filter(Boolean)
-    .sort((a, b) => (meta.better === "lower" ? a.value - b.value : b.value - a.value));
+  const checkers = [...new Set(latestRows.map((p) => p.checker_id))].sort();
+  const projMeta = new Map();
+  for (const p of latestRows) {
+    if (!projMeta.has(p.project)) {
+      projMeta.set(p.project, { tier: p.size_tier || "Large", loc: p.code_loc ?? 0 });
+    }
+  }
+  const projects = [...projMeta.keys()].sort((a, b) => {
+    const ma = projMeta.get(a);
+    const mb = projMeta.get(b);
+    return (
+      (TIER_ORDER[ma.tier] ?? 9) - (TIER_ORDER[mb.tier] ?? 9) ||
+      ma.loc - mb.loc ||
+      a.localeCompare(b)
+    );
+  });
 
-  card.classList.toggle("is-empty", rows.length === 0);
+  card.classList.toggle("is-empty", projects.length === 0 || checkers.length === 0);
   setText("snap-title", latest ? `Latest snapshot — ${latest}` : "Latest snapshot");
-  setText("snap-meta", rows.length ? `${budgetLabel} · ${meta.better} is better` : "");
-  if (!rows.length) {
-    barsEl.innerHTML = "";
+  setText("snap-meta", projects.length ? `${budgetLabel} · ${meta.better} is better` : "");
+  if (!projects.length || !checkers.length) {
+    headEl.innerHTML = "";
+    bodyEl.innerHTML = "";
     return;
   }
 
-  const best = rows[0].value;
-  const max = Math.max(...rows.map((r) => r.value));
-  barsEl.innerHTML = rows
-    .map((r) => {
-      const mult = meta.better === "lower" ? r.value / best : best / r.value;
-      const multText =
-        r === rows[0] ? "best" : `${mult.toFixed(mult >= 10 ? 0 : 1)}× vs best`;
-      return `
-        <div class="bar-row">
-          <span class="bar-row__label" title="${escapeHtml(r.id)}">${escapeHtml(r.id)}</span>
-          <span class="bar-row__track">
-            <span class="bar-row__fill" data-w="${((r.value / max) * 100).toFixed(2)}%"
-              style="background:${colorFor(r.id)}"></span>
-          </span>
-          <span class="bar-row__value">${r.value.toFixed(meta.digits)} ${meta.unit}</span>
-          <span class="bar-row__mult${r === rows[0] ? " bar-row__mult--best" : ""}">${multText}</span>
-        </div>`;
-    })
-    .join("");
+  headEl.innerHTML =
+    `<tr><th>Project</th>` +
+    checkers.map((c) => `<th>${escapeHtml(c)}</th>`).join("") +
+    `</tr>`;
 
-  // Widths start at 0 (stylesheet) and are set a frame later so the CSS
-  // transition animates the bars in on every re-render.
-  requestAnimationFrame(() => {
-    for (const fill of barsEl.querySelectorAll(".bar-row__fill")) {
-      fill.style.width = fill.dataset.w;
+  let html = "";
+  let currentTier = null;
+  for (const project of projects) {
+    const { tier, loc } = projMeta.get(project);
+    if (tier !== currentTier) {
+      currentTier = tier;
+      html += `<tr class="tier-row"><td colspan="${checkers.length + 1}">${escapeHtml(
+        tier
+      )} projects</td></tr>`;
     }
-  });
+
+    const values = checkers.map((c) => {
+      const hit = latestRows.find((p) => p.project === project && p.checker_id === c);
+      const v = hit ? hit[metricKey] : null;
+      return v === null || v === undefined ? null : v;
+    });
+    const present = values.filter((v) => v !== null);
+    const best = present.length
+      ? meta.better === "lower"
+        ? Math.min(...present)
+        : Math.max(...present)
+      : null;
+    const lo = Math.min(...present);
+    const hi = Math.max(...present);
+    const span = hi - lo;
+
+    const locHint = loc ? ` <small>${(loc / 1000).toFixed(0)}k</small>` : "";
+    const isSel = project === selected;
+    // The row acts as a button that repoints the trend chart; expose it to the
+    // keyboard and assistive tech (the project <select> it replaced was focusable).
+    html +=
+      `<tr class="proj-row${isSel ? " is-selected" : ""}" data-project="${escapeHtml(project)}" ` +
+      `role="button" tabindex="0" aria-pressed="${isSel}" ` +
+      `aria-label="Show ${escapeHtml(project)} trend over time">`;
+    html += `<td class="proj">${escapeHtml(project)}${locHint}</td>`;
+    for (const v of values) {
+      if (v === null) {
+        html += `<td class="cell na"><span class="c">—</span></td>`;
+        continue;
+      }
+      const t =
+        span > 0 ? (meta.better === "lower" ? (v - lo) / span : (hi - v) / span) : 0;
+      const isBest = present.length > 1 && v === best;
+      html += `<td class="cell${isBest ? " best" : ""}"><span class="c" style="background:${rankTint(
+        t
+      )}">${v.toFixed(meta.digits)}</span></td>`;
+    }
+    html += `</tr>`;
+  }
+  bodyEl.innerHTML = html;
+
+  for (const row of bodyEl.querySelectorAll(".proj-row")) {
+    const pick = () => onSelect(row.dataset.project);
+    row.addEventListener("click", pick);
+    row.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        pick();
+      }
+    });
+  }
 }
 
 async function main() {
@@ -167,7 +235,14 @@ async function main() {
   const points = data.points || [];
   fillStats(points, data.corpus_markers || [], data.cpu_models || []);
 
-  const projects = [...new Set(points.map((p) => p.project))].sort();
+  // Projects ordered small -> large (by analyzed code-LOC) so the trend defaults
+  // to the smallest project; the matrix re-derives the same order for its rows.
+  const locOf = (project) => points.find((p) => p.project === project)?.code_loc ?? 0;
+  const projectOrder = [...new Set(points.map((p) => p.project))].sort(
+    (a, b) => locOf(a) - locOf(b) || a.localeCompare(b)
+  );
+  let selectedProject = projectOrder[0] || null;
+
   const budgets = [...new Map(points.map((p) => [budgetKey(p), p])).values()]
     .map((p) => ({ key: budgetKey(p), cores: p.cores ?? null, label: budgetText(p) }))
     .sort((a, b) => {
@@ -176,9 +251,6 @@ async function main() {
       return a.cores - b.cores;
     });
 
-  document.getElementById("project").innerHTML = projects
-    .map((v) => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`)
-    .join("");
   document.getElementById("budget").innerHTML = budgets
     .map((b) => `<option value="${escapeHtml(b.key)}">${escapeHtml(b.label)}</option>`)
     .join("");
@@ -191,15 +263,21 @@ async function main() {
 
   function render() {
     const metricKey = document.getElementById("metric").value;
-    const project = document.getElementById("project").value;
     const budget = document.getElementById("budget").value;
     const meta = METRICS[metricKey];
     const budgetLabel =
       budgets.find((b) => b.key === budget)?.label || budget.replace("|", " · ");
 
-    const sel = points.filter((p) => p.project === project && budgetKey(p) === budget);
-    renderSnapshot(sel, metricKey, meta, budgetLabel);
+    // The matrix sees every project at this budget; clicking a row repoints the
+    // trend chart below. The trend stays pinned to one project (its time axis).
+    const selByBudget = points.filter((p) => budgetKey(p) === budget);
+    renderMatrix(selByBudget, metricKey, meta, budgetLabel, selectedProject, (project) => {
+      selectedProject = project;
+      render();
+    });
 
+    const project = selectedProject;
+    const sel = selByBudget.filter((p) => p.project === project);
     const dates = [...new Set(sel.map((p) => p.date))].sort();
     const checkerIds = [...new Set(sel.map((p) => p.checker_id))].sort();
 
@@ -228,7 +306,7 @@ async function main() {
 
     // Update title + meta and toggle the empty state.
     const hasData = datasets.some((ds) => ds.data.some((v) => v !== null && v !== undefined));
-    titleEl.textContent = `${project} — ${meta.axis.replace(/ \(.*\)/, "")}`;
+    titleEl.textContent = `${project ?? "—"} — ${meta.axis.replace(/ \(.*\)/, "")}`;
     metaEl.textContent = hasData
       ? `${budgetLabel} · ${meta.better} is better` +
         (dates.length === 1 ? " · history accrues with each official run" : "")
@@ -290,7 +368,7 @@ async function main() {
     });
   }
 
-  for (const id of ["metric", "project", "budget"]) {
+  for (const id of ["metric", "budget"]) {
     document.getElementById(id).addEventListener("change", render);
   }
 
