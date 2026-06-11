@@ -2,6 +2,10 @@ name: typebench A/B
 description: A/B-measure a type-checker PR build vs its latest release on your projects (wall-time).
 author: mikeleppane
 
+branding:
+  icon: activity
+  color: purple
+
 inputs:
   checker:
     description: "Adapter id: pyrefly | ty | mypy | pyright (stub is test-only)."
