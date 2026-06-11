@@ -89,6 +89,48 @@ def test_doctor_prints_install_hint_for_unhealthy_rows(monkeypatch: pytest.Monke
     assert "uv" not in fix_section  # healthy tool not listed in remediation
 
 
+def test_doctor_groups_rows_by_tier(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The table must surface each tier so a reader can tell a REQUIRED miss
+    # (breaks the run) from an OPTIONAL one (degrades gracefully) at a glance.
+    canned = [
+        _check("uv", Tier.REQUIRED, present=True),
+        _check("mypy", Tier.PER_TOOL, present=True),
+        _check("tokei", Tier.OPTIONAL, present=False),
+    ]
+    monkeypatch.setattr("typebench.cli.run_doctor", lambda: canned)
+    out = runner.invoke(app, ["doctor"]).stdout
+    assert "required" in out
+    assert "per-tool" in out
+    assert "optional" in out
+
+
+def test_doctor_prints_summary_counts(monkeypatch: pytest.MonkeyPatch) -> None:
+    # One healthy, one degraded (present but not usable), one missing.
+    canned = [
+        _check("uv", Tier.REQUIRED, present=True),
+        _check("pyright", Tier.PER_TOOL, present=True, healthy=False),
+        _check("tokei", Tier.OPTIONAL, present=False),
+    ]
+    monkeypatch.setattr("typebench.cli.run_doctor", lambda: canned)
+    out = runner.invoke(app, ["doctor"]).stdout
+    assert "1 healthy" in out
+    assert "1 degraded" in out
+    assert "1 missing" in out
+
+
+def test_doctor_status_uses_glyphs(monkeypatch: pytest.MonkeyPatch) -> None:
+    canned = [
+        _check("uv", Tier.REQUIRED, present=True),
+        _check("pyright", Tier.PER_TOOL, present=True, healthy=False),
+        _check("tokei", Tier.OPTIONAL, present=False),
+    ]
+    monkeypatch.setattr("typebench.cli.run_doctor", lambda: canned)
+    out = runner.invoke(app, ["doctor"]).stdout
+    assert "✓" in out  # check mark for healthy
+    assert "✗" in out  # cross for missing
+    assert "⚠" in out  # warning for degraded
+
+
 def test_doctor_with_config_lists_configured_checkers(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
