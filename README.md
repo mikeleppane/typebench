@@ -12,10 +12,11 @@ typebench measures cold single-shot checker runs on real Python projects. It is
 built around one rule: the numbers must be credible enough for checker maintainers,
 Python teams, and independent readers to rerun and audit them.
 
-> **Status:** The engine currently supports single-project, single-checker runs and
-> corpus preflight checks. Full-suite orchestration, generated result tables, and
-> the public trend site are still in development. No official benchmark results are
-> published yet.
+> **Status:** The engine supports single-project runs, full-suite orchestration
+> (`project × checker × thread-mode` matrix), checker comparison, corpus preflight, a
+> PR speed-regression GitHub Action, self-contained HTML reports, and a
+> render-to-Pages publishing pipeline. No official benchmark results are published
+> yet — the curated dataset under `data/official/` is still being filled.
 
 ---
 
@@ -26,6 +27,7 @@ Python teams, and independent readers to rerun and audit them.
 - [Quick start](#quick-start)
 - [Requirements](#requirements)
 - [Usage](#usage)
+- [GitHub Action: PR speed regression](#github-action-pr-speed-regression)
 - [Architecture](#architecture)
 - [Methodology](#methodology)
 - [Results](#results)
@@ -77,7 +79,7 @@ published yet.
 ## Quick start
 
 ```bash
-git clone <repository-url> typebench
+git clone https://github.com/mikeleppane/typebench
 cd typebench
 uv sync
 ```
@@ -162,16 +164,24 @@ macOS runs are timing-only because cgroup v2 is Linux-specific.
 
 ## Usage
 
-Two commands are available today:
+| Command | What it does |
+|---------|--------------|
+| `typebench run` | Measure one checker on one project. |
+| `typebench suite` | Run the full `project × checker × thread-mode` matrix and print grouped, fastest-first tables. |
+| `typebench compare` | Compare two or more checker specs (`name@version+label`) into one results envelope. |
+| `typebench ab` | A/B-measure a candidate checker binary against a baseline (the engine behind the GitHub Action). |
+| `typebench preflight` | Prepare a corpus project and probe whether the selected checkers can run it. |
+| `typebench doctor` | Verify every external tool resolves at the expected version (`--check` exits nonzero for CI). |
+| `typebench report` | Build a self-contained HTML trend report from a local results history. |
+| `typebench render` | Maintainer-only: regenerate the README table and `trends.json` from the official store. |
+| `typebench config init` / `show` | Scaffold or inspect a `typebench.toml` pinning checker versions. |
 
-- `typebench run` measures one checker on one project.
-- `typebench preflight` prepares a corpus project and probes selected checkers.
-
-Check the live CLI with:
+Check any command's live options with `--help`:
 
 ```bash
 uv run typebench run --help
-uv run typebench preflight --help
+uv run typebench suite --help
+uv run typebench doctor --help
 ```
 
 ### Corpus run
@@ -233,70 +243,6 @@ This folds the site assets and your local trends into a single portable file
 neither `README.md` nor the published site — those are maintainer-only and handled
 by `typebench render` plus CI (see [Publishing flow](#publishing-flow)).
 
-## GitHub Action: PR speed regression
-
-`mikeleppane/typebench@v1` A/B-measures your checker's PR build against its latest released
-version on projects you choose, and reports a wall-time delta to the PR. It runs on plain
-`pull_request` — **never `pull_request_target`** (that would hand a write token to a job that
-builds untrusted PR code; see the spec). Fork PRs get a read-only token, so the sticky comment
-is skipped and the result stays in the step summary.
-
-Using this action? Add a badge to your README:
-
-[![measured with typebench](https://img.shields.io/badge/measured%20with-typebench-7b3fe4)](https://github.com/mikeleppane/typebench)
-
-```markdown
-[![measured with typebench](https://img.shields.io/badge/measured%20with-typebench-7b3fe4)](https://github.com/mikeleppane/typebench)
-```
-
-**Rust checker (pyrefly):**
-```yaml
-on: pull_request
-permissions:
-  contents: read
-  pull-requests: write
-jobs:
-  bench:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build --release
-      - uses: mikeleppane/typebench@v1
-        with:
-          checker: pyrefly
-          candidate: target/release/pyrefly
-          baseline: latest
-          targets: |
-            ./bench/sample-app
-            https://github.com/encode/httpx
-          runs: 7
-```
-
-**Python checker (mypy):**
-```yaml
-on: pull_request
-permissions:
-  contents: read
-  pull-requests: write
-jobs:
-  bench:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - run: uv venv .venv-pr && uv pip install --python .venv-pr .
-      - uses: mikeleppane/typebench@v1
-        with:
-          checker: mypy
-          candidate: .venv-pr/bin/mypy
-          baseline: latest
-          targets: ./src
-```
-
-Output: a `Checker | Wall median (s) | Δ wall | runs | spread` table per target, in the run's
-step summary, a downloadable `typebench-ab-results` JSON artifact, and (same-repo PRs) a sticky
-comment. Memory/throughput are measured locally by the maintainer, not in CI.
-
 ### Preflight
 
 Preflight checks whether a corpus project is usable by the selected checkers before
@@ -338,6 +284,74 @@ pyrefly skips dot-directories during file discovery, so a hidden cache could mak
 the prepared corpus invisible to pyrefly alone. That would produce a recorded
 environment failure for one checker while the others ran normally. Keep cache-root
 overrides non-hidden.
+
+---
+
+## GitHub Action: PR speed regression
+
+`mikeleppane/typebench@v1` A/B-measures your checker's PR build against its latest released
+version on projects you choose, and reports a wall-time delta to the PR. It runs on plain
+`pull_request` — **never `pull_request_target`** (that would hand a write token to a job that
+builds untrusted PR code; see the spec). Fork PRs get a read-only token, so the sticky comment
+is skipped and the result stays in the step summary.
+
+Using this action? Add a badge to your README:
+
+[![measured with typebench](https://img.shields.io/badge/measured%20with-typebench-7b3fe4)](https://github.com/mikeleppane/typebench)
+
+```markdown
+[![measured with typebench](https://img.shields.io/badge/measured%20with-typebench-7b3fe4)](https://github.com/mikeleppane/typebench)
+```
+
+**Rust checker (pyrefly):**
+
+```yaml
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release
+      - uses: mikeleppane/typebench@v1
+        with:
+          checker: pyrefly
+          candidate: target/release/pyrefly
+          baseline: latest
+          targets: |
+            ./bench/sample-app
+            https://github.com/encode/httpx
+          runs: 7
+```
+
+**Python checker (mypy):**
+
+```yaml
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: uv venv .venv-pr && uv pip install --python .venv-pr .
+      - uses: mikeleppane/typebench@v1
+        with:
+          checker: mypy
+          candidate: .venv-pr/bin/mypy
+          baseline: latest
+          targets: ./src
+```
+
+Output: a `Checker | Wall median (s) | Δ wall | runs | spread` table per target, in the run's
+step summary, a downloadable `typebench-ab-results` JSON artifact, and (same-repo PRs) a sticky
+comment. Memory/throughput are measured locally by the maintainer, not in CI.
 
 ---
 
@@ -417,20 +431,23 @@ those tools instead of reimplementing their measurement logic.
 
 ### Publishing flow
 
-Single-run JSON is available now. The publishing flow is still in development:
+Raw JSON records feed `typebench render`, which regenerates the README results table
+and `trends.json`; CI (`publish.yml`) then deploys the static trend site to GitHub
+Pages from the durable store under `data/official/`:
 
 ```text
 many JSON records
     |
     v
-generated result tables
+typebench render  ->  README table + trends.json
     |
     v
-public trend site
+publish.yml CI  ->  GitHub Pages trend site
 ```
 
 That separation is important: raw JSON remains the source of truth, while tables
-and charts are views over the recorded measurements.
+and charts are views over the recorded measurements. The pipeline is wired; what is
+still pending is the curated `data/official/` dataset that feeds it.
 
 ---
 
@@ -513,8 +530,14 @@ Official runs use one normalized input contract:
 
 ## Results
 
-No official results are published yet. Generated tables will appear here once the
-publishing workflow is ready.
+The table below is regenerated by `typebench render` from the latest envelope in
+`data/official/`. No official results are published yet.
+
+<!-- TYPEBENCH:BEGIN -->
+
+_No official results published yet. Run a suite and add the envelope to `data/official/`._
+
+<!-- TYPEBENCH:END -->
 
 ---
 
@@ -547,11 +570,3 @@ Engineering expectations:
 ## License
 
 Released under the MIT License. See [`LICENSE`](LICENSE).
-
-## Latest results
-
-<!-- TYPEBENCH:BEGIN -->
-
-_No official results published yet. Run a suite and add the envelope to `data/official/`._
-
-<!-- TYPEBENCH:END -->

@@ -1,6 +1,6 @@
 ---
 name: test-driven-development
-description: Test-driven development skill for the typebench repo. Use whenever you are about to write or change product behavior — a new pipeline stage, a bug fix, a refactor of anything observable. Write the failing test first; use the Prove-It pattern for bugs. Apply on every behavioral change, not only when the user asks for tests. Covers typebench's conventions — `@pytest.mark.skipif` gating, the Typer `CliRunner`, `monkeypatch.setattr` for boundaries, the `_fake_checker`/`StubAdapter` taxonomy harness, JSON round-trips with `extra="forbid"` — and the `ruff` + `pyrefly` + `pytest` floor.
+description: Test-driven development skill for the typebench repo. Use whenever you are about to write or change product behavior — a new pipeline stage, a bug fix, a refactor of anything observable. Write the failing test first; use the Prove-It pattern for bugs. Apply on every behavioral change, not only when the user asks for tests. Covers typebench's conventions — `@pytest.mark.skipif` gating, the Typer `CliRunner`, `monkeypatch.setattr` for boundaries, the `fake_checker`/`StubAdapter` taxonomy harness, JSON round-trips with `extra="forbid"` — and the `ruff` + `pyrefly` + `pytest` floor.
 ---
 
 # Test-Driven Development (typebench)
@@ -19,7 +19,7 @@ Project-specific rules live in [AGENTS.md](../../../AGENTS.md) and override anyt
 
 This skill governs the pytest suite under `tests/` that exercises the `src/typebench/` package and the Typer CLI. The engine spine is **fully synchronous** — there is no asyncio anywhere in typebench, so there is no async-mode, no `@pytest.mark.asyncio`, and none of that machinery appears below.
 
-The single hardest thing to test here is the measurement pipeline without a real type checker attached. typebench solves that with an in-package controllable fake (`_fake_checker.py`) driven by `StubAdapter` — that pattern is the spine of this skill (see *The taxonomy harness* below), not an afterthought.
+The single hardest thing to test here is the measurement pipeline without a real type checker attached. typebench solves that with an in-package controllable fake (`fake_checker.py`) driven by `StubAdapter` — that pattern is the spine of this skill (see *The taxonomy harness* below), not an afterthought.
 
 ---
 
@@ -34,7 +34,7 @@ Re-read AGENTS.md "Testing" before every test commit. The highlights:
   A guarded test runs everywhere; it just skips cleanly where the dependency is absent, instead of failing or hanging. A skip guard is a real test-design decision — pick it deliberately for any test that touches `hyperfine` or signals.
 - **Tests get annotations too.** Pyrefly `preset = "strict"` applies to `tests/` (it's in `project-includes`). `def test_…() -> None:` is the minimum; fixtures and helpers are annotated too. typebench dogfoods a checker it benchmarks, so the test suite is held to the same strict bar as the package.
 - **Tests are exempt from `PLR2004`, `ARG001`, `ARG002`** (see `pyproject.toml [tool.ruff.lint.per-file-ignores]` `"tests/**"`). Magic numbers in assertions and unused fixture args are fine. `assert` is expected. Keep test code terse.
-- **Tests live flat under `tests/`**, one file per package module: `test_collector.py`, `test_wrapper.py`, `test_stub_adapter.py`, `test_cli.py`, `test_models.py`, `test_timing.py`, `test_env.py`, `test_e2e.py`, `test_smoke.py`. `pyproject.toml` sets `pythonpath = ["src"]` and `testpaths = ["tests"]`, so import the package directly (`from typebench.collector import run_single`).
+- **Tests live in a package-mirrored tree under `tests/`**, and a `tests/conftest.py` exists and provides shared named builders (e.g. a `make_env` fixture returning an `EnvFactory`). Test files mirror the `src/` layout: `tests/engine/` (test_wrapper.py, test_collector.py, test_timing.py, test_env.py, test_measure.py, test_calibration.py, test_doctor.py, test_proc.py, …), `tests/contracts/` (test_models.py, test_taxonomy.py, test_config.py, test_runconfig.py, …), `tests/adapters/` (test_stub_adapter.py, test_mypy_adapter.py, test_support.py, …), `tests/cli/` (test_cli.py, test_cli_ab.py, test_cli_doctor.py, …), plus `tests/corpus/`, `tests/suite/`, `tests/e2e/` (test_e2e.py, test_all_tools_e2e.py, test_pyright_e2e.py, test_smoke.py), `tests/neutrality/`, and `tests/site/`. `pyproject.toml` sets `pythonpath = ["src"]` and `testpaths = ["tests"]`, so import the package directly (`from typebench.engine.collector import run_single`).
 
 These are hard constraints — the rest of this skill works within them.
 
@@ -53,7 +53,7 @@ These are hard constraints — the rest of this skill works within them.
 - Pure config edits that do not change behavior (a ruff rule note, a pyproject comment).
 - Formatter-only edits, rename-only refactors where a `pyrefly check` is sufficient proof of equivalence.
 - Docs, comments, `.agents/skills/**`, spec/plan edits — no runtime behavior.
-- Scaffolding a deliberately-deferred Protocol method (`install`, `parallelism_cap`) that nothing calls yet — add the test when the first real call site lands (AGENTS.md "Scope discipline by plan").
+- Adding tests for a genuinely unused deferred surface — add the test when the first real call site lands, not speculatively (AGENTS.md "Scope discipline").
 
 If unsure, lean toward writing the test. Writing a test you later delete is cheap; shipping a behavior change to a measurement tool with no test is expensive.
 
@@ -75,22 +75,22 @@ If unsure, lean toward writing the test. Writing a test you later delete is chea
 A test that passes on the first run proves nothing. It usually means the test asserts on something already true (an enum default, an import side effect) or the behavior you intended to add already existed under another name. **If RED doesn't go red, stop and figure out why.**
 
 ```python
-# tests/test_wrapper.py
-from typebench.models import ResultClass
-from typebench.wrapper import RawRun, classify_default
+# tests/engine/test_wrapper.py
+from typebench.contracts.taxonomy import ResultClass
+from typebench.engine.wrapper import RawRun, classify_default
 
 
 def test_classify_default_maps_explicit_oom_flag_to_failed_oom() -> None:
-    # A cgroup-sourced OOM flag (Plan 4) must win over the raw exit code.
+    # A cgroup-sourced OOM flag must win over the raw exit code.
     raw = RawRun(137, None, False, oom=True, stdout="", stderr="")
     assert classify_default(raw) == ResultClass.FAILED_OOM
 ```
 
-At this point `classify_default` either doesn't handle the `oom` flag or maps it wrong. `uv run pytest tests/test_wrapper.py` fails with an `AssertionError` (or `TypeError` if the field doesn't exist yet). Good — that's RED confirmed.
+At this point `classify_default` either doesn't handle the `oom` flag or maps it wrong. `uv run pytest tests/engine/test_wrapper.py` fails with an `AssertionError` (or `TypeError` if the field doesn't exist yet). Good — that's RED confirmed.
 
 ### Step 2 — GREEN: minimum code to pass
 
-Resist the urge to design the whole module. Pass *this* test. Do not add future options, generalized extension points, compatibility shims, unused branches, or defensive handling for impossible inputs. The next failing test earns the next behavior. This is also AGENTS.md "Scope discipline by plan" — Plan 1 is the engine spine; don't build cgroup or real-checker behavior early just because a branch "might want it".
+Resist the urge to design the whole module. Pass *this* test. Do not add future options, generalized extension points, compatibility shims, unused branches, or defensive handling for impossible inputs. The next failing test earns the next behavior. This is also AGENTS.md "Scope discipline" — don't build behavior beyond the current task just because a branch "might want it"; cross an Ask-first boundary before adding anything that isn't driven by a test you just wrote.
 
 That's it. **The next test drives the next piece of the design** — not speculation.
 
@@ -143,15 +143,15 @@ Bug report: "When the probe succeeds (exit 0, clean) but a *timed* run crashes u
 Reproduce it deterministically by mocking the boundary, *not* by needing a real hyperfine:
 
 ```python
-# tests/test_collector.py
+# tests/engine/test_collector.py
 import subprocess
 
 import pytest
 
-from typebench import collector
+from typebench.engine import collector
 from typebench.adapters.stub import StubAdapter
-from typebench.collector import run_single
-from typebench.models import FailurePhase, ResultClass, ThreadMode
+from typebench.engine.collector import run_single
+from typebench.contracts.taxonomy import FailurePhase, ResultClass, ThreadMode
 
 
 def test_run_single_timing_crash_marks_timing_phase(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -191,7 +191,7 @@ There is no marker scheme, so the pyramid maps to *what each test touches*, gate
          ╱  ╲       real hyperfine        @pytest.mark.skipif(shutil.which("hyperfine") is None, …)
         ╱    ╲                            Shells out to the real binary; a deliberate few.
        ╱──────╲
-      ╱        ╲    fake-driven pipeline  run_single + StubAdapter + _fake_checker
+      ╱        ╲    fake-driven pipeline  run_single + StubAdapter + fake_checker
      ╱          ╲                         Full probe→classify path, deterministic, no real checker.
     ╱────────────╲
    ╱              ╲  pure unit            classify_default, parse, coerce_count, model round-trips
@@ -206,14 +206,14 @@ a model round-trip)?
   → pure unit. No subprocess, no skip guard.
 
 Does it need the whole probe→classify pipeline but NOT real wall-time numbers?
-  → drive it through StubAdapter + _fake_checker. Mock run_timing / shutil.which with
+  → drive it through StubAdapter + fake_checker. Mock run_timing / shutil.which with
     monkeypatch where a clean probe must be followed by a failing timed run.
 
 Does it genuinely need the real hyperfine binary or real signal delivery?
   → add the matching @pytest.mark.skipif guard.
 ```
 
-**The "own your behavior" rule.** *If you liked it, you should've put a test on it* — the Beyonce rule from Google's testing lore. A later plan's refactor (real adapters, cgroup memory) is not responsible for catching the engine spine's bugs — the spine's tests are. If a change broke something and there was no test, that is on the author of the original code, not on whoever refactored it.
+**The "own your behavior" rule.** *If you liked it, you should've put a test on it* — the Beyonce rule from Google's testing lore. A refactor touching a different module is not responsible for catching another module's bugs — each module's tests are. If a change broke something and there was no test, that is on the author of the original code, not on whoever refactored it.
 
 ---
 
@@ -221,13 +221,13 @@ Does it genuinely need the real hyperfine binary or real signal delivery?
 
 The whole failure taxonomy (`clean`, `diagnostics`, `failed{env}`, `failed{crash}`, `failed{timeout}`, `failed{oom}`) must be exercisable **without a real type checker**, deterministically, in CI that may not even have hyperfine. typebench does this with an in-package controllable fake:
 
-- `src/typebench/_fake_checker.py` — a tiny program that prints a JSON `{"diagnostics": …, "files": …}` summary and exits with a chosen code, optionally after a `--sleep`, optionally killing itself with `--signal`, optionally failing only on the Nth invocation via a `--state-file` counter. It ships in the wheel so the stub works from an installed package, not just a source checkout.
-- `src/typebench/adapters/stub.py` — `StubAdapter`, which builds the argv for `_fake_checker` from constructor knobs (`exit_code`, `diagnostics`, `files`, `sleep`, `signal`, `missing_binary`, `fail_after_runs` + `state_file`).
+- `src/typebench/_internal/fake_checker.py` — a tiny program that prints a JSON `{"diagnostics": …, "files": …}` summary and exits with a chosen code, optionally after a `--sleep`, optionally killing itself with `--signal`, optionally failing only on the Nth invocation via a `--state-file` counter. It ships in the wheel so the stub works from an installed package, not just a source checkout. (Invocable as `python -m typebench._internal.fake_checker`.)
+- `src/typebench/adapters/stub.py` — `StubAdapter`, which builds the argv for `fake_checker` from constructor knobs (`exit_code`, `diagnostics`, `files`, `sleep`, `signal`, `missing_binary`, `fail_after_runs` + `state_file`).
 
 This pair *is* the project's pipeline-testing pattern. Reach for it whenever a test needs a controlled checker outcome:
 
 ```python
-# tests/test_collector.py — exercise a whole taxonomy class through the fake
+# tests/engine/test_collector.py — exercise a whole taxonomy class through the fake
 def test_run_single_diagnostics_records_counts() -> None:
     adapter = StubAdapter(exit_code=1, diagnostics=3, files=7)  # -> DIAGNOSTICS
     result = run_single(
@@ -270,7 +270,7 @@ def test_run_single_env_failure_is_recorded() -> None:
     assert result.error_detail  # carries the OSError text
 ```
 
-The e2e test (`tests/test_e2e.py`) parametrizes every taxonomy class through this harness and round-trips each `RunResult` to JSON — the single best example of the pattern at full scale.
+The e2e test (`tests/e2e/test_e2e.py`) parametrizes every taxonomy class through this harness and round-trips each `RunResult` to JSON — the single best example of the pattern at full scale.
 
 ---
 
@@ -291,7 +291,7 @@ def test_run_single_failure_skips_timing() -> None:
 
 # Bad — asserts on how it's done, not what it does
 def test_run_single_calls_run_timing_once() -> None:
-    with patch("typebench.collector.run_timing") as mock_time:
+    with patch("typebench.engine.collector.run_timing") as mock_time:
         run_single(StubAdapter(exit_code=2), ...)
         assert mock_time.call_count == 0  # brittle: breaks on any internal restructure
 ```
@@ -421,11 +421,11 @@ If you can't name the test as a sentence, you probably don't know yet what behav
 Test `typebench run` through Typer's test harness, never by calling internal functions and re-implementing argument parsing. Assert on the **exit code** and the **output**, and validate any written JSON through the real model.
 
 ```python
-# tests/test_cli.py
+# tests/cli/test_cli.py
 from typer.testing import CliRunner
 
 from typebench.cli import app
-from typebench.models import RunResult
+from typebench.contracts.models import RunResult
 
 runner = CliRunner()
 
@@ -446,7 +446,7 @@ Note `assert result.exit_code == 0, result.output` — when the CLI fails, the c
 
 ### Boundary seams under test — `monkeypatch.setattr`, mock the boundary not the behavior
 
-The seams worth mocking are the **external boundaries**: the `hyperfine` subprocess, the `shutil.which` probe for it, the filesystem. Patch them on the *module that uses them* (`collector.run_timing`, `collector.shutil`) so you can drive failure paths deterministically and without the real binary. Never mock the behavior you are actually trying to prove.
+The seams worth mocking are the **external boundaries**: the `hyperfine` subprocess, the `shutil.which` probe for it, the filesystem. Patch them on the *module that uses them* (`collector.run_timing`, `collector.shutil`) so you can drive failure paths deterministically and without the real binary. Never mock the behavior you are actually trying to prove. (Here `collector` is the module imported as `from typebench.engine import collector`, so `monkeypatch.setattr(collector, "run_timing", …)` patches in that namespace.)
 
 ```python
 def test_run_single_timing_harness_error_is_failed_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -477,25 +477,25 @@ def test_cli_run_stub_writes_results_json(tmp_path: Path) -> None:
     # ... invoke, then read back from `out`
 ```
 
-Never write to `/tmp/…`, `~/.cache/…`, or a relative path — tests share worker state and trash each other. `tmp_path` is per-test, cleaned automatically. The `_fake_checker` state-file counter (`tmp_path / "count"`) and the process-tree marker test both rely on this.
+Never write to `/tmp/…`, `~/.cache/…`, or a relative path — tests share worker state and trash each other. `tmp_path` is per-test, cleaned automatically. The `fake_checker` state-file counter (`tmp_path / "count"`) and the process-tree marker test both rely on this.
 
 ### Boundary effects under test — when an interaction *is* the behavior
 
 Some measurement invariants are only observable as a side effect, and there the side effect is the assertion. Two real examples:
 
-- **Process-group kill on timeout** (`tests/test_wrapper.py`). The invariant: a timed-out parent must not leave a grandchild stealing CPU from later runs. The test spawns a parent→grandchild, times out the parent, and asserts the grandchild's marker file *never appears*. Guarded with `@pytest.mark.skipif(os.name != "posix", …)` because process-group kill is POSIX-specific.
-- **Signal recording** (`tests/test_wrapper.py`). A child that `os.kill`s itself with SIGSEGV must surface `raw.signal == 11`. Also POSIX-guarded.
+- **Process-group kill on timeout** (`tests/engine/test_wrapper.py`). The invariant: a timed-out parent must not leave a grandchild stealing CPU from later runs. The test spawns a parent→grandchild, times out the parent, and asserts the grandchild's marker file *never appears*. Guarded with `@pytest.mark.skipif(os.name != "posix", …)` because process-group kill is POSIX-specific.
+- **Signal recording** (`tests/engine/test_wrapper.py`). A child that `os.kill`s itself with SIGSEGV must surface `raw.signal == 11`. Also POSIX-guarded.
 
 These are not "interaction mocks" — they assert on a real, observable consequence of the code, not on whether some method was called.
 
 ### Measurement-invariant regression tests are first-class
 
-A test that locks a *performance* invariant counts as real TDD. The canonical one (`tests/test_wrapper.py`): the wrapper is hyperfine's per-run command, so any heavy import it pulls is paid on *every* timed measurement and biases comparative ratios (AGENTS.md "Measurement fidelity"). The guard runs a **fresh interpreter** via `subprocess` — because pytest itself has already imported pydantic, you can't check `sys.modules` in-process:
+A test that locks a *performance* invariant counts as real TDD. The canonical one (`tests/engine/test_wrapper.py`): the wrapper is hyperfine's per-run command, so any heavy import it pulls is paid on *every* timed measurement and biases comparative ratios (AGENTS.md "Measurement fidelity"). The guard runs a **fresh interpreter** via `subprocess` — because pytest itself has already imported pydantic, you can't check `sys.modules` in-process:
 
 ```python
 def test_wrapper_import_does_not_pull_pydantic() -> None:
     code = (
-        "import sys, typebench.wrapper\n"
+        "import sys, typebench.engine.wrapper\n"
         "bad = sorted(m for m in sys.modules if m.split('.')[0] == 'pydantic')\n"
         "assert not bad, bad\n"
     )
@@ -504,7 +504,7 @@ def test_wrapper_import_does_not_pull_pydantic() -> None:
     assert proc.returncode == 0, proc.stderr
 ```
 
-If you add an import to `wrapper.py` or `taxonomy.py`, this test is your early warning that you put pydantic (or anything heavy) back on the measured path.
+If you add an import to `engine/wrapper.py` or `contracts/taxonomy.py`, this test is your early warning that you put pydantic (or anything heavy) back on the measured path. `tests/engine/test_measure.py` and `tests/engine/test_calibration.py` have equivalent guards (`test_measure_import_does_not_pull_pydantic`, `test_calibration_import_does_not_pull_pydantic`) for the other modules on the measured path.
 
 ---
 
@@ -515,7 +515,7 @@ If you add an import to `wrapper.py` or `taxonomy.py`, this test is your early w
 | Inventing a `unit`/`component`/`integration` marker or `pytestmark` | typebench registers no markers; nothing selects on them and it misleads readers. | Gate with `@pytest.mark.skipif(shutil.which("hyperfine") is None, …)` or the POSIX guard. |
 | A hyperfine- or signal-dependent test with no skip guard | Fails or hangs in environments without the binary / on non-POSIX. | Add the matching `skipif`. |
 | `@pytest.mark.asyncio` / any async test machinery | typebench is fully synchronous; there is no asyncio in the engine spine. | Write a plain `def test_…() -> None:`. |
-| Mocking the *checker outcome* with a bare `Mock` | Parallel infrastructure when `StubAdapter` + `_fake_checker` produce a real, deterministic outcome. | Drive the outcome through `StubAdapter(exit_code=…, signal=…, …)`. |
+| Mocking the *checker outcome* with a bare `Mock` | Parallel infrastructure when `StubAdapter` + `fake_checker` produce a real, deterministic outcome. | Drive the outcome through `StubAdapter(exit_code=…, signal=…, …)`. |
 | `unittest.mock.patch("typebench.x.…")` reaching through module paths | Couples the test to import structure; breaks silently on rename. | `monkeypatch.setattr(collector, "run_timing", …)` on the module that uses the boundary. |
 | Calling the CLI's internal functions instead of `runner.invoke(app, …)` | Re-implements Typer's arg parsing; misses exit-code / output contract. | Use `CliRunner`; assert `result.exit_code` and `result.output`. |
 | Test writes to `/tmp/…` or a relative path | Tests share worker state and trash each other. | Use `tmp_path`. |
@@ -544,11 +544,11 @@ The thoughts that lead to the test getting skipped, and what's actually true.
 |---|---|
 | "I'll add tests after it works" | Tests written after the fact assert on *what the code does*, not *what it should do*. In a measurement tool that means calcifying a wrong number into the contract. |
 | "This is too simple to test" | A classify rule or a count coercion is exactly where an off-by-one biases the benchmark. The test is the contract. |
-| "I can't test the timing without hyperfine" | You can: `StubAdapter` + `_fake_checker` + a `monkeypatch` of `run_timing` cover every taxonomy class deterministically, no binary required. |
-| "I tested it manually" | Manual tests do not persist. Tomorrow's refactor — real adapters, cgroup memory — has nothing to fall back on. |
+| "I can't test the timing without hyperfine" | You can: `StubAdapter` + `fake_checker` + a `monkeypatch` of `run_timing` cover every taxonomy class deterministically, no binary required. |
+| "I tested it manually" | Manual tests do not persist. Tomorrow's refactor has nothing to fall back on. |
 | "The code is self-explanatory" | Code describes *how*. Tests describe *what*. They are not the same artifact. |
 | "Mocking's fine, I'll fix it later" | Once `Mock`s proliferate, nothing removes them. Use the real `StubAdapter`/fake now. |
-| "It's just the engine spine, real checkers come later" | The spine is what every later plan builds on. Its invariants are the foundation of trust in the numbers. |
+| "It's just the engine spine, checkers can wait" | The spine is the foundation every adapter builds on. Its invariants are what trust in the numbers rests on. |
 
 ---
 
@@ -563,7 +563,7 @@ If you catch yourself doing any of these, stop and course-correct:
 - A hyperfine- or signal-dependent test missing its `@pytest.mark.skipif` guard.
 - Inventing a `unit`/`component`/`integration` marker.
 - `unittest.mock.patch("typebench.…")` reaching through the module system instead of `monkeypatch.setattr` on the boundary.
-- Mocking the checker outcome with a bare `Mock` instead of driving `StubAdapter` + `_fake_checker`.
+- Mocking the checker outcome with a bare `Mock` instead of driving `StubAdapter` + `fake_checker`.
 - A schema field or flag added only so a test can inspect internals.
 - A test whose assertions would pass for any successful execution of the code path.
 - Asserting on a Pydantic message string instead of the raised `ValidationError`.
@@ -580,7 +580,7 @@ A test change — or a feature change with tests — is done when:
 - hyperfine- or signal-dependent tests carry the right `@pytest.mark.skipif` guard; everything else runs unconditionally.
 - No async machinery anywhere (typebench is synchronous).
 - No new marker invented; no `unittest.mock.patch` reaching through module paths where `monkeypatch.setattr` on the boundary would do.
-- Every taxonomy-class assertion is reachable deterministically via `StubAdapter` + `_fake_checker` (no flaky dependence on a real checker's behavior).
+- Every taxonomy-class assertion is reachable deterministically via `StubAdapter` + `fake_checker` (no flaky dependence on a real checker's behavior).
 - Models that touch disk are round-tripped through `model_dump_json` / `model_validate_json` and the `extra="forbid"` rejection is asserted.
 - The verification floor passes clean, in order (AGENTS.md "Quality gates"):
 
@@ -620,14 +620,14 @@ A test change — or a feature change with tests — is done when:
 **Bad shape that passes the test command and is still wrong:**
 
 ```python
-# tests/test_collector.py
+# tests/engine/test_collector.py
 from unittest.mock import Mock, patch
 
 
 def test_run_single_records_a_result() -> None:
     fake_adapter = Mock()                                  # (1) mocks the adapter outcome
     fake_adapter.classify.return_value = ResultClass.CLEAN
-    with patch("typebench.collector.run_timing") as mt:    # (2) patches via module path
+    with patch("typebench.engine.collector.run_timing") as mt:    # (2) patches via module path
         mt.return_value = Mock()
         result = run_single(fake_adapter, project="demo", thread_mode=ThreadMode.ALL_CORES,
                             warmup=1, runs=2, timeout=10)
@@ -636,8 +636,8 @@ def test_run_single_records_a_result() -> None:
 
 Three things are wrong at once:
 
-1. `Mock()` for the adapter bypasses what `StubAdapter` + `_fake_checker` would prove — the test won't catch a regression where the collector mis-maps a real exit code to the wrong taxonomy class, only whether `classify` was *called*.
-2. `patch("typebench.collector.run_timing")` is fine as a *target*, but pairing it with a fully-mocked adapter means nothing real runs end to end; prefer a real `StubAdapter` and `monkeypatch.setattr` so the collector's actual classification logic executes.
+1. `Mock()` for the adapter bypasses what `StubAdapter` + `fake_checker` would prove — the test won't catch a regression where the collector mis-maps a real exit code to the wrong taxonomy class, only whether `classify` was *called*.
+2. `patch("typebench.engine.collector.run_timing")` is fine as a *target*, but pairing it with a fully-mocked adapter means nothing real runs end to end; prefer a real `StubAdapter` and `monkeypatch.setattr` so the collector's actual classification logic executes.
 3. `assert fake_adapter.classify.called` is an interaction assertion — green against a refactor, green against the wrong `result_class`, green against a dropped failure. Asserting `result.result_class == ResultClass.CLEAN and result.timing is not None` would have caught all three.
 
 This test is worse than no test: it occupies a file named after the right behavior, lulls reviewers into approving, and will silently pass through every refactor that matters — including one that quietly biases the numbers. Delete it and rewrite around a real `StubAdapter` and assertions on the returned `RunResult`.

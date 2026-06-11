@@ -92,27 +92,46 @@ Choosing the right type:
 
 Every commit must carry a scope identifying the area of the codebase affected. Scopes are short, lowercase, and consistent.
 
-The scope vocabulary tracks the package layout, so **read `src/typebench/*` before picking one** and keep the list honest as modules emerge. Current scopes:
+> **Authoritative scope list:** [AGENTS.md](../../../AGENTS.md)'s "Commits" section is the single source of truth for the scope vocabulary. The table below mirrors it; when the two disagree, AGENTS.md wins.
+
+The scope vocabulary tracks the package layout, so **read `src/typebench/*` before picking one** and keep the list honest as modules emerge. Current scopes (core — matches AGENTS.md):
 
 | Scope | Area |
 |-------|------|
 | `scaffold` | Package skeleton, src layout, uv/hatchling, tooling bootstrap |
-| `models` | `models.py` — pydantic schemas (`RunResult`, `TimingStats`, `EnvFingerprint`) |
-| `taxonomy` | `taxonomy.py` — pydantic-free on-disk enums (`ResultClass`, `ThreadMode`, `FailurePhase`) |
-| `env` | `env.py` — environment fingerprint |
-| `wrapper` | `wrapper.py` — hyperfine's per-run command, `run_command`, `classify_default` |
-| `timing` | `timing.py` — hyperfine pass + `parse_hyperfine_json` |
-| `adapters` | `adapters/*` — `Adapter` Protocol, `StubAdapter`, shared helpers, `_fake_checker` |
-| `collector` | `collector.py` — `run_single`, the probe→time pipeline |
-| `cli` | `cli.py` — Typer app (`typebench run`) |
-| `e2e` | End-to-end / cross-module pipeline tests and the rendered README |
+| `contracts` | `contracts/` — shared pydantic schemas, config, identity, policy, proc, runconfig, taxonomy |
+| `models` | `contracts/models.py` — pydantic schemas (`RunResult`, `TimingStats`, `EnvFingerprint`) |
+| `taxonomy` | `contracts/taxonomy.py` — pydantic-free on-disk enums (`ResultClass`, `ThreadMode`, `FailurePhase`) |
+| `config` | `contracts/config.py` / `contracts/configfile.py` — configuration schemas |
 | `engine` | Genuinely cross-cutting spine changes that span the measured path (use sparingly) |
+| `wrapper` | `engine/wrapper.py` — hyperfine's per-run command, `run_command`, `classify_default` |
+| `timing` | `engine/timing.py` — hyperfine pass + `parse_hyperfine_json` |
+| `measure` | `engine/measure.py` — measurement orchestration |
+| `calibration` | `engine/calibration.py` — calibration pass |
+| `env` | `engine/env.py` — environment fingerprint |
+| `collector` | `engine/collector.py` — `run_single`, the probe→time pipeline |
+| `adapters` | `adapters/*` — `Adapter` Protocol, `StubAdapter`, shared helpers, `_internal/fake_checker` |
+| `corpus` | `corpus/` — corpus management |
+| `catalog` | Catalog of checkers/results |
+| `counting` | Counting / diagnostic-count logic |
+| `envman` | Environment management |
+| `suite` | `suite/` — suite runner and orchestration |
+| `preflight` | Preflight checks before a run |
+| `renderer` | Results rendering / report output |
+| `cli` | `cli.py` — Typer app (`typebench run`) |
+| `docs` | Documentation only (README, AGENTS.md, docstrings) |
+| `skills` | Agent skill files under `.agents/skills/` |
+| `ci` | CI pipeline configuration (`.github/workflows/`) |
 | `ruff` | Ruff config / per-file ignores and lint-rule churn |
+
+Supplementary scopes (not in the AGENTS.md core list, but recognised here):
+
+| Scope | Area |
+|-------|------|
+| `e2e` | End-to-end / cross-module pipeline tests and the rendered README |
 | `plan` | Phase plans under `docs/superpowers/plans/` |
 | `spec` | Design spec under `docs/superpowers/specs/` |
-| `docs` | Documentation only (README, AGENTS.md, docstrings) |
 | `deps` | Dependency bumps when not better expressed as `build` |
-| `ci` | CI pipeline configuration |
 
 `engine` is reserved for changes that legitimately touch the spine across several modules at once (for example, threading a new failure-phase concept through the wrapper, taxonomy, and collector together). If a change really only touches one module, use that module's scope.
 
@@ -292,16 +311,16 @@ After a non-trivial edit, give a structured summary. This surfaces scope discipl
 
 ```
 CHANGES MADE:
-- src/typebench/collector.py: run_single now catches harness failures
+- src/typebench/engine/collector.py: run_single now catches harness failures
   (bad hyperfine JSON, missing export, which() TOCTOU) and records
   failed{env} with FailurePhase=timing instead of crashing.
-- tests/test_collector.py: Added cases covering each dropped-failure
+- tests/engine/test_collector.py: Added cases covering each dropped-failure
   path, asserting a RunResult is still produced.
 
 THINGS I DIDN'T TOUCH (intentionally):
-- src/typebench/wrapper.py: classify_default precedence is correct as-is;
+- src/typebench/engine/wrapper.py: classify_default precedence is correct as-is;
   this change is about the collector's harness boundary, not the wrapper.
-- src/typebench/models.py: No schema field added — the existing
+- src/typebench/contracts/models.py: No schema field added — the existing
   failure_phase field already carries this; out of scope to widen it.
 
 POTENTIAL CONCERNS:
@@ -356,11 +375,11 @@ git bisect good <known-good-commit>
 # When done: git bisect reset
 
 # What changed in a given area recently?
-git log --oneline -20 -- src/typebench/collector.py
+git log --oneline -20 -- src/typebench/engine/collector.py
 git diff HEAD~5..HEAD -- src/typebench/
 
 # Who last changed a specific line, and why?
-git blame -L <start>,<end> src/typebench/wrapper.py
+git blame -L <start>,<end> src/typebench/engine/wrapper.py
 # Then: git show <commit-hash> for the full context
 
 # Find commits by keyword in the message
@@ -404,7 +423,7 @@ Stop and reconsider if you notice any of these:
 - `--no-verify` used to bypass a failing hook
 - **Any AI/assistant attribution in the staged message — `Co-Authored-By: Claude`, "Generated with Claude Code", a 🤖 trailer, or "Claude suggested"**
 - A `# type: ignore` instead of `# pyrefly: ignore[<kind>]` with a reason
-- A heavy import (pydantic, etc.) added to `wrapper.py` or `taxonomy.py` — it biases every timed measurement
+- A heavy import (pydantic, etc.) added to `engine/wrapper.py` or `contracts/taxonomy.py` — it biases every timed measurement
 
 ---
 

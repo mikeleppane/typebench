@@ -21,7 +21,8 @@ doubt, prefer the honest, conservative, reproducible choice over the convenient 
 ## Layout
 
 - `src/typebench/` — the package (src layout, hatchling):
-  - `cli.py` — Typer app (`run`, `suite`, `render`, `preflight`; `--cores`).
+  - `cli.py` — Typer app (`run`, `suite`, `compare`, `ab`, `preflight`, `doctor`,
+    `report`, `render`, `config init`/`show`; `--cores`).
   - `contracts/` — shared vocabulary, no internal deps.
     - `contracts/models` — pydantic schemas (`RunResult`, `ResultsEnvelope`,
       `TimingStats`, `EnvFingerprint`, `PreparedProject`), `ConfigDict(extra="forbid")`.
@@ -99,6 +100,10 @@ explicitly asks to publish/version that specific result artifact.
 For verification runs, report the command, key metrics, and sanity checks in the
 assistant response. Commit rendered/source artifacts only when they are part of the
 requested change and not ignored by default.
+
+**Planning directories stay out of git — hard rule.** `docs/plans/` and
+`docs/superpowers/` are gitignored working notes. Never commit them and never
+`git add -f` them. They are scratch context for the author, not project history.
 
 ## Conventions
 

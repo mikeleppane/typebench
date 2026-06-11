@@ -1,0 +1,75 @@
+name: "📦 Corpus Project Proposal"
+description: Propose a Python project for the curated benchmark corpus
+title: "[Corpus]: "
+labels: ["corpus"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The corpus (`corpus/suite.toml`) is curated: every entry pins a repository SHA,
+        source roots, Python target, install recipe, and dependency constraints, and must
+        pass preflight with the benchmarked checkers. Propose projects that make the
+        benchmark more representative of real-world Python — not projects chosen to make
+        any one checker look good or bad.
+
+  - type: input
+    id: repo
+    attributes:
+      label: Repository URL
+      placeholder: "https://github.com/encode/httpx"
+    validations:
+      required: true
+
+  - type: input
+    id: license
+    attributes:
+      label: License
+      description: The project must be publicly cloneable under a license that permits benchmarking use.
+      placeholder: "e.g., MIT, Apache-2.0, BSD-3-Clause"
+    validations:
+      required: true
+
+  - type: input
+    id: size
+    attributes:
+      label: Approximate Size
+      description: Code LOC of the first-party source (tokei or similar), if you know it.
+      placeholder: "e.g., ~25k code LOC across src/httpx"
+    validations:
+      required: false
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why This Project
+      description: What does it add to the corpus? Typing style (strict / gradual / untyped), size bucket, domain, dependency weight, unusual patterns (plugins, generated code, heavy generics)...
+      placeholder: |
+        Large, heavily-annotated async codebase with pervasive generics — the corpus
+        currently has nothing in this size bucket that exercises overload resolution
+        this hard.
+    validations:
+      required: true
+
+  - type: textarea
+    id: preflight
+    attributes:
+      label: Preflight Output
+      description: |
+        If you've run it, paste the output of
+        `uv run typebench preflight --corpus <your-draft-entry> --project <name>` —
+        it probes all four checkers and reports readiness. Not required, but it fast-tracks the proposal.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: criteria
+    attributes:
+      label: Curation Criteria
+      options:
+        - label: The project's dependencies can be installed so imports resolve (no private indexes, no system libs that can't be pinned)
+          required: false
+        - label: I'm proposing this for corpus representativeness, not to favor or disadvantage a specific checker
+          required: true
+        - label: I would be willing to help maintain this corpus entry (SHA bumps, constraint updates)
+          required: false
