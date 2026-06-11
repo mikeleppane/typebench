@@ -14,6 +14,7 @@ from typebench.contracts.models import (
 from typebench.contracts.taxonomy import LocDenominator, ResultClass, ThreadMode
 from typebench.suite.renderer import (
     _code_loc_or_withheld,
+    _files_degraded,
     build_report_html,
     build_trends,
     cpu_model_anchors,
@@ -563,3 +564,32 @@ def test_build_report_html_neutralizes_closing_script_tag() -> None:
         trends={"points": []},
     )
     assert "var s='<\\/script>';" in html
+
+
+def _files_record(tool: str, files: int | None, make_env: EnvFactory) -> RunResult:
+    rec = _record(tool, 1.0, 100_000_000, make_env)
+    return rec.model_copy(update={"files": files})
+
+
+def test_files_degraded_true_when_either_arm_analyzed_nothing(make_env: EnvFactory) -> None:
+    pr = _files_record("pyrefly", 0, make_env)
+    rel = _files_record("pyrefly", 12, make_env)
+    assert _files_degraded([pr, rel]) is True
+
+
+def test_files_degraded_true_when_arms_disagree_on_file_count(make_env: EnvFactory) -> None:
+    pr = _files_record("pyrefly", 12, make_env)
+    rel = _files_record("pyrefly", 3, make_env)
+    assert _files_degraded([pr, rel]) is True
+
+
+def test_files_degraded_false_when_arms_agree_and_nonzero(make_env: EnvFactory) -> None:
+    pr = _files_record("pyrefly", 12, make_env)
+    rel = _files_record("pyrefly", 12, make_env)
+    assert _files_degraded([pr, rel]) is False
+
+
+def test_files_degraded_true_when_count_unknown(make_env: EnvFactory) -> None:
+    pr = _files_record("pyrefly", None, make_env)
+    rel = _files_record("pyrefly", 12, make_env)
+    assert _files_degraded([pr, rel]) is True

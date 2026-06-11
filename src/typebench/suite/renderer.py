@@ -249,6 +249,16 @@ def _peak_mb_value(
     return peak / 1_000_000 if peak is not None else None
 
 
+def _files_degraded(records: list[RunResult]) -> bool:
+    """A/B file-count sanity gate. The delta is trustworthy only if every arm
+    analyzed a non-empty, equal file set; otherwise (missing deps, divergent
+    traversal) the number is misleading and the row is marked degraded."""
+    counts = [r.files for r in records]
+    if any(c is None or c <= 0 for c in counts):
+        return True
+    return len(set(counts)) > 1
+
+
 def _delta_pct(baseline: float | None, value: float | None) -> str:
     if baseline is None or value is None or baseline == 0:
         return "—"
