@@ -228,6 +228,62 @@ This folds the site assets and your local trends into a single portable file
 neither `README.md` nor the published site — those are maintainer-only and handled
 by `typebench render` plus CI (see [Publishing flow](#publishing-flow)).
 
+## GitHub Action: PR speed regression
+
+`mikeleppane/typebench@v1` A/B-measures your checker's PR build against its latest released
+version on projects you choose, and reports a wall-time delta to the PR. It runs on plain
+`pull_request` — **never `pull_request_target`** (that would hand a write token to a job that
+builds untrusted PR code; see the spec). Fork PRs get a read-only token, so the sticky comment
+is skipped and the result stays in the step summary.
+
+**Rust checker (pyrefly):**
+```yaml
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release
+      - uses: mikeleppane/typebench@v1
+        with:
+          checker: pyrefly
+          candidate: target/release/pyrefly
+          baseline: latest
+          targets: |
+            ./bench/sample-app
+            https://github.com/encode/httpx
+          runs: 7
+```
+
+**Python checker (mypy):**
+```yaml
+on: pull_request
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: uv venv .venv-pr && uv pip install --python .venv-pr .
+      - uses: mikeleppane/typebench@v1
+        with:
+          checker: mypy
+          candidate: .venv-pr/bin/mypy
+          baseline: latest
+          targets: ./src
+```
+
+Output: a `Checker | Wall median (s) | Δ wall | runs | spread` table per target, in the run's
+step summary, a downloadable `typebench-ab-results` JSON artifact, and (same-repo PRs) a sticky
+comment. Memory/throughput are measured locally by the maintainer, not in CI.
+
 ### Preflight
 
 Preflight checks whether a corpus project is usable by the selected checkers before
