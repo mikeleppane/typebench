@@ -13,6 +13,7 @@ from typebench.contracts.models import (
 )
 from typebench.contracts.taxonomy import LocDenominator, ResultClass, ThreadMode
 from typebench.suite.renderer import (
+    _ab_display,
     _code_loc_or_withheld,
     _files_degraded,
     build_report_html,
@@ -594,6 +595,26 @@ def test_files_degraded_true_when_count_unknown(make_env: EnvFactory) -> None:
     pr = _files_record("pyrefly", None, make_env)
     rel = _files_record("pyrefly", 12, make_env)
     assert _files_degraded([pr, rel]) is True
+
+
+def test_ab_display_is_tool_and_label_dropping_raw_version() -> None:
+    assert _ab_display("mypy@mypy 2.1.0 (compiled: yes)+release") == "mypy (release)"
+    assert _ab_display("pyrefly@path+pr") == "pyrefly (pr)"
+    assert _ab_display("ty@0.0.44") == "ty@0.0.44"  # no label -> fall back to full id
+
+
+def test_render_ab_rows_show_friendly_labels_not_raw_version(make_env: EnvFactory) -> None:
+    base = _record("mypy", 2.0, 1, make_env).model_copy(
+        update={"checker_id": "mypy@mypy 2.1.0 (compiled: yes)+release", "files": 10}
+    )
+    cand = _record("mypy", 1.5, 1, make_env).model_copy(
+        update={"checker_id": "mypy@mypy 2.1.0 (compiled: yes)+pr", "files": 10}
+    )
+    env = ResultsEnvelope(suite_version="ab", generated_at="t", runs=[base, cand])
+    out = render_ab(env, baseline="mypy@mypy 2.1.0 (compiled: yes)+release")
+    assert "mypy (pr)" in out and "mypy (release)" in out
+    assert "(compiled: yes)" not in out  # raw version string gone from display
+    assert "-25.0%" in out  # delta math still correct (matching on raw id)
 
 
 def test_render_ab_is_wall_only_with_delta_and_spread(make_env: EnvFactory) -> None:
