@@ -373,6 +373,9 @@ def test_build_trends_includes_kloc_and_corpus_markers(make_env: EnvFactory) -> 
     assert abs(kloc_s - 1.6) < 1e-9
     assert _corpus_markers(trends)[0]["suite_version"] == "v"
     assert "CPU-A" in _cpu_models(trends)
+    # code_loc + size_tier drive the site's projects-by-checkers matrix tiering.
+    assert p["code_loc"] == 3200
+    assert p["size_tier"] == "Small"
 
 
 def test_build_trends_uses_harness_corrected_values(make_env: EnvFactory) -> None:

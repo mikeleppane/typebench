@@ -571,11 +571,20 @@ def build_trends(history: list[ResultsEnvelope]) -> dict[str, object]:
             )
             peak_mb = _peak_mb_value(record, envelope.harness_mem_baseline_bytes)
             checker_id = _checker_id(record)
+            # code_loc + size_tier let the site group the projects-by-checkers
+            # matrix into the same Small/Medium/Large tiers the README uses, without
+            # duplicating the LOC cutoffs in JS (the cutoffs stay here, in Python).
+            # code_loc is the canonical CODE LOC only -- never the physical fallback:
+            # mixing denominators under one label breaks neutrality discipline, so it
+            # is null when tokei code-LOC is unavailable and the site omits the hint.
+            code_loc = record.canonical_code_loc
             points.append(
                 {
                     "date": date,
                     "suite_version": envelope.suite_version,
                     "project": record.project,
+                    "code_loc": code_loc,
+                    "size_tier": _size_tier(record.canonical_code_loc),
                     "thread_mode": record.thread_mode.value,
                     "cores": record.cores,
                     "checker_id": checker_id,
