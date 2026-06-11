@@ -111,6 +111,10 @@ runs:
     - name: Run A/B
       id: ab
       shell: bash
+      # SECURITY: every ${{ inputs.* }} below is interpolated from the consuming
+      # workflow's author-controlled inputs, never from PR-derived context
+      # (github.event.*). Keep it that way — wiring any of these from PR content
+      # would turn this shell into an injection sink.
       env:
         GITHUB_ACTION_PATH: ${{ github.action_path }}
       run: |

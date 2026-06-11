@@ -854,10 +854,20 @@ def ab(  # noqa: PLR0913 — distinct user-facing CLI options for one command
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
 
+    if not candidate_bin.is_file():
+        typer.echo(f"--candidate-bin is not a file: {candidate_bin}", err=True)
+        raise typer.Exit(code=2)
+    if baseline_bin is not None and not baseline_bin.is_file():
+        typer.echo(f"--baseline-bin is not a file: {baseline_bin}", err=True)
+        raise typer.Exit(code=2)
+
     if baseline_bin is not None:
         baseline_spec = CheckerSpec(tool=checker, label=baseline_label, source=Source.PATH)
         baseline_resolver: CheckerResolver = PathResolver(str(baseline_bin))
     else:
+        if baseline.strip().startswith("path:"):
+            typer.echo("--baseline does not accept 'path:'; use --baseline-bin instead.", err=True)
+            raise typer.Exit(code=2)
         baseline_spec = CheckerSpec(
             tool=checker, version=_parse_baseline(baseline), label=baseline_label
         )
