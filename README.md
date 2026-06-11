@@ -465,37 +465,6 @@ Released under the MIT License. See [`LICENSE`](LICENSE).
 
 <!-- TYPEBENCH:BEGIN -->
 
-_Suite `2026-06-10` · generated 2026-06-10T16:13:11.481711+00:00_
-
-
-#### click — all-cores · all-cores
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| mypy@2.1.0 | clean | 0.948 | 778.6 | 4.791 | 4.91 | 9.9 |
-
-
-#### click — constrained · cores=1
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| mypy@2.1.0 | clean | 0.998 | 85.0 | 1.007 | 0.98 | 9.4 |
-
-
-#### httpx — all-cores · all-cores
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| mypy@2.1.0 | diagnostics | 1.156 | 924.8 | 5.525 | 4.67 | 6.3 |
-
-
-#### httpx — constrained · cores=1
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| mypy@2.1.0 | diagnostics | 1.328 | 105.0 | 1.307 | 0.97 | 5.5 |
-
-
-> kLOC/s denominator is the canonical analyzed code-LOC (tokei; blanks+comments excluded), identical across tools. `—*` = throughput withheld because the tool over-reports its analyzed set vs the canonical denominator. `!` = swap observed during the memory pass, so peak memory may be understated. Parallel efficiency is cross-pass (cold cgroup CPU-time ÷ warm hyperfine wall). Checker issue counts are intentionally omitted — they are not comparable across tools and are not a ranking.
+_No official results published yet. Run a suite and add the envelope to `data/official/`._
 
 <!-- TYPEBENCH:END -->
