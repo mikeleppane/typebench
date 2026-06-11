@@ -10,6 +10,7 @@ all-cores and constrained 1/4/8-core walls into columns.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, assert_never
 
 from typebench.contracts.taxonomy import LocDenominator
@@ -19,6 +20,15 @@ if TYPE_CHECKING:
 
 _README_BEGIN = "<!-- TYPEBENCH:BEGIN -->"
 _README_END = "<!-- TYPEBENCH:END -->"
+
+
+def _format_generated(iso: str) -> str:
+    """Render the envelope's ISO-8601 stamp as a clean 'YYYY-MM-DD HH:MM UTC'. Falls
+    back to the raw string if it is not parseable, so render never crashes on it."""
+    try:
+        return datetime.fromisoformat(iso).astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    except ValueError:
+        return iso
 
 
 def _corrected_wall_s(record: RunResult, harness_wall_overhead_s: float | None) -> float | None:
@@ -110,6 +120,8 @@ def _sort_key(record: RunResult) -> tuple[int, float, str]:
 
 _CONSTRAINED_CORES: tuple[int, ...] = (1, 4, 8)
 _TIER_ORDER: dict[str, int] = {"Small": 0, "Medium": 1, "Large": 2}
+# A column winner is only meaningful with at least this many comparable values.
+_MIN_BOLD_CONTENDERS = 2
 # Tier cutoffs on canonical code-LOC. Presentation-only grouping, not the corpus's
 # declared buckets (which the envelope does not carry); chosen to read small->large.
 _SMALL_MAX_LOC = 20_000
@@ -150,6 +162,20 @@ def _wall_or_status(record: RunResult | None, harness_wall_overhead_s: float | N
     return _wall(record, harness_wall_overhead_s)
 
 
+def _bold_best(
+    cells: dict[str, tuple[float | None, str]], *, higher_is_better: bool
+) -> dict[str, str]:
+    """Bold the winning cell(s) in one metric column. Only marks a winner when at least
+    two checkers have a comparable value, so a lone measurement is never 'best'. Ties are
+    all bolded."""
+    text = {cid: formatted for cid, (_, formatted) in cells.items()}
+    valued = {cid: value for cid, (value, _) in cells.items() if value is not None}
+    if len(valued) < _MIN_BOLD_CONTENDERS:
+        return text
+    best = max(valued.values()) if higher_is_better else min(valued.values())
+    return {cid: (f"**{t}**" if valued.get(cid) == best else t) for cid, t in text.items()}
+
+
 def _compact_table(
     records: list[RunResult],
     *,
@@ -158,7 +184,7 @@ def _compact_table(
 ) -> str:
     """One row per checker for a single project: all-cores wall + the constrained
     1/4/8-core sweep folded into columns, plus peak mem and kLOC/s from the all-cores
-    pass. Fastest (all-cores wall) first."""
+    pass. Fastest (all-cores wall) first; the best cell in each metric column is bold."""
     by_checker: dict[str, dict[tuple[str, int | None], RunResult]] = {}
     for r in records:
         by_checker.setdefault(_checker_id(r), {})[(r.thread_mode.value, r.cores)] = r
@@ -172,33 +198,61 @@ def _compact_table(
             return (0, rec.timing.median_s)
         return (1, float("inf"))
 
+    cids = sorted(by_checker, key=sort_key)
+
+    def wall_cell(rec: RunResult | None) -> tuple[float | None, str]:
+        value = (
+            _corrected_wall_s(rec, harness_wall_overhead_s)
+            if rec is not None and rec.timing is not None
+            else None
+        )
+        return (value, _wall_or_status(rec, harness_wall_overhead_s))
+
+    def mem_cell(rec: RunResult | None) -> tuple[float | None, str]:
+        peak = _corrected_peak_bytes(rec, harness_mem_baseline_bytes) if rec is not None else None
+        return (
+            float(peak) if peak is not None else None,
+            _peak_mem_mb(rec, harness_mem_baseline_bytes) if rec is not None else "—",
+        )
+
+    def kloc_cell(rec: RunResult | None) -> tuple[float | None, str]:
+        return (
+            _kloc_value(rec, harness_wall_overhead_s) if rec is not None else None,
+            _kloc_s(rec, harness_wall_overhead_s) if rec is not None else "—",
+        )
+
+    all_col = _bold_best({cid: wall_cell(all_cores(cid)) for cid in cids}, higher_is_better=False)
+    sweep_cols = {
+        c: _bold_best(
+            {cid: wall_cell(by_checker[cid].get(("constrained", c))) for cid in cids},
+            higher_is_better=False,
+        )
+        for c in _CONSTRAINED_CORES
+    }
+    mem_col = _bold_best({cid: mem_cell(all_cores(cid)) for cid in cids}, higher_is_better=False)
+    kloc_col = _bold_best({cid: kloc_cell(all_cores(cid)) for cid in cids}, higher_is_better=True)
+
     header = (
         "| Checker | All-cores | 1c | 4c | 8c | Peak mem (MB) | kLOC/s |\n"
         "|------|--:|--:|--:|--:|--:|--:|\n"
     )
     rows: list[str] = []
-    for checker_id in sorted(by_checker, key=sort_key):
-        ac = all_cores(checker_id)
-        cells = [_wall_or_status(ac, harness_wall_overhead_s)]
-        cells += [
-            _wall_or_status(by_checker[checker_id].get(("constrained", c)), harness_wall_overhead_s)
-            for c in _CONSTRAINED_CORES
-        ]
-        mem = _peak_mem_mb(ac, harness_mem_baseline_bytes) if ac is not None else "—"
-        kloc = _kloc_s(ac, harness_wall_overhead_s) if ac is not None else "—"
-        rows.append(f"| {checker_id} | " + " | ".join(cells) + f" | {mem} | {kloc} |")
+    for cid in cids:
+        cells = [all_col[cid]] + [sweep_cols[c][cid] for c in _CONSTRAINED_CORES]
+        cells += [mem_col[cid], kloc_col[cid]]
+        rows.append(f"| {cid} | " + " | ".join(cells) + " |")
     return header + "\n".join(rows) + "\n"
 
 
 _FOOTNOTE = (
-    "\n> Wall is the hyperfine median in seconds, fastest first. **All-cores** uses the "
-    "whole machine; **1c/4c/8c** are the constrained track pinned to that many cores. Peak "
-    "mem and kLOC/s are from the all-cores pass. kLOC/s denominator is the canonical analyzed "
-    "code-LOC (tokei; blanks+comments excluded), identical across tools. `—*` = throughput "
-    "withheld because the tool over-reports its analyzed set vs the canonical denominator. "
-    "`!` = swap observed during the memory pass, so peak memory may be understated. Checker "
-    "issue counts are intentionally omitted — they are not comparable across tools and are "
-    "not a ranking.\n"
+    "\n> Wall is the hyperfine median in seconds, fastest first; the best cell in each metric "
+    "column is in **bold**. **All-cores** uses the whole machine; **1c/4c/8c** are the "
+    "constrained track pinned to that many cores. Peak mem and kLOC/s are from the all-cores "
+    "pass. kLOC/s denominator is the canonical analyzed code-LOC, identical across tools. "
+    "`—*` = throughput withheld because the tool over-reports its analyzed set vs the canonical "
+    "denominator. `!` = swap observed during the memory pass, so peak memory may be "
+    "understated. Checker issue counts are intentionally omitted — they are not comparable "
+    "across tools and are not a ranking.\n"
 )
 
 
@@ -254,13 +308,19 @@ def _result_tables(envelope: ResultsEnvelope) -> list[str]:
     return parts
 
 
+def _dataset_line(envelope: ResultsEnvelope) -> str:
+    """The italic one-liner above the tables: corpus snapshot + clean measured time."""
+    when = _format_generated(envelope.generated_at)
+    return f"_Corpus snapshot {envelope.suite_version} · measured {when}_"
+
+
 def render_readme(envelope: ResultsEnvelope) -> str:
     """Markdown block (between the TYPEBENCH markers) — one table per
     (project, thread-mode), ordered fastest-first. Includes the suite version,
     generated timestamp, and the caveat footnotes."""
     parts = [
         _README_BEGIN,
-        f"\n_Suite `{envelope.suite_version}` · generated {envelope.generated_at}_\n",
+        f"\n{_dataset_line(envelope)}\n",
         *_result_tables(envelope),
         _FOOTNOTE,
         _provenance(envelope),
@@ -274,7 +334,7 @@ def render_terminal(envelope: ResultsEnvelope) -> str:
     printing a readable summary at the end of a `suite` run (markdown renders
     fine as plain text in a terminal)."""
     parts = [
-        f"_Suite `{envelope.suite_version}` · generated {envelope.generated_at}_\n",
+        f"{_dataset_line(envelope)}\n",
         *_result_tables(envelope),
         _FOOTNOTE,
         _provenance(envelope),
