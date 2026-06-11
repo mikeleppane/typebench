@@ -328,6 +328,64 @@ def render_compare(envelope: ResultsEnvelope, baseline: str | None = None) -> st
     return "\n".join(parts)
 
 
+def render_ab(envelope: ResultsEnvelope, baseline: str | None = None) -> str:
+    """Wall-only A/B delta table for the GitHub Action: one section per
+    (project, thread-mode, cores). Columns: Checker | Wall median (s) | Δ wall |
+    runs | spread. Memory and kLOC/s are intentionally omitted (local-only
+    metrics). A target whose arms analyzed unequal/zero files is marked degraded."""
+    if not envelope.runs:
+        return "_no records to compare_"
+
+    base_id = baseline or _checker_id(envelope.runs[0])
+    groups: dict[tuple[str, str, int | None], list[RunResult]] = {}
+    for record in envelope.runs:
+        groups.setdefault((record.project, record.thread_mode.value, record.cores), []).append(
+            record
+        )
+
+    parts = [f"_A/B · baseline `{base_id}` · wall-time only_\n"]
+    for project, mode, cores in sorted(
+        groups, key=lambda group: (group[0], group[1], -1 if group[2] is None else group[2])
+    ):
+        records = groups[(project, mode, cores)]
+        degraded = (
+            " — ⚠ degraded (file counts differ across arms)" if _files_degraded(records) else ""
+        )
+        baseline_record = next(
+            (record for record in records if _checker_id(record) == base_id), None
+        )
+        base_wall = (
+            _corrected_wall_s(baseline_record, envelope.harness_wall_overhead_s)
+            if baseline_record is not None
+            else None
+        )
+        parts.append(f"\n#### {project} — {mode} · {_cores_label(cores)}{degraded}\n")
+        rows = [
+            "| Checker | Wall median (s) | Δ wall | runs | spread (min..max s) |",
+            "|---------|-----------------|--------|------|---------------------|",
+        ]
+        for record in sorted(records, key=_sort_key):
+            checker_id = _checker_id(record)
+            wall = _corrected_wall_s(record, envelope.harness_wall_overhead_s)
+            is_baseline = checker_id == base_id
+            delta = "baseline" if is_baseline else _delta_pct(base_wall, wall)
+            wall_text = f"{wall:.3f}" if wall is not None else "—"
+            if record.timing is not None:
+                runs_text = str(record.timing.runs)
+                spread = f"{record.timing.min_s:.3f}..{record.timing.max_s:.3f}"
+            else:
+                runs_text = "—"
+                spread = "—"
+            rows.append(f"| {checker_id} | {wall_text} | {delta} | {runs_text} | {spread} |")
+        parts.append("\n".join(rows) + "\n")
+    parts.append(
+        "\n> Wall-time deltas on a shared CI runner. Treat small deltas (≲ a few %) as "
+        "noise; arms run sequentially per target. Memory/throughput are measured locally, "
+        "not here.\n"
+    )
+    return "\n".join(parts)
+
+
 def build_trends(history: list[ResultsEnvelope]) -> dict[str, object]:
     """Flatten history to fully-labelled points + per-CPU-model-normalized variants.
     The GH Pages app groups points into series and derives inter-checker ratios

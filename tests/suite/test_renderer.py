@@ -18,6 +18,7 @@ from typebench.suite.renderer import (
     build_report_html,
     build_trends,
     cpu_model_anchors,
+    render_ab,
     render_compare,
     render_readme,
     render_terminal,
@@ -593,3 +594,34 @@ def test_files_degraded_true_when_count_unknown(make_env: EnvFactory) -> None:
     pr = _files_record("pyrefly", None, make_env)
     rel = _files_record("pyrefly", 12, make_env)
     assert _files_degraded([pr, rel]) is True
+
+
+def test_render_ab_is_wall_only_with_delta_and_spread(make_env: EnvFactory) -> None:
+    base = _record("pyrefly", 2.00, 100_000_000, make_env).model_copy(
+        update={"checker_id": "pyrefly@0.36+release", "files": 10}
+    )
+    cand = _record("pyrefly", 1.50, 100_000_000, make_env).model_copy(
+        update={"checker_id": "pyrefly@path+pr", "files": 10}
+    )
+    env = ResultsEnvelope(suite_version="ab-2026-06-11", generated_at="t", runs=[base, cand])
+
+    out = render_ab(env, baseline="pyrefly@0.36+release")
+
+    assert "Peak" not in out and "kLOC" not in out
+    assert "Wall median (s)" in out and "Δ wall" in out and "runs" in out
+    assert "-25.0%" in out
+    assert "baseline" in out
+
+
+def test_render_ab_marks_degraded_when_file_counts_disagree(make_env: EnvFactory) -> None:
+    base = _record("pyrefly", 2.0, 1, make_env).model_copy(
+        update={"checker_id": "pyrefly@0.36+release", "files": 10}
+    )
+    cand = _record("pyrefly", 0.1, 1, make_env).model_copy(
+        update={"checker_id": "pyrefly@path+pr", "files": 0}
+    )
+    env = ResultsEnvelope(suite_version="ab", generated_at="t", runs=[base, cand])
+
+    out = render_ab(env, baseline="pyrefly@0.36+release")
+
+    assert "degraded" in out
