@@ -17,3 +17,83 @@ uv        = "0.11.19"
 [tasks.render]
 description = "Render README results block + site trends from data/official/"
 run = "uv run typebench render --results-dir data/official --readme README.md --trends site/data/trends.json"
+
+# ---------------------------------------------------------------------------
+# Developer shortcuts. `mise run <task>`; `mise tasks` lists them. These wrap
+# the uv-managed toolchain — there is no Makefile. Tasks without a usage spec
+# forward extra args, so `mise run test tests/engine -k oom` and
+# `mise run lint --fix` both work.
+# ---------------------------------------------------------------------------
+
+[tasks.fmt]
+description = "Format the tree (ruff format)"
+run = "uv run ruff format"
+
+[tasks.lint]
+description = "Lint (ruff check); append --fix to autofix"
+run = "uv run ruff check"
+
+[tasks.types]
+description = "Type-check (pyrefly, strict preset)"
+run = "uv run pyrefly check"
+
+[tasks.test]
+description = "Run the test suite (forwards extra pytest args)"
+run = "uv run pytest"
+
+# The AGENTS.md quality floor, in the required order. This is the gate to pass
+# before declaring a change done.
+[tasks.check]
+description = "Full quality gate: format, lint, type-check, test (in order)"
+run = [
+  "uv run ruff format",
+  "uv run ruff check",
+  "uv run pyrefly check",
+  "uv run pytest",
+]
+
+# Fast inner loop: skip the e2e and neutrality suites (which can shell out to
+# real checkers / hyperfine). Pure unit + fake-driven pipeline coverage.
+[tasks.test-fast]
+description = "Run tests excluding e2e + neutrality (fast inner loop)"
+run = "uv run pytest --ignore=tests/e2e --ignore=tests/neutrality"
+
+[tasks.test-e2e]
+description = "Run only the end-to-end suite"
+run = "uv run pytest tests/e2e"
+
+[tasks.doctor]
+description = "Verify the external toolchain resolves at the pinned versions"
+run = "uv run typebench doctor"
+
+# Probe whether a corpus project is usable by all four checkers before it is
+# benchmarked. Defaults to httpx; pass another name: `mise run preflight attrs`.
+[tasks.preflight]
+description = "Preflight a corpus project (default: httpx)"
+usage = '''
+arg "<project>" help="Corpus project name from corpus/suite.toml" default="httpx"
+'''
+run = "uv run typebench preflight --corpus corpus/suite.toml --project ${usage_project?} --output preflight/${usage_project?}.json"
+
+# Full corpus benchmark: every corpus project × all four checkers × both thread
+# tracks → one timestamped results envelope under results/. Heavy (real checkers,
+# real timing). Forwards extra args, so narrow or preview it:
+#   mise run suite --dry-run             # print the effective plan, run nothing
+#   mise run suite --project httpx       # one project
+#   mise run suite --tool mypy --tool ty # a subset of checkers
+[tasks.suite]
+description = "Run the full corpus suite into results/ (forwards filters/--dry-run)"
+run = 'uv run typebench suite --output "results/suite-$(date +%Y%m%d-%H%M%S).json"'
+
+[tasks.report]
+description = "Build and open a self-contained HTML trend report from results/"
+run = "uv run typebench report --results-dir results --open"
+
+# Remove regenerable tool scratch. Leaves the expensive corpus clone/venv cache
+# (typebench-cache/) and the durable data/official/ store untouched.
+[tasks.clean]
+description = "Remove tool caches (.pytest_cache, .ruff_cache, __pycache__)"
+run = [
+  "rm -rf .pytest_cache .ruff_cache",
+  "find . -type d -name __pycache__ -prune -exec rm -rf {} +",
+]

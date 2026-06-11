@@ -88,6 +88,11 @@ uv run pyrefly check
 uv run pytest
 ```
 
+`mise run check` runs exactly these four, in order — the shortcut for the floor.
+`mise tasks` lists the rest (`fmt`, `lint`, `types`, `test`, `test-fast`,
+`test-e2e`, `doctor`, `preflight`, `suite`, `report`, `render`, `clean`); they wrap
+the same `uv run …` invocations (`mise trust` once per clone first).
+
 `uv sync` sets up the env. Pre-commit runs `ruff check --fix`, `ruff format`, and
 `pyrefly check` (strict) on commit; never bypass with `--no-verify`.
 

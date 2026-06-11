@@ -143,6 +143,38 @@ is **activated** (the `mise activate` line above puts the shims on PATH).
 `typebench doctor` reports the resolved versions, so a mis-activated shell is
 visible immediately.
 
+### Task shortcuts
+
+Common workflows are wrapped as [mise tasks](https://mise.jdx.dev/tasks/) in
+`mise.toml`, so you don't have to retype the `uv run …` invocations (there is no
+Makefile — `uv`/`mise` own the toolchain). Trust the config once per clone, then
+run any task:
+
+```bash
+mise trust          # one-time: approve this repo's mise.toml
+mise tasks          # list every task with its description
+mise run check      # the full quality gate, in order
+```
+
+| Task | Runs |
+|------|------|
+| `mise run check` | The full gate in order: `ruff format` → `ruff check` → `pyrefly check` → `pytest`. |
+| `mise run fmt` | `ruff format`. |
+| `mise run lint` | `ruff check` (append `--fix` to autofix). |
+| `mise run types` | `pyrefly check` (strict). |
+| `mise run test` | The full `pytest` suite. |
+| `mise run test-fast` | `pytest` minus `e2e` + `neutrality` — the fast inner loop. |
+| `mise run test-e2e` | Only the end-to-end suite. |
+| `mise run doctor` | `typebench doctor` — confirm the toolchain resolves. |
+| `mise run preflight [project]` | Preflight a corpus project (defaults to `httpx`). |
+| `mise run suite` | Run the **full corpus** (every project × all four checkers × both thread tracks) into `results/`. |
+| `mise run report` | Build and open a local HTML trend report from `results/`. |
+| `mise run render` | Maintainer-only: regenerate the README block + site trends. |
+| `mise run clean` | Remove tool caches (`.pytest_cache`, `.ruff_cache`, `__pycache__`). |
+
+Tasks forward extra arguments, so `mise run test tests/engine -k oom` and
+`mise run lint --fix` work as expected.
+
 ### External tools
 
 | Tool | Role | Required? | If absent |
@@ -546,9 +578,12 @@ _No official results published yet. Run a suite and add the envelope to `data/of
 typebench is a measurement tool, so correctness includes methodological honesty.
 Avoid changes that make the record claim a methodology the engine did not run.
 
-Run the full gate before considering work complete:
+Run the full gate before considering work complete — `mise run check` is the
+shortcut for it (see [Task shortcuts](#task-shortcuts)):
 
 ```bash
+mise run check
+# equivalently:
 uv run ruff format && uv run ruff check && uv run pyrefly check && uv run pytest
 ```
 
