@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from typebench.adapters.base import CheckerHandle
 from typebench.adapters.registry import create_adapter
+from typebench.contracts.identity import CheckerRuntime, CheckerSpec
 from typebench.contracts.policy import Policy
 from typebench.corpus.catalog import load_suite, load_suite_version
 from typebench.corpus.checkerenv import prepare_checker
@@ -16,10 +19,7 @@ from typebench.engine.proc import SYSTEM_HOST
 from typebench.suite.preflight import preflight_project
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from typebench.contracts.config import MeasurementPlan, NormalizedConfig
-    from typebench.contracts.identity import CheckerSpec
     from typebench.contracts.models import (
         CalibrationStats,
         PreflightReport,
@@ -77,6 +77,45 @@ class UvCheckerResolver:
             self._cache_root,
             install_source=adapter.install_source,
             host=self._host,
+        )
+        return CheckerHandle(spec=spec, adapter=adapter, runtime=runtime)
+
+
+class PathResolver:
+    """Resolve a checker spec to an explicit prebuilt binary (Source.PATH).
+
+    Unlike UvCheckerResolver, this never installs: it stamps the given binary as
+    the runtime, with lock_hash = sha256 of the binary's bytes (the reproducibility
+    anchor for a build-from-source artifact). Used by `run_ab` for the PR candidate.
+    """
+
+    def __init__(self, binary: str, *, host: ProcessHost = SYSTEM_HOST) -> None:
+        self._binary = binary
+        self._host = host
+
+    def resolve(self, spec: CheckerSpec) -> CheckerHandle:
+        adapter = create_adapter(spec.tool, host=self._host)
+        binary = str(Path(self._binary).resolve())
+        try:
+            version = adapter.version(binary)
+        except (OSError, ValueError):
+            version = "path"
+        # Adapters probe versions through a no-raise ProcessHost helper that
+        # returns the "unknown" sentinel on a failed launch rather than raising,
+        # so degrade that sentinel to "path" as well.
+        if version == "unknown":
+            version = "path"
+        digest = hashlib.sha256(Path(binary).read_bytes()).hexdigest()
+        checker_id = f"{spec.tool}@{version}"
+        if spec.label:
+            checker_id = f"{checker_id}+{spec.label}"
+        runtime = CheckerRuntime(
+            checker_id=checker_id,
+            tool=spec.tool,
+            binary=binary,
+            version=version,
+            lock_hash=f"sha256:{digest}",
+            install_source="path",
         )
         return CheckerHandle(spec=spec, adapter=adapter, runtime=runtime)
 
