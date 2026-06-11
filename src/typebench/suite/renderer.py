@@ -2,8 +2,9 @@
 
 No filesystem I/O here (the CLI does it); golden-tested. Hard rules: diagnostics
 counts are NEVER a headline column; kLOC/s uses the canonical code-LOC denominator
-and is withheld for over-reporting tools; parallel_efficiency is labelled
-cross-pass (cold-cpu ÷ warm-wall), not a within-run figure.
+and is withheld for over-reporting tools. The README results block is one compact
+table per project (ecosystem library), grouped into size tiers, folding the
+all-cores and constrained 1/4/8-core walls into columns.
 """
 
 from __future__ import annotations
@@ -107,38 +108,97 @@ def _sort_key(record: RunResult) -> tuple[int, float, str]:
     return (1, float("inf"), _checker_id(record))
 
 
-def _table(
+_CONSTRAINED_CORES: tuple[int, ...] = (1, 4, 8)
+_TIER_ORDER: dict[str, int] = {"Small": 0, "Medium": 1, "Large": 2}
+# Tier cutoffs on canonical code-LOC. Presentation-only grouping, not the corpus's
+# declared buckets (which the envelope does not carry); chosen to read small->large.
+_SMALL_MAX_LOC = 20_000
+_MEDIUM_MAX_LOC = 70_000
+
+
+def _size_tier(code_loc: int | None) -> str:
+    """Group projects by analyzed code size so the README reads small -> large."""
+    loc = code_loc or 0
+    if loc < _SMALL_MAX_LOC:
+        return "Small"
+    if loc < _MEDIUM_MAX_LOC:
+        return "Medium"
+    return "Large"
+
+
+def _loc_headline(record: RunResult) -> str:
+    """The 'N code LOC analyzed across M files' line under a project heading. Uses the
+    canonical code-LOC (the shared kLOC/s denominator); falls back to physical LOC when
+    tokei was unavailable."""
+    loc = (
+        record.canonical_code_loc if record.canonical_code_loc is not None else record.canonical_loc
+    )
+    loc_str = f"{loc:,}" if loc is not None else "unknown"
+    files = (
+        f" across {record.canonical_files:,} files" if record.canonical_files is not None else ""
+    )
+    return f"{loc_str} code LOC analyzed{files}"
+
+
+def _wall_or_status(record: RunResult | None, harness_wall_overhead_s: float | None) -> str:
+    """Wall median for a measured cell; the failure class for a cell that ran but failed
+    (kept visible, not hidden); — when that thread config was not run."""
+    if record is None:
+        return "—"
+    if record.timing is None:
+        return record.result_class.value
+    return _wall(record, harness_wall_overhead_s)
+
+
+def _compact_table(
     records: list[RunResult],
     *,
     harness_mem_baseline_bytes: int | None,
     harness_wall_overhead_s: float | None,
 ) -> str:
+    """One row per checker for a single project: all-cores wall + the constrained
+    1/4/8-core sweep folded into columns, plus peak mem and kLOC/s from the all-cores
+    pass. Fastest (all-cores wall) first."""
+    by_checker: dict[str, dict[tuple[str, int | None], RunResult]] = {}
+    for r in records:
+        by_checker.setdefault(_checker_id(r), {})[(r.thread_mode.value, r.cores)] = r
+
+    def all_cores(checker_id: str) -> RunResult | None:
+        return by_checker[checker_id].get(("all-cores", None))
+
+    def sort_key(checker_id: str) -> tuple[int, float]:
+        rec = all_cores(checker_id)
+        if rec is not None and rec.timing is not None:
+            return (0, rec.timing.median_s)
+        return (1, float("inf"))
+
     header = (
-        "| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | "
-        "CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |\n"
-        "|------|--------|-----------------|----------------------|"
-        "--------------|----------------------------|---------------|\n"
+        "| Checker | All-cores | 1c | 4c | 8c | Peak mem (MB) | kLOC/s |\n"
+        "|------|--:|--:|--:|--:|--:|--:|\n"
     )
-    rows = []
-    for r in sorted(records, key=_sort_key):
-        cpu = f"{r.cpu_time_s:.3f}" if r.cpu_time_s is not None else "—"
-        peff = f"{r.parallel_efficiency:.2f}" if r.parallel_efficiency is not None else "—"
-        rows.append(
-            f"| {_checker_id(r)} | {r.result_class.value} | {_wall(r, harness_wall_overhead_s)} | "
-            f"{_peak_mem_mb(r, harness_mem_baseline_bytes)} | {cpu} | {peff} | "
-            f"{_kloc_s(r, harness_wall_overhead_s)} |"
-        )
+    rows: list[str] = []
+    for checker_id in sorted(by_checker, key=sort_key):
+        ac = all_cores(checker_id)
+        cells = [_wall_or_status(ac, harness_wall_overhead_s)]
+        cells += [
+            _wall_or_status(by_checker[checker_id].get(("constrained", c)), harness_wall_overhead_s)
+            for c in _CONSTRAINED_CORES
+        ]
+        mem = _peak_mem_mb(ac, harness_mem_baseline_bytes) if ac is not None else "—"
+        kloc = _kloc_s(ac, harness_wall_overhead_s) if ac is not None else "—"
+        rows.append(f"| {checker_id} | " + " | ".join(cells) + f" | {mem} | {kloc} |")
     return header + "\n".join(rows) + "\n"
 
 
 _FOOTNOTE = (
-    "\n> kLOC/s denominator is the canonical analyzed code-LOC (tokei; blanks+"
-    "comments excluded), identical across tools. `—*` = throughput withheld "
-    "because the tool over-reports its analyzed set vs the canonical denominator. "
-    "`!` = swap observed during the memory pass, so peak memory may be understated. "
-    "Parallel efficiency is cross-pass (cold cgroup CPU-time ÷ warm hyperfine wall). "
-    "Checker issue counts are intentionally omitted — they are not comparable across "
-    "tools and are not a ranking.\n"
+    "\n> Wall is the hyperfine median in seconds, fastest first. **All-cores** uses the "
+    "whole machine; **1c/4c/8c** are the constrained track pinned to that many cores. Peak "
+    "mem and kLOC/s are from the all-cores pass. kLOC/s denominator is the canonical analyzed "
+    "code-LOC (tokei; blanks+comments excluded), identical across tools. `—*` = throughput "
+    "withheld because the tool over-reports its analyzed set vs the canonical denominator. "
+    "`!` = swap observed during the memory pass, so peak memory may be understated. Checker "
+    "issue counts are intentionally omitted — they are not comparable across tools and are "
+    "not a ranking.\n"
 )
 
 
@@ -160,22 +220,33 @@ def _provenance(envelope: ResultsEnvelope) -> str:
 
 
 def _result_tables(envelope: ResultsEnvelope) -> list[str]:
-    """Per-(project, thread-mode, cores) heading + table parts, ordered fastest-
-    first (ranking by the measured metric, not diagnostics). Shared by the README
-    block and the terminal summary so the two never drift."""
-    groups: dict[tuple[str, str, int | None], list[RunResult]] = {}
+    """One section per project (ecosystem library), grouped into size tiers and ordered
+    small -> large. Each section states the analyzed code-LOC and renders a single compact
+    table folding the thread-mode/core sweep into columns. Shared by the README block and
+    the terminal summary so the two never drift."""
+    by_project: dict[str, list[RunResult]] = {}
     for record in envelope.runs:
-        groups.setdefault((record.project, record.thread_mode.value, record.cores), []).append(
-            record
-        )
+        by_project.setdefault(record.project, []).append(record)
+    rep = {project: recs[0] for project, recs in by_project.items()}
+
+    def project_key(project: str) -> tuple[int, int, str]:
+        rec = rep[project]
+        loc = rec.canonical_code_loc or rec.canonical_loc or 0
+        return (_TIER_ORDER[_size_tier(rec.canonical_code_loc)], loc, project)
+
     parts: list[str] = []
-    for project, mode, cores in sorted(
-        groups, key=lambda group: (group[0], group[1], -1 if group[2] is None else group[2])
-    ):
-        parts.append(f"\n#### {project} — {mode} · {_cores_label(cores)}\n")
+    current_tier: str | None = None
+    for project in sorted(by_project, key=project_key):
+        rec = rep[project]
+        tier = _size_tier(rec.canonical_code_loc)
+        if tier != current_tier:
+            parts.append(f"\n### {tier} projects\n")
+            current_tier = tier
+        parts.append(f"\n#### {project}\n")
+        parts.append(f"{_loc_headline(rec)}\n")
         parts.append(
-            _table(
-                groups[(project, mode, cores)],
+            _compact_table(
+                by_project[project],
                 harness_mem_baseline_bytes=envelope.harness_mem_baseline_bytes,
                 harness_wall_overhead_s=envelope.harness_wall_overhead_s,
             )
