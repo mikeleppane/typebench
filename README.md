@@ -1,5 +1,10 @@
 # typebench
 
+[![smoke](https://github.com/mikeleppane/typebench/actions/workflows/smoke.yml/badge.svg)](https://github.com/mikeleppane/typebench/actions/workflows/smoke.yml)
+[![release](https://img.shields.io/github/v/tag/mikeleppane/typebench?label=release)](https://github.com/mikeleppane/typebench/releases)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![python](https://img.shields.io/badge/python-3.12%2B-blue)](pyproject.toml)
+
 A neutral, reproducible benchmark engine for Python type-checker performance across
 **mypy**, **pyright**, **pyrefly**, and **ty**.
 
@@ -235,6 +240,14 @@ version on projects you choose, and reports a wall-time delta to the PR. It runs
 `pull_request` — **never `pull_request_target`** (that would hand a write token to a job that
 builds untrusted PR code; see the spec). Fork PRs get a read-only token, so the sticky comment
 is skipped and the result stays in the step summary.
+
+Using this action? Add a badge to your README:
+
+[![measured with typebench](https://img.shields.io/badge/measured%20with-typebench-7b3fe4)](https://github.com/mikeleppane/typebench)
+
+```markdown
+[![measured with typebench](https://img.shields.io/badge/measured%20with-typebench-7b3fe4)](https://github.com/mikeleppane/typebench)
+```
 
 **Rust checker (pyrefly):**
 ```yaml
