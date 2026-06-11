@@ -1,0 +1,84 @@
+name: publish
+
+# Renders the README results block + site trend data from the durable official
+# store, then deploys the static site to GitHub Pages.
+#
+# This job does NOT measure anything — official numbers are produced on the
+# maintainer's benchmark PC and committed to data/official/ (hosted runners are
+# too noisy for trustworthy timings; see docs/plans/2026-06-10-results-representation.md).
+# Here we only transform committed JSON into README tables + trends.json.
+#
+# Loop safety: the only file committed back to the branch is README.md, which is
+# deliberately absent from the `paths` filter below, so the bot push cannot
+# re-trigger this workflow. site/data/trends.json is gitignored — it is rebuilt
+# here and shipped as a Pages artifact, never committed.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "data/official/**"
+      - "site/**"
+      - ".github/workflows/publish.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # commit the refreshed README.md back to main
+  pages: write # deploy to GitHub Pages
+  id-token: write # OIDC token for the Pages deployment
+
+# Serialize publishes so a README commit + Pages deploy never race a later push.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.19"
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Sync project
+        run: uv sync --frozen
+
+      - name: Render README + trends
+        run: >
+          uv run typebench render
+          --results-dir data/official
+          --readme README.md
+          --trends site/data/trends.json
+
+      - name: Commit refreshed README
+        run: |
+          if git diff --quiet -- README.md; then
+            echo "README unchanged — nothing to commit."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add README.md
+            git commit -m "docs(readme): refresh benchmark results [skip ci]"
+            git push
+          fi
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: render
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
