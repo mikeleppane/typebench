@@ -1,0 +1,166 @@
+name: typebench A/B
+description: A/B-measure a type-checker PR build vs its latest release on your projects (wall-time).
+author: mikeleppane
+
+inputs:
+  checker:
+    description: "Adapter id: pyrefly | ty | mypy | pyright (stub is test-only)."
+    required: true
+  candidate:
+    description: "Path to a prebuilt candidate binary (use this OR build)."
+    required: false
+    default: ""
+  build:
+    description: "Shell command that builds the candidate (e.g. cargo build --release)."
+    required: false
+    default: ""
+  binary:
+    description: "Path where `build` puts the candidate (required with build)."
+    required: false
+    default: ""
+  baseline:
+    description: "Baseline: 'latest', '==X.Y' (uv), or 'path:/abs/binary' (offline)."
+    required: false
+    default: "latest"
+  targets:
+    description: "Newline-delimited project paths and/or repo URLs to type-check."
+    required: true
+  runs:
+    description: "hyperfine timed runs."
+    required: false
+    default: "5"
+  thread-mode:
+    description: "all-cores | constrained."
+    required: false
+    default: "all-cores"
+  cores:
+    description: "Constrained-track core pin (used only with thread-mode: constrained)."
+    required: false
+    default: "1"
+  comment:
+    description: "Post/update a sticky PR comment with the wall delta table."
+    required: false
+    default: "true"
+  python-version:
+    description: "Python for the action's own typebench runtime."
+    required: false
+    default: "3.12"
+
+outputs:
+  envelope-path:
+    description: "Path to the written A/B results envelope JSON."
+    value: ${{ steps.ab.outputs.envelope-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        python-version: ${{ inputs.python-version }}
+        enable-cache: true
+
+    - name: Install hyperfine
+      shell: bash
+      run: |
+        ver=1.20.0
+        url="https://github.com/sharkdp/hyperfine/releases/download/v${ver}/hyperfine-v${ver}-x86_64-unknown-linux-musl.tar.gz"
+        curl -fsSL "$url" | tar xz -C /tmp
+        echo "/tmp/hyperfine-v${ver}-x86_64-unknown-linux-musl" >> "$GITHUB_PATH"
+
+    - name: Resolve candidate
+      id: candidate
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ -n "${{ inputs.build }}" ]; then
+          echo "::group::build candidate"
+          bash -c "${{ inputs.build }}"
+          echo "::endgroup::"
+          cand="${{ inputs.binary }}"
+        else
+          cand="${{ inputs.candidate }}"
+        fi
+        if [ -z "$cand" ]; then echo "::error::provide candidate OR build+binary"; exit 1; fi
+        echo "path=$cand" >> "$GITHUB_OUTPUT"
+
+    - name: Resolve targets
+      id: targets
+      shell: bash
+      run: |
+        set -euo pipefail
+        args=()
+        tmp="$(mktemp -d)"
+        i=0
+        while IFS= read -r line; do
+          [ -z "$line" ] && continue
+          case "$line" in
+            http://*|https://*|git@*)
+              dest="$tmp/repo$i"; i=$((i+1))
+              ref=""; url="$line"
+              case "$line" in *"@"*"://"*) : ;; *@*) url="${line%@*}"; ref="${line##*@}";; esac
+              git clone --depth 1 ${ref:+--branch "$ref"} "$url" "$dest"
+              args+=(--target "$dest") ;;
+            *)
+              args+=(--target "$line") ;;
+          esac
+        done <<< "${{ inputs.targets }}"
+        printf '%s\n' "${args[@]}" > "$tmp/targetargs"
+        echo "argsfile=$tmp/targetargs" >> "$GITHUB_OUTPUT"
+
+    - name: Run A/B
+      id: ab
+      shell: bash
+      env:
+        GITHUB_ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        mapfile -t targs < "${{ steps.targets.outputs.argsfile }}"
+        baseline_args=(--baseline "${{ inputs.baseline }}")
+        case "${{ inputs.baseline }}" in
+          path:*) baseline_args=(--baseline-bin "${{ inputs.baseline }}") ; baseline_args[1]="${baseline_args[1]#path:}" ;;
+        esac
+        uv tool run --from "$GITHUB_ACTION_PATH" typebench ab \
+          --checker "${{ inputs.checker }}" \
+          --candidate-bin "${{ steps.candidate.outputs.path }}" \
+          "${baseline_args[@]}" \
+          --thread-mode "${{ inputs.thread-mode }}" \
+          --cores "${{ inputs.cores }}" \
+          --runs "${{ inputs.runs }}" \
+          --no-measure \
+          "${targs[@]}" \
+          --output ab-results.json | tee ab-table.md
+        echo "envelope-path=ab-results.json" >> "$GITHUB_OUTPUT"
+        {
+          echo "## typebench A/B — ${{ inputs.checker }} (PR vs ${{ inputs.baseline }})"
+          cat ab-table.md
+        } >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: typebench-ab-results
+        path: ab-results.json
+
+    - name: Sticky PR comment
+      if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const marker = `<!-- typebench-ab:${{ inputs.checker }} -->`;
+          const table = fs.readFileSync('ab-table.md', 'utf8');
+          const body = `${marker}\n## typebench A/B — ${{ inputs.checker }} (PR vs ${{ inputs.baseline }})\n${table}`;
+          const { owner, repo } = context.repo;
+          const issue_number = context.issue.number;
+          try {
+            const { data: comments } = await github.rest.issues.listComments({ owner, repo, issue_number });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+          } catch (err) {
+            core.notice(`Skipped PR comment (token cannot write — likely a fork PR): ${err.message}`);
+          }
