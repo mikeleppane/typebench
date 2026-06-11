@@ -53,6 +53,17 @@ jobs:
       - name: Tests
         run: uv run pytest -q
 
+      - name: Action install-source sanity
+        run: |
+          # The action must install typebench from its OWN checkout (github.action_path),
+          # never from a git ref/branch — otherwise a tagged release could install a
+          # different version than it ships with.
+          grep -q "github.action_path" action.yml || {
+            echo "::error::action.yml must install typebench from github.action_path"; exit 1; }
+          if grep -qE "uv tool install .*git\+" action.yml; then
+            echo "::error::action.yml must not install typebench from a git ref"; exit 1
+          fi
+
   pipeline:
     runs-on: ubuntu-latest
     steps:
