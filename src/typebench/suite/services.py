@@ -95,7 +95,8 @@ class PathResolver:
 
     def resolve(self, spec: CheckerSpec) -> CheckerHandle:
         adapter = create_adapter(spec.tool, host=self._host)
-        binary = str(Path(self._binary).resolve())
+        resolved = Path(self._binary).resolve()
+        binary = str(resolved)
         try:
             version = adapter.version(binary)
         except (OSError, ValueError):
@@ -105,7 +106,7 @@ class PathResolver:
         # so degrade that sentinel to "path" as well.
         if version == "unknown":
             version = "path"
-        digest = hashlib.sha256(Path(binary).read_bytes()).hexdigest()
+        digest = hashlib.sha256(resolved.read_bytes()).hexdigest()
         checker_id = f"{spec.tool}@{version}"
         if spec.label:
             checker_id = f"{checker_id}+{spec.label}"
@@ -115,7 +116,7 @@ class PathResolver:
             binary=binary,
             version=version,
             lock_hash=f"sha256:{digest}",
-            install_source="path",
+            install_source="prebuilt binary (path)",
         )
         return CheckerHandle(spec=spec, adapter=adapter, runtime=runtime)
 
