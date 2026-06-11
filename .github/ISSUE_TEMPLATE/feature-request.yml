@@ -1,0 +1,68 @@
+name: "✨ Feature Request"
+description: Suggest a new feature or enhancement for typebench
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature! One thing to know up front: neutrality is a design
+        requirement here. Features that would favor one checker, hide failures, or make the
+        record claim a methodology the engine didn't run will be declined — everything else
+        is fair game.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: Describe the problem or use case this feature would solve. Focus on the need, not the implementation.
+      placeholder: |
+        I want to compare two local builds of the same checker against each other,
+        but `typebench ab` only supports candidate-vs-latest-release...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe your proposed solution or feature.
+      placeholder: |
+        Allow `--baseline path:/abs/binary` in the ab command so both sides of the
+        A/B can be local builds.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected Area
+      description: Where would this feature live?
+      options:
+        - CLI (new command or option)
+        - Engine (measurement, classification, calibration)
+        - Checker adapters (new checker or adapter behavior)
+        - Corpus (new project criteria, preparation, counting)
+        - GitHub Action (A/B PR benchmark)
+        - Rendering / report / trend site
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative solutions or workarounds you've considered.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I would be willing to help implement this feature
+          required: false
+        - label: I would be willing to help test this feature
+          required: false

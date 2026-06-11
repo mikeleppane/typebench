@@ -1,0 +1,132 @@
+name: "🐛 Bug Report"
+description: Report a bug or unexpected behavior in typebench
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! typebench is a measurement tool, so
+        precise reproduction details matter more than usual — the exact command, version,
+        and environment let us rerun what you ran.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected Area
+      description: Which part of typebench misbehaves?
+      options:
+        - CLI (run / suite / compare / preflight / doctor / config)
+        - Engine (timing, cgroup resource pass, calibration, classification)
+        - Checker adapter (mypy / pyright / pyrefly / ty specific)
+        - Corpus preparation (clone, venv, install, counting)
+        - GitHub Action (A/B PR benchmark)
+        - Rendering / report / trend site
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+      placeholder: |
+        Running the suite against httpx, the pyright cell is recorded as failed{env}
+        even though pyright runs fine on the prepared venv...
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Exact Command
+      description: The full command you ran, copy-pasted — not paraphrased.
+      render: shell
+      placeholder: |
+        uv run typebench run --tool pyright --corpus corpus/suite.toml \
+          --corpus-project httpx --thread-mode all-cores --output results.json
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened. Include error messages, tracebacks, or the recorded result class.
+      render: shell
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: typebench Version
+      description: Release tag or commit SHA you ran.
+      placeholder: "e.g., v1.2.0 or commit 45058d8"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checkers
+    attributes:
+      label: Checkers Affected
+      description: Which checkers does this reproduce with? Check all that apply.
+      options:
+        - label: mypy
+        - label: pyright
+        - label: pyrefly
+        - label: ty
+        - label: Not checker-specific (engine / CLI / corpus / action)
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating System
+      description: Note — the cgroup resource pass (memory / CPU-time) is Linux-only; macOS runs are timing-only.
+      options:
+        - Linux (x86_64)
+        - Linux (ARM64)
+        - WSL2
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - CI runner (GitHub Actions)
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`typebench doctor` Output"
+      description: Paste the output of `uv run typebench doctor` — it captures the resolved toolchain (hyperfine, tokei, node, uv, checker versions) in one shot.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    id: record
+    attributes:
+      label: Results JSON Record
+      description: If a results record was written, paste the relevant run record (or attach the file). Failure records carry the audit trail.
+      render: json
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: validations
+    attributes:
+      label: Validations
+      options:
+        - label: I have searched for similar issues and didn't find any duplicates
+          required: true
+        - label: I can reproduce this issue consistently
+          required: false

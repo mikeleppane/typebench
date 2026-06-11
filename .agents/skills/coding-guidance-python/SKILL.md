@@ -42,18 +42,18 @@ Good Python in this repo is small, typed, explicit, and boring. The agent is not
 - Treat DRY as protection for measurement rules, schema rules, and fragile assumptions. Do not abstract harmless repetition just to remove repeated lines.
 - Keep functions focused, but do not split a readable flow into tiny helper chains that force the reader to jump around.
 - Choose obvious control flow and familiar project patterns. Clever code must earn its keep through correctness, clarity, or safety.
-- Prefer deletion over accommodation when code is unused or speculative — but note the pinned Adapter Protocol methods (`install`, `parallelism_cap`) are *deferred, not dead*: they're the stable surface for Plans 2/4. Don't delete them; don't build behavior behind them early.
-- Comments explain why the obvious path was not taken. They are not a place to restate well-named code. (The existing `# PLAN 2 TRAP` and measurement-fidelity comments are the model: they explain a non-obvious hazard.)
+- Prefer deletion over accommodation when code is unused or speculative — but note the pinned Adapter Protocol methods (`install`, `parallelism_cap`) are implemented, normal methods with tests; don't delete them.
+- Comments explain why the obvious path was not taken. They are not a place to restate well-named code. (The existing measurement-fidelity comments and the `universal_failure_prefix` / `classify_with_map` hazard note in `engine/wrapper.py` are the model: they explain a non-obvious hazard.)
 
 ## Domain values
 
 typebench-specific invariants. These are not style preferences — violating one corrupts the numbers, which is the whole product. They map to AGENTS.md "Domain invariants."
 
-- **Honesty by construction.** The schema must never claim a methodology that wasn't run. `thread_mode_enforced` stays `False` until CPU affinity is actually applied (Plan 4). `FailurePhase` disambiguates a probe failure (`real_exit_code` is its own code) from a flaky timed-run failure (`real_exit_code` is the *successful probe's*), so a record can't be misread.
+- **Honesty by construction.** The schema must never claim a methodology that wasn't run. `thread_mode_enforced` must reflect whether CPU affinity was actually applied for the run — never set `True` when it wasn't. `FailurePhase` disambiguates a probe failure (`real_exit_code` is its own code) from a flaky timed-run failure (`real_exit_code` is the *successful probe's*), so a record can't be misread.
 - **Record every failure, never drop one.** The failure taxonomy (`ResultClass`: `clean`, `diagnostics`, `failed{env|crash|timeout|oom}`) is the contract. A dropped failure silently biases the benchmark. `run_command` **never raises** — nonzero exit, timeout, signal death, and missing-binary all become a recorded `RawRun`.
-- **Measurement fidelity.** The wrapper is hyperfine's per-run command, so everything it imports runs on *every* timed measurement. Keep `wrapper.py` **and** `taxonomy.py` free of heavy imports — pydantic on the measured path adds constant startup overhead that biases comparative ratios. Import enums from `taxonomy`, not `models`.
+- **Measurement fidelity.** The wrapper is hyperfine's per-run command, so everything it imports runs on *every* timed measurement. Keep `engine/wrapper`, `engine/measure`, `engine/calibration`, and `contracts/taxonomy` free of heavy imports — pydantic on the measured path adds constant startup overhead that biases comparative ratios. Import enums from `contracts/taxonomy`, not `contracts/models`.
 - **Benchmark isolation.** Subprocess in list-form only; `shlex.join` for hyperfine command strings. On timeout, kill the whole **process group** (`start_new_session` + `killpg`), not just the direct child, or stragglers contaminate later runs.
-- **Scope discipline by plan.** Plan 1 is the engine spine (timing-only slice, stub adapter); Plan 2 = real adapters; Plan 4 = cgroup + CPU affinity; later = corpus + renderer. Don't build real-checker, cgroup, corpus, or renderer code in spine work. Pinned Adapter Protocol methods (`install`, `parallelism_cap`) are deferred, not dead.
+- **Scope discipline.** Keep changes as narrow as possible. The "Ask first" boundaries in AGENTS.md define the hard edges: on-disk schema, quality gates, runtime dependencies, and heavy imports on the measured path. When a change approaches any of those boundaries, stop and check before continuing.
 
 ## Implementation workflow
 
@@ -105,7 +105,7 @@ Security rules come first because the cost of a violation is highest. typebench 
 
 ### First tier — causes bugs
 
-- Keep module side effects minimal; no import-time network calls, filesystem mutation, or heavy initialization unless the module is an entrypoint. On the measured path (`wrapper.py`, `taxonomy.py`) this extends to import *cost*: no pydantic, no heavy third-party imports.
+- Keep module side effects minimal; no import-time network calls, filesystem mutation, or heavy initialization unless the module is an entrypoint. On the measured path (`engine/wrapper`, `engine/measure`, `engine/calibration`, `contracts/taxonomy`) this extends to import *cost*: no pydantic, no heavy third-party imports.
 - Prefer explicit parameters and return values over hidden globals, ambient context, or module-level mutation.
 - Do not use mutable default arguments.
 - Treat `None`, optional fields, and missing keys as contract design, not caller cleanup. (`timing=None`, `failure_phase=None`, and `diagnostics/files=None` in `RunResult` are deliberate contract states, not laziness.)
@@ -119,7 +119,7 @@ Security rules come first because the cost of a violation is highest. typebench 
 - Use classes when they model stateful domain objects or a stable behavior boundary, not just to group helpers.
 - Prefer `pathlib.Path`.
 - Prefer standard-library types — `dataclass`, `TypedDict`, `Protocol`, `Enum`/`StrEnum`, `Literal`, `NamedTuple` — when they clarify contracts. typebench uses `@dataclass(frozen=True)` for the measured-path `RawRun`/`ParallelismCap`, `StrEnum` for the on-disk taxonomy, and a `runtime_checkable` `Protocol` for `Adapter`. For validated external/on-disk data, use Pydantic with `ConfigDict(extra="forbid")`.
-- **`Final` for constants** — `MAX_RETRIES: Final = 3`. No unexplained literals; if a number has meaning, name it (e.g. the `_SIGKILL = 9` OOM-heuristic constant in `wrapper.py`).
+- **`Final` for constants** — `MAX_RETRIES: Final = 3`. No unexplained literals; if a number has meaning, name it (e.g. the `_SIGKILL = 9` OOM-heuristic constant in `engine/wrapper.py`).
 - Early returns over deep nesting.
 - Keyword-only arguments (after `*`) for optional parameters in public APIs.
 - Use comprehensions and built-ins when they clarify intent; avoid dense one-liners that hide control flow.
@@ -150,7 +150,7 @@ Patterns in Python 3.12, grounded in typebench:
 - **Discriminated unions** — a `Literal`/enum tag + `match`. typebench's `RawRun` → `ResultClass` mapping in `classify_default` is a precedence-ordered classifier over the failure dimensions (env-error, oom, timeout, signal, exit code). When real adapters add variants, an exhaustive `match` over `ResultClass` (pyrefly's strict preset flags non-exhaustive matches) keeps every consumer honest:
 
   ```python
-  from typebench.taxonomy import ResultClass
+  from typebench.contracts.taxonomy import ResultClass
 
   def label(rc: ResultClass) -> str:
       match rc:
@@ -171,7 +171,7 @@ Patterns in Python 3.12, grounded in typebench:
 
 Use these features when they make the contract clearer. typebench is **fully synchronous** — the async/`TaskGroup`/`except*`/`to_thread`/`httpx` features from the general Python toolbox are deliberately out of scope for the engine spine. Revisit only if async is ever introduced, behind a clearly-named boundary.
 
-- **`StrEnum` (3.11)** — string-valued enums for stable on-disk tokens (used throughout `taxonomy.py`).
+- **`StrEnum` (3.11)** — string-valued enums for stable on-disk tokens (used throughout `contracts/taxonomy.py`).
 - **`typing.Self` (3.11)** — for methods returning self (builder chains, fluent APIs).
 - **`@override` (3.12)** — annotates intentional overrides; pyrefly flags silent divergence when a base method is renamed.
 - **PEP 695 type alias (3.12)** — `type Counts = tuple[int | None, int | None]`. Cleaner than `TypeAlias`.
@@ -189,7 +189,7 @@ The [test-driven-development](../test-driven-development/SKILL.md) skill owns th
   - `@pytest.mark.skipif(os.name != "posix", ...)` for signals / process-group tests.
 - Test the Typer CLI with `typer.testing.CliRunner`.
 - Stub boundary seams (`run_timing`, `shutil.which`) with `monkeypatch.setattr` — mock the external boundary, not the internal behavior you're trying to prove.
-- **Drive every taxonomy class deterministically** through `StubAdapter` + `_fake_checker` — no real checker required. The fake checker is controllable, so each `ResultClass` (clean / diagnostics / each failure mode) gets exercised on purpose.
+- **Drive every taxonomy class deterministically** through `StubAdapter` + `fake_checker` (`typebench._internal.fake_checker`) — no real checker required. The fake checker is controllable, so each `ResultClass` (clean / diagnostics / each failure mode) gets exercised on purpose.
 - **Round-trip pydantic models through JSON** and assert `extra="forbid"` rejects unknown fields — the on-disk schema is a stability contract, so prove it both serializes and refuses junk.
 - Parameterize when the same contract holds across multiple inputs. Use fixtures for reusable setup, not to hide meaning.
 - Do not distort production APIs for tests. Test-only fields, flags, branches, or exports are design regressions unless the runtime contract explicitly needs them.
@@ -200,7 +200,7 @@ The [test-driven-development](../test-driven-development/SKILL.md) skill owns th
 - **For externally-derived / on-disk data** (the result schema, env fingerprint, anything parsed from JSON): Pydantic model with `ConfigDict(extra="forbid")`. Validate at the boundary; downstream code trusts the type.
 - **Pydantic v2 idioms** — `model_config = ConfigDict(extra="forbid")` on the class (not the v1 `class Config:` inner class). `field_validator` / `model_validator` for custom rules (not the v1 `@validator`). `Model.model_validate_json(raw)` for parsing (not `parse_raw`). Use `Field(..., ge=0)` for built-in constraints before reaching for a validator (counts are non-negative).
 - **Push structural rules into the model.** Allowed-value sets, range limits, and format constraints belong in `field_validator` / `model_validator` on the model — not as repeated `if` checks at every consumer. One validator, every call site safe.
-- Keep validation, serialization, and the measurement logic separate enough to test each directly. Crucially: keep pydantic *off* the measured path — `wrapper.py`/`taxonomy.py` produce plain dataclasses/enums; the pydantic `RunResult` is assembled later in the collector.
+- Keep validation, serialization, and the measurement logic separate enough to test each directly. Crucially: keep pydantic *off* the measured path — `engine/wrapper`, `engine/measure`, `engine/calibration`, and `contracts/taxonomy` produce plain dataclasses/enums; the pydantic `RunResult` is assembled later in the collector.
 - Be suspicious of `dict[str, Any]` or raw parsed JSON flowing through many layers — narrow it at the boundary (`coerce_count`).
 - Prefer immutable or append-only data flow where shared mutation would make behavior harder to reason about.
 - Cache only when measurement justifies it; make scope and invalidation explicit. (Checker caches are the opposite concern: the collector deliberately *clears* them before every timed run so each run is cold.)
@@ -209,15 +209,14 @@ The [test-driven-development](../test-driven-development/SKILL.md) skill owns th
 ### Modules, structure, and packaging
 
 - `src/typebench/` holds the package (src layout, hatchling). The layering, lowest to highest:
-  - `taxonomy.py` — stdlib-only on-disk enums. **Stays free of heavy imports.**
-  - `wrapper.py` — `RawRun`, `run_command`, `classify_default`, and the CLI used as hyperfine's per-run command. **Stays free of heavy imports.**
-  - `models.py` — pydantic schemas (`RunResult`, `TimingStats`, `EnvFingerprint`).
-  - `env.py`, `timing.py` — environment fingerprint, hyperfine parse.
-  - `adapters/base.py` — the `Adapter` Protocol (the only checker-specific surface) plus shared helpers; `adapters/stub.py` — `StubAdapter`.
-  - `collector.py` — `run_single`, the probe→time pipeline that assembles one `RunResult`.
+  - `contracts/` — stdlib-only on-disk enums (`taxonomy`), plain dataclass schemas (`models`, `proc`, `runconfig`), and the `Adapter` Protocol identity. **Stays free of heavy imports.**
+  - `engine/` — `wrapper` (`RawRun`, `run_command`, `classify_default`, the hyperfine per-run command), `measure` (cgroup memory), `calibration`, `timing`, `env`, `collector`. **The measured-path modules (`wrapper`, `measure`, `calibration`, `timing`) stay free of heavy imports.**
+  - `adapters/` — real checker adapters (`mypy`, `pyright`, `pyrefly`, `ty`), `base` (the `Adapter` Protocol helpers, `coerce_count`), `stub` (`StubAdapter`), `_support` (`probe_version`, `confirm_clean`), `registry`.
+  - `corpus/` — corpus catalog, checker-env management, counting, `envman`.
+  - `suite/` — A/B suite ports, preflight, renderer, runner, selection, services.
   - `cli.py` — the Typer app (`typebench run`).
 - **The Typer CLI is a wiring layer**: parse args, build the composition root (adapter, run knobs), and hand off to `collector.run_single`. No business logic or module-level state at import time.
-- Avoid circular imports by moving shared contracts to a lower layer, not by using late imports as a default escape hatch. The legitimate `TYPE_CHECKING` imports in `adapters/base.py` and `collector.py` exist to keep the *runtime* import graph (and the measured path) clean — follow that pattern.
+- Avoid circular imports by moving shared contracts to a lower layer, not by using late imports as a default escape hatch. The legitimate `TYPE_CHECKING` imports in `adapters/base.py` and `engine/collector.py` exist to keep the *runtime* import graph (and the measured path) clean — follow that pattern.
 - Keep CLI, subprocess/timing, schema, and measurement logic separated.
 - Prefer shallow directory structures unless there is a real sub-domain split (`adapters/` is one).
 - **Prefer modules under ~300 lines.**
@@ -228,7 +227,7 @@ The [test-driven-development](../test-driven-development/SKILL.md) skill owns th
 - Prefer composition over inheritance unless inheritance matches the real domain model. The `Adapter` Protocol is structural substitution, not a base class to inherit from.
 - Wait for repeated pressure before extracting abstractions; avoid registries, factories, or framework indirection that don't buy real clarity.
 - Keep subprocess/timing I/O and classification logic separated enough that classification (`classify_default`) can be tested without spawning a process.
-- Do not duplicate retry, timeout, or classification behavior at multiple layers. Classification lives in one place per phase; the `# PLAN 2 TRAP` comment in `wrapper.py` exists precisely because the wrapper's generic gate and the adapter's `classify` must not silently disagree.
+- Do not duplicate retry, timeout, or classification behavior at multiple layers. Classification lives in one place per phase; the `universal_failure_prefix` / `classify_with_map` mechanism in `engine/wrapper.py` exists precisely because the wrapper's generic success-exit gate and the adapter's `classify` must not silently disagree — an adapter whose probe-phase `classify` conflicts with the wrapper's gate records contradictory results.
 - Do not hard-code environment-specific settings — route through config / the run knobs.
 - Do not swallow exceptions, ignore partial failures silently, or hide a recorded failure behind a benign name. Every failure becomes a recorded `ResultClass`.
 
@@ -259,8 +258,8 @@ except subprocess.CalledProcessError as exc:
 
 Use these when the right choice is not obvious:
 
-- **Scope check** — if a change touches more than 3 modules or public entrypoints, stop and plan before continuing; the change is bigger than it looks. Also check it against the current plan's scope (spine vs. real-checker vs. cgroup vs. renderer).
-- **Measured-path check** — if the change touches `wrapper.py` or `taxonomy.py`, ask "does this add an import?" A heavy import on the measured path is an "Ask first" boundary because it biases the numbers.
+- **Scope check** — if a change touches more than 3 modules or public entrypoints, stop and plan before continuing; the change is bigger than it looks. Also check it against the AGENTS.md "Ask first" boundaries (on-disk schema, quality gates, runtime deps, heavy imports on the measured path).
+- **Measured-path check** — if the change touches `engine/wrapper`, `engine/measure`, `engine/calibration`, or `contracts/taxonomy`, ask "does this add an import?" A heavy import on the measured path is an "Ask first" boundary because it biases the numbers.
 - **Function size** — keep functions ≤40–50 lines. Longer usually means mixed responsibilities.
 - **Nesting depth** — if nesting exceeds 3 levels, use early returns or extract a helper.
 - **Parameter count** — public function with more than 5 meaningful parameters? Introduce a dataclass/Pydantic model or split. (ruff's pylint `max-args` is 8; treat >2–3 as a yellow flag.)
@@ -337,11 +336,11 @@ A change is done when:
 - `uv run ruff check` passes with no new findings.
 - `uv run pyrefly check` passes with no new findings (strict preset; typebench dogfoods this).
 - `uv run pytest` passes.
-- New behavior has test coverage driven deterministically through `StubAdapter` + `_fake_checker` (or the lack of coverage is called out with a concrete reason), and any on-disk schema change round-trips through JSON with `extra="forbid"` asserted.
+- New behavior has test coverage driven deterministically through `StubAdapter` + `fake_checker` (`typebench._internal.fake_checker`) (or the lack of coverage is called out with a concrete reason), and any on-disk schema change round-trips through JSON with `extra="forbid"` asserted.
 - No new `# pyrefly: ignore[<kind>]` without a reason comment; legacy `# type: ignore` is not accepted.
-- No import-time side effects added — and no new heavy import on the measured path (`wrapper.py`, `taxonomy.py`).
+- No import-time side effects added — and no new heavy import on the measured path (`engine/wrapper`, `engine/measure`, `engine/calibration`, `contracts/taxonomy`).
 - No new `Any` in public signatures, no broad `object` where a union or named alias would state the contract.
-- The schema never claims an un-run methodology (`thread_mode_enforced` honesty, `FailurePhase` correctness) and no failure path can drop a run.
+- The schema never claims an un-run methodology (`thread_mode_enforced` reflects actual affinity application, `FailurePhase` correctness) and no failure path can drop a run.
 - On-disk schema and taxonomy string values are unchanged, or the change was raised as an "Ask first" decision.
 - Review findings at `Critical` and `Important` severity are addressed.
 - Commit message explains the *why* and uses a required scope (see the [git-conventions](../git-conventions/SKILL.md) skill).

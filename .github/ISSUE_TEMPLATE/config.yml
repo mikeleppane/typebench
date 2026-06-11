@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: "💬 Discussions"
+    url: https://github.com/mikeleppane/typebench/discussions
+    about: Ask questions, discuss benchmark methodology, and share results with the community
+  - name: "📖 Methodology Documentation"
+    url: https://github.com/mikeleppane/typebench#methodology
+    about: How typebench measures — cold runs, failure classes, thread modes, normalized configuration

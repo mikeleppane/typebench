@@ -1,6 +1,6 @@
 ---
 name: code-review-and-quality
-description: Multimodal multi-axis code review for the typebench repo before merge — your own code, another agent's, or a teammate's PR. Runs two independent reviewers (Claude Opus 4.8 + Codex gpt-5.5, both at xhigh effort) and synthesizes their findings. Adds benchmark-aware checks for measurement fidelity, record honesty, and failure completeness on top of the standard correctness/readability/architecture/security/performance review. Use whenever you are about to merge, or when asked "is this ready?", "review this", "check this change", "look this over". Reviewing AI-generated code is a stronger trigger, not a weaker one — false confidence is the dominant failure mode.
+description: Multimodal multi-axis code review for the typebench repo before merge — your own code, another agent's, or a teammate's PR. Runs two independent reviewers (a primary model + an independent second model) at high reasoning effort and synthesizes their findings. Adds benchmark-aware checks for measurement fidelity, record honesty, and failure completeness on top of the standard correctness/readability/architecture/security/performance review. Use whenever you are about to merge, or when asked "is this ready?", "review this", "check this change", "look this over". Reviewing AI-generated code is a stronger trigger, not a weaker one — false confidence is the dominant failure mode.
 ---
 
 # Code Review & Quality (typebench)
@@ -27,10 +27,10 @@ The two reviewers:
 
 | Reviewer | Model | Effort | Role |
 |---|---|---|---|
-| **Primary** | Claude Opus 4.8 | xhigh | Runs the full process below (all five axes + the benchmark-aware checks). Owns the final synthesized report. |
-| **Second** | Codex `gpt-5.5` | xhigh | Independent second pass via the Codex CLI. Read-only, non-interactive. |
+| **Primary** | current default: Claude Opus 4.8 | xhigh | Runs the full process below (all five axes + the benchmark-aware checks). Owns the final synthesized report. The role (owns synthesis, owns benchmark-aware checks) is what matters — the specific model is swappable. |
+| **Second** | current default: Codex `gpt-5.5` | xhigh | Independent second pass via the Codex CLI. Read-only, non-interactive. The role (independent architectural blind-spot coverage) is what matters — the specific model is swappable. |
 
-Both reviewers see the **same diff** and the **same intent** (Step 1). They run **concurrently** — do not let one wait on the other. Then a **synthesis pass** (run by the primary, Opus 4.8) merges the two into a single report.
+Both reviewers see the **same diff** and the **same intent** (Step 1). They run **concurrently** — do not let one wait on the other. Then a **synthesis pass** (run by the primary) merges the two into a single report.
 
 ### Running the two reviewers
 
@@ -49,7 +49,7 @@ Codex CLI specifics (learned the hard way — keep them here so the next run doe
 - **`-m gpt-5.5-codex` is rejected on a ChatGPT-account login** (`The 'gpt-5.5-codex' model is not supported when using Codex with a ChatGPT account`). Omit `-m` so Codex uses the account's default `gpt-5.5`, or log in with an API key for explicit model ids. Set effort with `-c model_reasoning_effort="xhigh"`, not `-m`.
 - If `bubblewrap` is absent Codex warns and falls back to a bundled sandbox — harmless for a read-only review.
 
-**Primary reviewer — Claude Opus 4.8, xhigh:** this is the agent running this skill. Either review inline (you are Opus 4.8), or, when you need a *third* independent Claude pass on a fresh context, run:
+**Primary reviewer — current default: Claude Opus 4.8, xhigh:** this is the agent running this skill. Either review inline (you are the primary model), or, when you need a *third* independent Claude pass on a fresh context, run:
 
 ```bash
 git diff <base-branch>...HEAD | claude -p "<paste this skill's process + the change intent>" --permission-mode plan
@@ -57,7 +57,7 @@ git diff <base-branch>...HEAD | claude -p "<paste this skill's process + the cha
 
 ### Synthesis — merging the two reports
 
-The primary (Opus 4.8) produces **one** report from both inputs. The synthesis is not concatenation — it is adjudication. Rules:
+The primary (current default: Opus 4.8) produces **one** report from both inputs. The synthesis is not concatenation — it is adjudication. Rules:
 
 1. **Verify every finding against the code before it enters the merged report.** Both models hallucinate: a wrong `file:line`, a finding that ignores existing error handling, a fix that breaks a different invariant. The synthesizer *reads the quoted line* and confirms the defect is real. An unverifiable finding is dropped (or demoted to `FYI: <model> flagged X — could not confirm`). This gate is the whole point — two models also means two sources of false positives.
 2. **Tag every surviving finding with its origin:** `[opus]`, `[codex]`, or `[both]`. Put `[both]` (convergent) findings first within each severity — independent agreement is the strongest signal in the report.
@@ -66,7 +66,7 @@ The primary (Opus 4.8) produces **one** report from both inputs. The synthesis i
 5. **Apply the budget *after* the merge.** `Critical`/`Important` stay uncapped; the `Suggestion`+`Nit` cap (5–7) applies to the merged set, preferring `[both]` items when trimming.
 6. **The benchmark-aware checks are owned by the primary.** Codex does not have this skill's project context; treat a missed measurement-fidelity / record-honesty / failure-completeness defect as the primary's responsibility regardless of what Codex returned. Convergence is a bonus there, never a substitute.
 
-If Codex fails to produce a report (auth error, model rejection, timeout), **do not block** — proceed with the Opus 4.8 review alone and record it in the report header: `Reviewers: Opus 4.8 (xhigh) · Codex unavailable (<reason>)`. A one-model review is the floor, not a failure; the multimodal pass is an upgrade, not a gate.
+If Codex fails to produce a report (auth error, model rejection, timeout), **do not block** — proceed with the primary-model review alone and record it in the report header: `Reviewers: <primary model> (xhigh) · Codex unavailable (<reason>)`. A one-model review is the floor, not a failure; the multimodal pass is an upgrade, not a gate.
 
 ---
 
@@ -91,7 +91,7 @@ For this repo there is one extra approval gate: **a change that can bias the num
 ## When *not* to use it
 
 - Trivial one-line changes (typo, import order, formatter churn) — the review is one line too. Skip the report format and just say "looks good" or "nope, X is wrong".
-- A spec is missing and you don't yet know what the code is *supposed* to do — that's a spec problem, not a review problem. Reviewing code against an unstated intent produces opinion, not findings. The design spec (`docs/superpowers/specs/`) and the per-plan plan docs are the intent of record here.
+- A spec is missing and you don't yet know what the code is *supposed* to do — that's a spec problem, not a review problem. Reviewing code against an unstated intent produces opinion, not findings. The design spec (`docs/superpowers/specs/`) and the task description are the intent of record here.
 - The change is part of an in-progress branch the author has explicitly marked as WIP. Wait until they're done.
 
 ---
@@ -103,7 +103,7 @@ Every finding gets a severity label. This is what makes a review actionable inst
 | Label | Meaning | Author Action |
 |---|---|---|
 | `Critical` | Blocks merge. Will crash the run, drop or fabricate a benchmark record, bias the measured interval, leak data, claim an unrun methodology, break a stable on-disk contract *without* a documented migration path, or violate AGENTS.md "do not violate" invariants or "Never" rules. | Must fix before merge. |
-| `Important` | Should fix before merge. Bug on a less-likely path, AGENTS.md "Ask first" boundary crossed without checking, design issue that will compound, scope creep past the current plan. | Fix or explicitly defer with reason recorded. |
+| `Important` | Should fix before merge. Bug on a less-likely path, AGENTS.md "Ask first" boundary crossed without checking, design issue that will compound, scope creep past the stated task. | Fix or explicitly defer with reason recorded. |
 | `Suggestion` | Would improve the change. Refactor, clarification, missing test for an edge case. | Worth doing; reviewer doesn't block on it. |
 | `Nit` | Optional polish. Naming, formatting (where the formatter doesn't already enforce), micro-style. | Author may ignore. Use sparingly — too many nits drown the real findings. |
 | `FYI` | Informational. Context for future readers, related bug to file, observation. | No action needed. |
@@ -120,9 +120,9 @@ Walk these five steps in order. Don't jump straight to "let me look at the code"
 
 Before reading code, find the answer to:
 
-- What is this change trying to accomplish? (commit message, PR description, the design spec, the plan doc)
+- What is this change trying to accomplish? (commit message, PR description, the design spec)
 - What was the failing behavior, or what new behavior is being added?
-- **Which plan does this belong to?** typebench is plan-staged (Plan 1 = engine spine + stub adapter; real checkers, cgroup memory, corpus pinning, renderer land later). Work that reaches past the current plan is a scope finding.
+- **Does this change stay within its stated scope?** Work that bundles unrelated subsystems, crosses an AGENTS.md "Ask first" boundary without clearance, or reaches past the stated task is a scope finding — split it out.
 - Which AGENTS.md "Ask first" boundaries does it touch?
 
 If you can't answer these from the artifacts the author provided, the change description is incomplete — that's the first finding (`Important: change description doesn't say what it does`). A reviewer who has to reconstruct intent from the diff is a reviewer who will miss things.
@@ -136,7 +136,7 @@ Tests reveal intent, coverage, and the author's mental model. They also tell you
 - Are edge cases covered (empty input, boundary values, error paths, every failure taxonomy class)?
 - Do test names describe the scenario? AGENTS.md names `test_<unit>_<scenario>_<expected_behavior>` as the target style (e.g. `test_run_command_missing_binary_records_failed_env`) because it reads as a sentence in failure output. If the project hasn't adopted this in some corner yet, file at most a `Suggestion`, not an `Important`.
 - **Are environment-specific tests gated?** No pytest markers are registered here. A test that needs the timing harness must carry `@pytest.mark.skipif(shutil.which("hyperfine") is None, ...)`; a test that exercises signals / process groups must carry `@pytest.mark.skipif(os.name != "posix", ...)`. An ungated test that silently passes (or hangs) where the binary/platform is absent is `Important`, often `Critical` in CI.
-- Are taxonomy classes driven **deterministically through `StubAdapter` + `_fake_checker`** rather than against a real checker? A test that shells out to mypy/pyright/ty to assert a failure class is non-reproducible and out of plan scope — `Important`.
+- Are taxonomy classes driven **deterministically through `StubAdapter` + `fake_checker`** (`src/typebench/_internal/fake_checker.py`) rather than against a real checker? A test that shells out to mypy/pyright/ty to assert a failure class is non-reproducible — `Important`.
 - Do on-disk models round-trip through JSON and assert `extra="forbid"`? A schema change without a round-trip + extra-forbidden test is `Important` (the on-disk contract is unverified).
 - Would the tests catch a regression if someone changed the implementation tomorrow? (Mutation-test the test mentally — if you flipped the implementation, would the assertion catch it?)
 - No production API, field, flag, branch, or export was added only to make a test or assertion possible.
@@ -158,7 +158,7 @@ Then walk the **Benchmark-aware review checks** — the typebench-specific axis 
 For every finding, attach:
 
 - **Severity** — `Critical` / `Important` / `Suggestion` / `Nit` / `FYI`
-- **File and line** — `src/typebench/collector.py:60`
+- **File and line** — `src/typebench/engine/collector.py:60`
 - **Snippet** — the actual code, copied verbatim. If you can't quote it, you don't have a finding.
 - **Problem** — 1–3 sentences in plain English. What is wrong and why.
 - **Fix** — concrete replacement code or, if the fix is conceptual, the end state.
@@ -176,7 +176,7 @@ Check what the author actually ran:
   - `uv run pytest`
   Ruff and pyrefly findings must be at **zero**.
 - For schema changes — does a representative `RunResult` round-trip to JSON and back, and does an unknown on-disk field fail (`extra="forbid"`)?
-- For wrapper / measured-path changes — was the import cost of the change considered? (See *Measurement fidelity*.)
+- For measured-path changes (`engine/wrapper.py`, `engine/measure.py`, `engine/calibration.py`, `contracts/taxonomy.py`) — was the import cost of the change considered? (See *Measurement fidelity*.)
 - For failure-path changes — was every taxonomy class actually produced by a test, not just reasoned about?
 - For CLI behavior — was `typebench run` actually invoked (`typer.testing.CliRunner`), or only type-checked?
 
@@ -190,9 +190,11 @@ A green gate is necessary, not sufficient. Type-check passing is not the same as
 
 ### 1. Measurement fidelity — does the change bias the interval?
 
-The wrapper (`src/typebench/wrapper.py`) is hyperfine's per-run command: **everything it imports runs on every single timed measurement.** A heavy import there (pydantic, or anything that transitively pulls it in) adds a constant per-run startup cost that biases comparative ratios between tools.
+The wrapper (`src/typebench/engine/wrapper.py`) is hyperfine's per-run command: **everything it imports runs on every single timed measurement.** A heavy import there (pydantic, or anything that transitively pulls it in) adds a constant per-run startup cost that biases comparative ratios between tools.
 
-- Does any change put a heavy import on the measured path? The wrapper must import enums from `taxonomy.py` (pydantic-free, stdlib-only), **never from `models.py`** (which imports pydantic). The same applies to `taxonomy.py` itself — it must stay stdlib-only. A `from typebench.models import ...` in the wrapper is `Critical`.
+The measured path — each module guarded by an import test — is: `engine/wrapper.py`, `engine/measure.py`, `engine/calibration.py`, and `contracts/taxonomy.py`. All must remain pydantic-free (stdlib-only).
+
+- Does any change put a heavy import on the measured path? The wrapper must import enums from `contracts/taxonomy.py` (pydantic-free, stdlib-only), **never from `contracts/models.py`** (which imports pydantic). The same applies to `contracts/taxonomy.py` itself — it must stay stdlib-only. A `from typebench.contracts.models import ...` in the wrapper is `Critical`.
 - Does the change add fixed startup cost, output capture-and-rewrite of large buffers, extra shell parsing, or any work to the measured interval that lands *unevenly* across tools? Constant overhead biases ratios even when it looks "small". Flag it.
 - Is timing measurement still delegated to hyperfine (wall-time) rather than reimplemented in-process? Hand-rolled timing inside the measured command is both less accurate and a fidelity risk.
 
@@ -200,7 +202,7 @@ The wrapper (`src/typebench/wrapper.py`) is hyperfine's per-run command: **every
 
 The schema must never assert something the engine didn't actually do.
 
-- `thread_mode_enforced` must stay `False` until CPU affinity / a hard cap is actually applied (Plan 4). A change that flips it `True` without the enforcement mechanism is `Critical` — it claims an unrun methodology.
+- `thread_mode_enforced` is computed by the collector from whether CPU affinity (taskset) was actually applied during the run. A record whose `thread_mode_enforced=True` when affinity was **not** actually applied is `Critical` — it claims an unrun methodology. Conversely, a field that hardcodes `False` (ignoring whether affinity ran) silently under-reports. The field must mirror reality.
 - A failure record must not imply success metadata. If `result_class` is a `failed{...}` class, `failure_phase` must mark *which pass* failed (`PROBE` vs `TIMING`) so `real_exit_code` can't be misread as a clean command with a failed result. A `failed{crash}` next to a clean-looking `real_exit_code` with no `failure_phase` marker is `Critical`.
 - New on-disk fields must round-trip through JSON and respect `extra="forbid"`. A field that serializes but doesn't deserialize (or vice versa), or that bypasses `extra="forbid"`, breaks the on-disk contract. Schema/taxonomy-string changes are an AGENTS.md "Ask first" boundary — surface it.
 
@@ -218,16 +220,17 @@ A dropped or crashed failure silently biases the benchmark by removing a data po
 - Any command string handed to hyperfine must go through `shlex.join` — never naive string concatenation of argv. Unquoted user/project paths into a hyperfine command string is `Critical`.
 - Timeouts must kill the **whole process group**, not just the direct child (`start_new_session` + `os.killpg`), or grandchild stragglers steal CPU from later runs and contaminate them. A change that swaps `_terminate_tree` for a plain `proc.kill()` on POSIX is `Critical` (benchmark isolation).
 
-### 5. Scope by plan
+### 5. Scope
 
-- Is this change staying inside the current plan? Plan 1 is the engine spine + stub adapter. Real-checker adapters, cgroup memory, corpus pinning, and the renderer belong to later plans. Spine work that starts building real-checker / cgroup / corpus / renderer behavior is `Important: out of plan scope` (often the right move is to split it out).
-- Are the deferred Adapter Protocol methods (`install`, `parallelism_cap`) left as documented-but-unbuilt placeholders rather than half-implemented? Don't delete them; don't grow behavior behind them early. A half-built deferred method is `Important`.
+- Is this change staying inside its stated scope? A change that bundles unrelated subsystems, crosses an AGENTS.md "Ask first" boundary without clearance, or reaches past the stated task is `Important: out of scope` — the right move is to split it out and handle each concern in its own PR.
+- Does the change stay within the layer that owns it? Work that bleeds across the dependency direction (`contracts ← engine ← {adapters, corpus} ← suite ← cli`) without a clear reason is an architecture finding.
+- Are the Adapter Protocol methods (`name`, `version`, `install`, `command`, `parallelism_cap`, `parse`, `classify`, `clear_cache`, `prepare_command`) all implemented correctly? A missing or mistyped method is `Critical`.
 
 ### 6. Adapter contract
 
 - New adapters must conform to the `Adapter` Protocol (`@runtime_checkable`, `src/typebench/adapters/base.py`) — `name`, `version`, `install`, `command`, `parallelism_cap`, `parse`, `classify`, `clear_cache`, `prepare_command`. A missing or mistyped method is `Critical` (it breaks the collector's pipeline).
-- `parse()` must **degrade to `(None, None)` on unexpected output** rather than raising or guessing, and must coerce counts through `coerce_count` (which rejects bools and non-ints) rather than leaking a garbage value (or a JSON `true`) into the record as a count. A `parse()` that lets unvalidated parsed-JSON flow into `diagnostics`/`files` is `Important`.
-- `classify()` may delegate to `default_classify`/`classify_default` for the generic `{0: clean, 1: diagnostics}` map, but a real tool whose diagnostics exit code is not 1 (e.g. ty) needs its own classify *and* the wrapper's success-exit gate must agree (see the "PLAN 2 TRAP" note in `wrapper.py`). A new adapter whose probe-phase classify and wrapper-gate classify disagree is `Critical` — the two phases will record conflicting results.
+- `parse()` must **degrade to `(None, None)` on unexpected output** rather than raising or guessing, and must coerce counts through `coerce_count` in `adapters/base.py` (which rejects bools and non-ints) rather than leaking a garbage value (or a JSON `true`) into the record as a count. A `parse()` that lets unvalidated parsed-JSON flow into `diagnostics`/`files` is `Important`.
+- `classify()` may delegate to `default_classify` in `adapters/base.py` or `classify_default` in `engine/wrapper.py` for the generic `{0: clean, 1: diagnostics}` map, but a real tool whose diagnostics exit code is not 1 (e.g. ty) needs its own classify *and* the wrapper's success-exit gate must agree. The `universal_failure_prefix` + `classify_with_map` mechanism in `engine/wrapper.py` gates success exits; an adapter whose probe-phase `classify` disagrees with that gate will record conflicting results across the two phases. A new adapter whose probe-phase classify and wrapper-gate classify disagree is `Critical`.
 
 ---
 
@@ -258,20 +261,21 @@ When in doubt, prefer to cite `coding-guidance-python` and AGENTS.md rather than
 - **Could this be done in fewer lines?** 1000 lines where 100 would suffice is a failure. But don't *force* compression for its own sake — clarity wins over brevity.
 - **Are abstractions earning their complexity?** Don't generalize until the third use case. A `Protocol` with one implementation is premature — *except* where AGENTS.md deliberately pins a final-ish shape early (the Adapter Protocol). Know the difference before filing.
 - **Is this extra surface area justified?** Unused option flags, speculative compatibility shims, generalized helpers with one caller, future-proof extension points — review findings when they make the next change harder. `Important` when they complicate reasoning or the on-disk/Protocol contracts; otherwise `Suggestion`.
-- Are the comments doing real work? The codebase uses load-bearing "why" comments heavily (the "PLAN 2 TRAP", the precedence notes, the killpg rationale). Deleting one of those is a finding; adding a comment that merely restates well-named code is noise.
+- Are the comments doing real work? The codebase uses load-bearing "why" comments heavily (the classify/gate agreement note in `engine/wrapper.py`, the precedence notes, the killpg rationale). Deleting one of those is a finding; adding a comment that merely restates well-named code is noise.
 - Dead code artifacts — no-op variables, leftover shims, `# removed` comments? No commented-out code (AGENTS.md: `git log` remembers).
 
 ### 3. Architecture — does it fit the system?
 
-- Does it respect the **pydantic-free boundary**? `taxonomy.py` and `wrapper.py` are on the measured path and must not import `models.py` / pydantic. A cross-boundary import there is `Critical` (see *Measurement fidelity*).
-- Does the **schema live in one place** (`models.py` / `taxonomy.py`)? Reads of on-disk fields scattered across modules instead of going through the typed model are a smell.
+- Does it respect the **pydantic-free boundary**? `contracts/taxonomy.py`, `engine/wrapper.py`, `engine/measure.py`, and `engine/calibration.py` are on the measured path and must not import `contracts/models.py` / pydantic. A cross-boundary import there is `Critical` (see *Measurement fidelity*).
+- Does the **schema live in one place** (`contracts/models.py` / `contracts/taxonomy.py`)? Reads of on-disk fields scattered across modules instead of going through the typed model are a smell.
 - Does the **Adapter Protocol stay the only checker-specific surface**? Checker-specific branching leaking into the collector / wrapper / timing instead of into an adapter is an architecture finding.
-- Does the **CLI stay a wiring layer** — Typer parsing, composition root, hand-off to `collector` / `timing` library code? Business logic creeping into `cli.py` is a smell.
+- Does the **CLI stay a wiring layer** — Typer parsing, composition root, hand-off to `engine/` / `suite/` library code? Business logic creeping into `cli.py` is a smell.
+- Does the change respect the layer dependency direction? `contracts ← engine ← {adapters, corpus} ← suite ← cli`. A module in an inner layer importing from an outer layer is `Important`.
 - Does it follow existing patterns or invent a new one? A new "Manager" / "Service" / "Handler" suffix where the surrounding code uses named domain types (`RawRun`, `RunResult`, `Adapter`) is a smell.
 - Are there shallow modules that should be deepened? (Interface nearly as complex as the implementation.)
 - Is `dict[str, Any]`, `dict[str, object]`, or raw parsed JSON flowing through multiple layers? At the boundary, define a `TypedDict` / dataclass / Pydantic model so the contract is named. (`coerce_count` is the pattern for taming raw parsed-JSON counts — reuse it.)
 - Is `object` used where the possible shapes are already known? Prefer a union or local `type` statement. Keep `object` for opaque inputs that are immediately narrowed (e.g. `coerce_count(value: object)`).
-- Are the package's `__init__` / re-export surfaces growing into accidental public API? `models.py` re-exports the taxonomy enums *deliberately* (stable import path); new re-exports need the same justification.
+- Are the package's `__init__` / re-export surfaces growing into accidental public API? `engine/wrapper.py` re-exports `RawRun` (defined in `contracts/proc.py`) *deliberately* (stable import path); new re-exports need the same justification.
 
 ### 4. Security — does it expose anything new?
 
@@ -309,7 +313,7 @@ If the answer is no, the finding is noise. Even if it's *technically correct*. T
 
 ```
 Suggestion: Use list comprehension
-src/typebench/timing.py:88
+src/typebench/engine/timing.py:88
 
   result = []
   for item in items:
@@ -324,7 +328,7 @@ Technically correct. List comprehensions are idiomatic. But the loop is clear an
 
 ```
 Important: Possible crash if hyperfine JSON is malformed
-src/typebench/collector.py:48
+src/typebench/engine/collector.py:48
 
 run_timing parses hyperfine's JSON. If the JSON is garbled this will blow up
 and crash the whole benchmark run.
@@ -336,7 +340,7 @@ Looks like a real finding — names a function, names a scenario. But the review
 
 ```
 Suggestion: Use match/case for the classifier dispatch
-src/typebench/wrapper.py:118
+src/typebench/engine/wrapper.py:118
 
 The if-chain in classify_default would be cleaner as a match statement.
 ```
@@ -347,7 +351,7 @@ The classifier is an ordered precedence chain (env → oom → timeout → …) 
 
 ```
 Important: Missing docstring
-src/typebench/wrapper.py:32
+src/typebench/engine/wrapper.py:32
 
 def _terminate_tree(proc: subprocess.Popen[str]) -> None:
 ```
@@ -359,19 +363,19 @@ def _terminate_tree(proc: subprocess.Popen[str]) -> None:
 Following the per-finding format defined in *Output format* below:
 
 ````markdown
-**Critical: Wrapper imports from models.py, putting pydantic on the measured path**
-`src/typebench/wrapper.py:14`
+**Critical: Wrapper imports from contracts/models.py, putting pydantic on the measured path**
+`src/typebench/engine/wrapper.py:14`
 
 ```python
-from typebench.models import ResultClass
+from typebench.contracts.models import ResultClass
 ```
 
-`wrapper.py` is hyperfine's per-run command, so every import here runs on *every* timed measurement. `models.py` imports pydantic (~50ms startup); pulling it onto the measured path adds a constant per-run overhead that biases comparative ratios between tools. The enums live in the pydantic-free `taxonomy.py` precisely so the wrapper can import them cheaply. See AGENTS.md "Measurement fidelity".
+`engine/wrapper.py` is hyperfine's per-run command, so every import here runs on *every* timed measurement. `contracts/models.py` imports pydantic (~50ms startup); pulling it onto the measured path adds a constant per-run overhead that biases comparative ratios between tools. The enums live in the pydantic-free `contracts/taxonomy.py` precisely so the wrapper can import them cheaply. See AGENTS.md "Measurement fidelity".
 
 **Fix:**
 
 ```python
-from typebench.taxonomy import ResultClass
+from typebench.contracts.taxonomy import ResultClass
 ```
 ````
 
@@ -417,11 +421,11 @@ Skip the section if you genuinely have nothing positive — fabricated strengths
 This is the dominant case in this repo. Treat it as a *stronger* trigger for this skill, not a weaker one. The failure modes:
 
 - **False confidence.** AI-generated code reads as authoritative. It uses the right vocabulary, follows the right shape, looks plausible. *Plausible-looking code that's subtly wrong is the dominant defect* — and in a measurement tool, "subtly wrong" often means "biases the numbers without crashing".
-- **Pattern transplant.** The model may import a pattern from another codebase that doesn't match this project — `os.path` instead of `pathlib.Path`, a convenience `from typebench.models import ...` in the wrapper that breaks the pydantic-free boundary, `shell=True` for "simplicity", a bare `except Exception` that swallows a record.
+- **Pattern transplant.** The model may import a pattern from another codebase that doesn't match this project — `os.path` instead of `pathlib.Path`, a convenience `from typebench.contracts.models import ...` in the wrapper that breaks the pydantic-free boundary, `shell=True` for "simplicity", a bare `except Exception` that swallows a record.
 - **Hallucinated APIs.** Method names that look right but don't exist, kwargs the library doesn't accept, fields the Pydantic model doesn't have, Adapter Protocol methods with the wrong signature. Always verify import paths and signatures against the actual file.
 - **Test theater.** Tests that assert what the implementation *does*, not what the contract *should* be. They pass, prove nothing, and lock the implementation in place.
-- **Record/honesty theater.** A change that makes the schema *look* complete — flipping `thread_mode_enforced` to `True`, or filling a failure record with success-looking metadata — without the underlying methodology. This is the highest-stakes AI failure mode here: it produces a confident, plausible, *dishonest* record. Treat with maximum suspicion.
-- **Extra-mile features.** Code that solves more than was asked, or reaches into a later plan. Unused options, premature config flags, half-built deferred Adapter methods, defensive code for impossible inputs. Pull these out — future maintenance cost for no current benefit, and a scope violation.
+- **Record/honesty theater.** A change that makes the schema *look* complete — setting `thread_mode_enforced=True` when affinity wasn't applied, or filling a failure record with success-looking metadata — without the underlying methodology. This is the highest-stakes AI failure mode here: it produces a confident, plausible, *dishonest* record. Treat with maximum suspicion.
+- **Extra-mile features.** Code that solves more than was asked, or reaches into unrelated subsystems. Unused options, premature config flags, defensive code for impossible inputs. Pull these out — future maintenance cost for no current benefit, and a scope violation.
 - **AI attribution smuggled into commits.** AGENTS.md and `git-conventions` are explicit: no AI/assistant attribution, co-author trailers, or marketing footers in commit messages or PR bodies — commits read as the author's own work. Scan the branch. `Critical` when they appear.
 
 When the author *is* an AI agent, you have a special obligation: nobody else is going to push back. **Be more direct, not less.** Polite hedging — "this might be worth considering" — gets the wrong things merged. State problems plainly, with evidence, and ask for the fix.
@@ -447,7 +451,7 @@ Splitting strategies (from `git-conventions`):
 | **Horizontal** | Shared types / `Protocol` first, consumers next. Layered changes. |
 | **Vertical** | Smaller end-to-end slices of the feature. Most feature work. |
 
-**Separate refactors from feature work.** A change that refactors *and* adds new behavior is two changes — file `Important: split refactor from feature` and ask for it. **Separate one plan's work from the next** for the same reason.
+**Separate refactors from feature work.** A change that refactors *and* adds new behavior is two changes — file `Important: split refactor from feature` and ask for it. **Separate unrelated subsystem changes from each other** for the same reason.
 
 ---
 
@@ -458,7 +462,7 @@ AGENTS.md treats new runtime dependencies as an *Ask first* boundary. When a cha
 - `Important: New runtime dependency added — was this asked about?` (Even if the answer is yes, the answer needs to appear in the PR description.)
 - Is the dependency actively maintained? Last release date, open-issue count.
 - License compatible?
-- **Does it land on the measured path?** A dependency whose import touches `wrapper.py` / `taxonomy.py` biases every timed run — that's a `Critical` fidelity issue, not just an "ask first" one. The runtime deps today are `pydantic` and `typer`, and pydantic is deliberately kept *off* the measured path.
+- **Does it land on the measured path?** A dependency whose import touches `engine/wrapper.py`, `engine/measure.py`, `engine/calibration.py`, or `contracts/taxonomy.py` biases every timed run — that's a `Critical` fidelity issue, not just an "ask first" one. The runtime deps today are `pydantic` and `typer`, and pydantic is deliberately kept *off* the measured path.
 - Does the existing stack solve this? (`pydantic` for models, `typer` for the CLI, stdlib `subprocess`/`shlex` for process control, `hyperfine` for timing. The answer is almost always *use what's already here*.)
 
 **Rule from `coding-guidance-python`:** prefer standard library and existing project utilities over new dependencies. Every dependency is a liability — and on the measured path, a measurement bias.
@@ -475,13 +479,13 @@ Refactors and feature changes often leave orphaned code. After the implementatio
 - Test fixtures no longer used.
 - Constants whose only callers are deleted.
 
-**Don't silently delete.** What looks orphaned to you may be in-progress work the author hasn't wired up yet, a deliberately-deferred Adapter Protocol method (`install`, `parallelism_cap`), or part of a planned next slice — AGENTS.md says *don't delete the deferred surface*. File a finding listing what *appears* unused and ask:
+**Don't silently delete.** What looks orphaned to you may be in-progress work the author hasn't wired up yet, an Adapter Protocol method that is implemented but not yet called from a particular path, or part of a planned next slice. File a finding listing what *appears* unused and ask:
 
 ```
 FYI: Apparent dead code after this change
 
-  - _parse_legacy_summary() in src/typebench/timing.py — no remaining callers
-  - LEGACY_PHASE constant in src/typebench/taxonomy.py — no references
+  - _parse_legacy_summary() in src/typebench/engine/timing.py — no remaining callers
+  - LEGACY_PHASE constant in src/typebench/contracts/taxonomy.py — no references
   - test_legacy_timing() in tests/test_timing.py — covers a deleted path
 
 Is removing these in scope for this change, or part of a follow-up? (Confirm none
@@ -501,8 +505,8 @@ Render the review as Markdown using this exact template. Stable structure means 
 
 ## Reviewers
 
-<e.g. `Opus 4.8 (xhigh) · Codex gpt-5.5 (xhigh)` — or `Opus 4.8 (xhigh) · Codex unavailable (<reason>)`.
-Synthesized by Opus 4.8. Each finding below is tagged `[both]` / `[opus]` / `[codex]`.>
+<e.g. `<primary model> (xhigh) · Codex gpt-5.5 (xhigh)` — or `<primary model> (xhigh) · Codex unavailable (<reason>)`.
+Synthesized by primary. Each finding below is tagged `[both]` / `[opus]` / `[codex]`.>
 
 ## Summary
 
@@ -575,7 +579,7 @@ Each finding follows this structure. The origin tag (`[both]` / `[opus]` / `[cod
 
 `````markdown
 **Critical [both]: <short title>**
-`src/typebench/collector.py:60`
+`src/typebench/engine/collector.py:60`
 
 ```python
 result_class = ResultClass.FAILED_CRASH
@@ -613,14 +617,14 @@ Before delivering the report, sanity-check it against this list. Each item is so
 **Coverage:**
 
 - [ ] AGENTS.md "Ask first" / "do not violate" boundaries surfaced explicitly (or noted as not present).
-- [ ] Measured-path purity: `wrapper.py` and `taxonomy.py` import no pydantic / heavy deps.
+- [ ] Measured-path purity: `engine/wrapper.py`, `engine/measure.py`, `engine/calibration.py`, and `contracts/taxonomy.py` import no pydantic / heavy deps.
 - [ ] On-disk models have `ConfigDict(extra="forbid")`; schema/taxonomy-string changes flagged as an Ask-first boundary.
-- [ ] Record honesty: `thread_mode_enforced` not falsely `True`; failure records carry `failure_phase`.
+- [ ] Record honesty: `thread_mode_enforced` mirrors whether CPU affinity was actually applied (not hardcoded); failure records carry `failure_phase`.
 - [ ] Failure completeness: `run_command` can't raise; collector catches timing-harness failures into recorded classes.
 - [ ] Subprocess safety: list-form only, no `shell=True`, `shlex.join` for hyperfine strings, process-group kill on timeout.
 - [ ] Adapter contract: new adapters conform to the Protocol; `parse()` degrades to `(None, None)` and uses `coerce_count`.
-- [ ] Scope by plan: no out-of-plan real-checker / cgroup / corpus / renderer work; deferred Protocol methods untouched.
-- [ ] Env-specific tests gated with `skipif`; taxonomy classes driven through StubAdapter + `_fake_checker`.
+- [ ] Scope: change stays within its stated scope; no unrelated subsystems bundled; no AGENTS.md "Ask first" boundaries crossed without clearance.
+- [ ] Env-specific tests gated with `skipif`; taxonomy classes driven through StubAdapter + `fake_checker` (`_internal/fake_checker.py`).
 - [ ] Verification story is checked, not assumed.
 - [ ] No AI attribution / co-author trailers / marketing footers in commit messages on the branch under review.
 
@@ -635,7 +639,7 @@ Before delivering the report, sanity-check it against this list. Each item is so
 
 **Multimodal:**
 
-- [ ] Both reviewers ran (Opus 4.8 + Codex gpt-5.5, xhigh) — or Codex's absence is recorded in the `## Reviewers` header with a reason.
+- [ ] Both reviewers ran (primary model + Codex, xhigh) — or Codex's absence is recorded in the `## Reviewers` header with a reason.
 - [ ] Every finding carries an origin tag (`[both]` / `[opus]` / `[codex]`); `[both]` findings sort first within their severity.
 - [ ] Every merged finding was verified against the actual code — no model's finding was copied in unverified.
 - [ ] Conflicts (one model flagged, the other cleared) are adjudicated in writing, not silently dropped.
@@ -662,7 +666,7 @@ The thoughts that lead to a bad review. Notice them, reverse course.
 | "This change is too big to review properly, so I'll skim it" | Skimming a 1500-line change is how real bugs reach main. Push back: split it. |
 | "Both models agree, so it's definitely real" | Two models share training-data blind spots and can converge on the *same* false positive. Convergence raises confidence; it doesn't replace reading the line. |
 | "Codex didn't flag it, so the measured-path / record-honesty check is covered" | Codex doesn't have this skill's benchmark context. The primary owns those checks; silence from Codex is not coverage. |
-| "Codex errored, I'll abort the review" | A one-model review is the floor, not a failure. Record Codex's absence in the header and ship the Opus 4.8 review. |
+| "Codex errored, I'll abort the review" | A one-model review is the floor, not a failure. Record Codex's absence in the header and ship the primary-model review. |
 
 ---
 
@@ -670,15 +674,15 @@ The thoughts that lead to a bad review. Notice them, reverse course.
 
 Things that are easy to get wrong here. Add to this list when a real review miss happens.
 
-- **Letting a `from typebench.models import ...` (or any heavy import) into `wrapper.py` / `taxonomy.py`** — it puts pydantic on the measured path and biases every timed run; invisible to anyone not looking for it.
-- **Approving a flip of `thread_mode_enforced` to `True` without the CPU-affinity mechanism** — the record then claims a methodology the engine never ran.
+- **Letting a `from typebench.contracts.models import ...` (or any heavy import) into `engine/wrapper.py`, `engine/measure.py`, `engine/calibration.py`, or `contracts/taxonomy.py`** — it puts pydantic on the measured path and biases every timed run; invisible to anyone not looking for it.
+- **Approving a `thread_mode_enforced=True` record when CPU affinity was not actually applied** — the record then claims a methodology the engine never ran. Equally bad: hardcoding `False` when affinity did run.
 - **Approving a failure record with no `failure_phase`** — `real_exit_code` can be misread as a clean command with a failed result.
 - **Letting a new code path raise out of `run_command`, or escape the collector's timing-harness `except`** — a dropped or crash-causing failure silently biases the benchmark.
 - **Approving a `subprocess` call without auditing for `shell=True`, for `shlex.join` on hyperfine strings, and for process-group kill on timeout** — each is a benchmark-isolation or safety break.
 - **Approving a new adapter whose `parse()` can raise, or whose counts skip `coerce_count`** — garbage (or a JSON `true`) leaks into the record as a count.
-- **Approving an adapter whose probe-phase `classify` disagrees with the wrapper's success-exit gate** (the "PLAN 2 TRAP") — the two phases record conflicting results.
+- **Approving an adapter whose probe-phase `classify` disagrees with the wrapper's success-exit gate** — the `universal_failure_prefix` + `classify_with_map` mechanism in `engine/wrapper.py` gates success exits; a disagreement means the two phases record conflicting results.
 - **Approving a schema or taxonomy-string change without round-trip + `extra="forbid"` tests, or without the AGENTS.md "Ask first"** — the on-disk contract is a stability promise.
-- **Approving out-of-plan work** — spine work that starts building real-checker / cgroup / corpus / renderer behavior, or half-builds a deferred Adapter method.
+- **Approving out-of-scope work** — a change that bundles unrelated subsystems, crosses an AGENTS.md "Ask first" boundary without clearance, or reaches past the stated task.
 - **Approving a PR whose commit messages contain AI attribution or marketing footers** — AGENTS.md and `git-conventions` forbid them; they need to come out before merge.
 
 ---
@@ -692,15 +696,15 @@ Things that are easy to get wrong here. Add to this list when a real review miss
 
 ## Reviewers
 
-Opus 4.8 (xhigh) · Codex gpt-5.5 (xhigh). Synthesized by Opus 4.8. Both models cleared the
+Opus 4.8 (xhigh, current default primary) · Codex gpt-5.5 (xhigh, current default second). Synthesized by primary. Both models cleared the
 measured path and the failure-record contract; the one surviving finding is `[opus]`.
 
 ## Summary
 
 Routes the stub adapter's parsed diagnostics/files counts through `coerce_count`
-so a malformed `_fake_checker` summary line yields `(None, None)` instead of a
+so a malformed `fake_checker` summary line yields `(None, None)` instead of a
 garbage count. Adds two tests (non-int value, JSON `true`) asserting the count is
-dropped. ~30 lines, single concern, Plan 1 scope.
+dropped. ~30 lines, single concern, adapter scope only.
 
 ## Verdict
 
@@ -727,7 +731,7 @@ cleanly — the property the benchmark actually depends on.
 
 - coerce_count rejects bools and non-ints — a JSON `true` can't masquerade as a count
 - parse() degrades to (None, None) rather than raising, so no record is ever dropped
-- Tests drive the path through StubAdapter + _fake_checker — fully reproducible
+- Tests drive the path through StubAdapter + fake_checker — fully reproducible
 
 ## Verification
 
@@ -735,7 +739,7 @@ cleanly — the property the benchmark actually depends on.
 - [x] `uv run pyrefly check` passes (strict)
 - [x] `uv run pytest` passes
 - [x] Measured path untouched (no new imports in wrapper.py / taxonomy.py)
-- [x] AGENTS.md "Ask first" boundaries: none crossed (Plan 1 adapter scope)
+- [x] AGENTS.md "Ask first" boundaries: none crossed (adapter scope, single concern)
 - [x] No AI attribution in commit messages on this branch
 ````
 

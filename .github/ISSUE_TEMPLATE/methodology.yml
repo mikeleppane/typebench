@@ -1,0 +1,83 @@
+name: "⚖️ Methodology / Results Challenge"
+description: Dispute a published number, flag a fairness problem, or challenge how typebench measures
+title: "[Methodology]: "
+labels: ["methodology", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        typebench exists to replace anecdote with measurement, and its stated rule is that
+        the numbers must be credible enough to rerun and audit. If a published result looks
+        wrong, a comparison seems unfair to one checker, or the methodology has a blind spot —
+        this is the right place, and challenges are welcome. "If project text reads as
+        advocacy for one checker, that is a bug."
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Challenge Type
+      options:
+        - A published number looks wrong or unreproducible
+        - The methodology favors / penalizes a specific checker
+        - A failure is misclassified (wrong result class)
+        - The docs claim something the engine doesn't actually do
+        - A blind spot — something relevant isn't measured or recorded
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: claim
+    attributes:
+      label: The Claim or Number in Question
+      description: Quote the specific result, table row, README statement, or code behavior you're challenging. Link to it if possible.
+      placeholder: |
+        The published suite table shows pyrefly at 0.9s on httpx, but rerunning the
+        documented command on comparable hardware I consistently get 2.1s...
+    validations:
+      required: true
+
+  - type: textarea
+    id: argument
+    attributes:
+      label: Why It's Wrong, Unfair, or Misleading
+      description: The substance of the challenge. Concrete mechanisms beat vibes — "the cold-run cache clear misses pyright's node module cache, so pyright pays a startup cost the others don't" is actionable.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence / Reproduction
+      description: Commands you ran, numbers you got, environment details, or code references. For reruns, include the `typebench doctor` output and the results JSON.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checkers
+    attributes:
+      label: Checkers Affected
+      description: Which checkers does this challenge concern? Check all that apply.
+      options:
+        - label: mypy
+        - label: pyright
+        - label: pyrefly
+        - label: ty
+        - label: All / the methodology itself
+
+  - type: textarea
+    id: correction
+    attributes:
+      label: Suggested Correction
+      description: If you have a concrete fix in mind — a measurement change, a re-run, a docs correction, a new recorded field — describe it.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: validations
+    attributes:
+      label: Validations
+      options:
+        - label: I have searched for similar issues and didn't find any duplicates
+          required: true
