@@ -426,6 +426,47 @@ def test_render_readme_labels_rows_by_checker_id(make_env: EnvFactory) -> None:
     assert "mypy@1.19.0" in md
 
 
+def test_render_readme_bolds_best_cell_per_column(make_env: EnvFactory) -> None:
+    # Two checkers on one project: ty is faster (better wall + kLOC/s), mypy uses less
+    # memory. Each column's winner is bold; the loser is not.
+    env = ResultsEnvelope(
+        suite_version="v",
+        generated_at="t",
+        runs=[
+            _record("ty", 0.5, 100_000_000, make_env),  # faster, more memory
+            _record("mypy", 2.0, 50_000_000, make_env),  # slower, less memory
+        ],
+    )
+    md = render_readme(env)
+    assert "**0.500**" in md  # ty wins all-cores wall
+    assert "**50.0**" in md  # mypy wins peak mem
+    assert "**6.4**" in md  # ty wins kLOC/s (3200 / 0.5)
+    assert "**2.000**" not in md  # mypy's slower wall is not bold
+
+
+def test_render_readme_does_not_bold_a_lone_value(make_env: EnvFactory) -> None:
+    # A single checker has no competitor, so none of its cells are bold (the footnote
+    # legitimately contains its own ** markers, so check the cell values, not the page).
+    env = ResultsEnvelope(
+        suite_version="v", generated_at="t", runs=[_record("ty", 0.5, 100_000_000, make_env)]
+    )
+    md = render_readme(env)
+    assert "**0.500**" not in md  # lone wall
+    assert "**100.0**" not in md  # lone mem
+    assert "**6.4**" not in md  # lone kLOC/s
+
+
+def test_render_readme_formats_generated_timestamp(make_env: EnvFactory) -> None:
+    env = ResultsEnvelope(
+        suite_version="2026-06-10",
+        generated_at="2026-06-11T09:10:55.399560+00:00",
+        runs=[_record("ty", 0.5, 100_000_000, make_env)],
+    )
+    md = render_readme(env)
+    assert "Corpus snapshot 2026-06-10 · measured 2026-06-11 09:10 UTC" in md
+    assert "09:10:55.399560" not in md  # the raw microsecond stamp is gone
+
+
 def test_render_readme_folds_constrained_cores_into_columns(make_env: EnvFactory) -> None:
     env = ResultsEnvelope(
         suite_version="v",
