@@ -1,0 +1,42 @@
+name: ab-selftest
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ab-selftest-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Sync project (puts .venv/bin/mypy on disk)
+        run: uv sync --frozen
+
+      - name: Run the action against itself (mypy vs mypy)
+        uses: ./
+        with:
+          checker: mypy
+          candidate: ${{ github.workspace }}/.venv/bin/mypy
+          baseline: path:${{ github.workspace }}/.venv/bin/mypy
+          targets: |
+            ./fixtures/clean_project
+          runs: 2
+
+      - name: Assert artifact was produced
+        run: test -f ab-results.json && echo "ok"
