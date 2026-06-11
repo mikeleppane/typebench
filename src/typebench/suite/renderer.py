@@ -142,6 +142,23 @@ _FOOTNOTE = (
 )
 
 
+def _provenance(envelope: ResultsEnvelope) -> str:
+    """Machine/run caveat built from existing envelope fields. Returns '' when the
+    envelope carries no runs (degraded store) so render stays crash-free. Makes the
+    provenance explicit so absolute seconds are not cross-machine-compared."""
+    if not envelope.runs:
+        return ""
+    env = envelope.runs[0].env
+    machine = f"{env.cpu_model} ({env.core_count} cores), {env.os} {env.kernel}"
+    cfg = envelope.run_config
+    run_clause = f"; {cfg.runs} timed runs, {cfg.warmup} warmup" if cfg is not None else ""
+    return (
+        f"\n> Measured on {machine}{run_clause}. Absolute times are machine-specific — "
+        "compare rows within the same suite, or the normalized trend lines on the site; "
+        "do not compare raw seconds across machines.\n"
+    )
+
+
 def _result_tables(envelope: ResultsEnvelope) -> list[str]:
     """Per-(project, thread-mode, cores) heading + table parts, ordered fastest-
     first (ranking by the measured metric, not diagnostics). Shared by the README
@@ -175,6 +192,7 @@ def render_readme(envelope: ResultsEnvelope) -> str:
         f"\n_Suite `{envelope.suite_version}` · generated {envelope.generated_at}_\n",
         *_result_tables(envelope),
         _FOOTNOTE,
+        _provenance(envelope),
         _README_END,
     ]
     return "\n".join(parts)
@@ -188,6 +206,7 @@ def render_terminal(envelope: ResultsEnvelope) -> str:
         f"_Suite `{envelope.suite_version}` · generated {envelope.generated_at}_\n",
         *_result_tables(envelope),
         _FOOTNOTE,
+        _provenance(envelope),
     ]
     return "\n".join(parts)
 

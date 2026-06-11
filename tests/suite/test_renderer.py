@@ -11,11 +11,13 @@ from typebench.contracts.models import (
     RunResult,
     TimingStats,
 )
+from typebench.contracts.runconfig import RunConfig
 from typebench.contracts.taxonomy import LocDenominator, ResultClass, ThreadMode
 from typebench.suite.renderer import (
     _ab_display,
     _code_loc_or_withheld,
     _files_degraded,
+    _provenance,
     build_report_html,
     build_trends,
     cpu_model_anchors,
@@ -62,6 +64,42 @@ def _record(
         over_reports=over,
         env=make_env(),
     )
+
+
+def test_provenance_names_machine_and_warns(make_env: EnvFactory) -> None:
+    rec = _record("mypy", 1.0, 100, make_env)
+    env = ResultsEnvelope(suite_version="v", generated_at="t", runs=[rec])
+    out = render_readme(env)
+    assert "Test CPU" in out
+    assert "8 cores" in out
+    assert "machine-specific" in out
+
+
+def test_provenance_empty_when_no_runs() -> None:
+    env = ResultsEnvelope(suite_version="v", generated_at="t", runs=[])
+    assert _provenance(env) == ""
+    assert "machine-specific" not in render_readme(env)
+
+
+def test_provenance_without_run_config_omits_run_counts(make_env: EnvFactory) -> None:
+    rec = _record("mypy", 1.0, 100, make_env)
+    env = ResultsEnvelope(suite_version="v", generated_at="t", runs=[rec])
+    out = render_readme(env)
+    assert "Test CPU" in out
+    assert "timed runs" not in out
+
+
+def test_provenance_includes_run_counts_from_config(make_env: EnvFactory) -> None:
+    rec = _record("mypy", 1.0, 100, make_env)
+    cfg = RunConfig(checkers=(), runs=5, warmup=2)
+    env = ResultsEnvelope(suite_version="v", generated_at="t", runs=[rec], run_config=cfg)
+    assert "5 timed runs, 2 warmup" in render_readme(env)
+
+
+def test_provenance_in_terminal(make_env: EnvFactory) -> None:
+    rec = _record("mypy", 1.0, 100, make_env)
+    env = ResultsEnvelope(suite_version="v", generated_at="t", runs=[rec])
+    assert "machine-specific" in render_terminal(env)
 
 
 def test_render_readme_table_is_fastest_first_and_excludes_diagnostics(
