@@ -120,8 +120,6 @@ def test_render_readme_table_is_fastest_first_and_excludes_diagnostics(
     assert "diagnostics" not in md.lower()
     # code-LOC throughput present (3200 LOC / 0.5 s = 6.4 kLOC/s)
     assert "6.4" in md
-    # cross-pass label on parallel efficiency
-    assert "cross-pass" in md.lower()
 
 
 def test_render_readme_subtracts_harness_baselines_without_mutating_raw(
@@ -138,8 +136,9 @@ def test_render_readme_subtracts_harness_baselines_without_mutating_raw(
 
     md = render_readme(env)
 
-    assert "| ty@1.0 | clean | 0.040 | 40.0 |" in md
-    assert "80.0" in md  # 3200 LOC / corrected 0.040 s
+    assert "| ty@1.0 | 0.040 |" in md  # corrected all-cores wall
+    assert "| 40.0 | 80.0 |" in md  # corrected mem 40.0 + 3200 LOC / 0.040 s
+    assert "80.0" in md
     assert record.timing is not None and record.timing.median_s == 0.050
     assert record.memory is not None and record.memory.peak_bytes_median == 54_000_000
 
@@ -153,7 +152,8 @@ def test_render_readme_without_baselines_keeps_legacy_raw_display(
 
     md = render_readme(env)
 
-    assert "| ty@1.0 | clean | 0.050 | 54.0 |" in md
+    assert "| ty@1.0 | 0.050 |" in md  # raw all-cores wall (no baselines)
+    assert "| 54.0 | 64.0 |" in md  # raw mem 54.0 + 3200 LOC / 0.050 s
     assert "64.0" in md
 
 
@@ -421,12 +421,12 @@ def test_render_readme_labels_rows_by_checker_id(make_env: EnvFactory) -> None:
         ],
     )
     md = render_readme(env)
-    assert "| Checker | Result |" in md
+    assert "| Checker | All-cores |" in md
     assert "mypy@1.18.2" in md
     assert "mypy@1.19.0" in md
 
 
-def test_render_readme_groups_constrained_records_by_cores(make_env: EnvFactory) -> None:
+def test_render_readme_folds_constrained_cores_into_columns(make_env: EnvFactory) -> None:
     env = ResultsEnvelope(
         suite_version="v",
         generated_at="t",
@@ -450,9 +450,11 @@ def test_render_readme_groups_constrained_records_by_cores(make_env: EnvFactory)
         ],
     )
     md = render_readme(env)
-    assert "#### httpx — constrained · cores=1" in md
-    assert "#### httpx — constrained · cores=4" in md
-    assert md.count("| mypy@1.19.0 |") == 2
+    assert "#### httpx" in md
+    assert "| 1c | 4c | 8c |" in md  # the constrained sweep folded into columns
+    # one folded row per checker, not one section per core count
+    assert md.count("| mypy@1.19.0 |") == 1
+    assert "2.000" in md and "1.500" in md  # 1-core and 4-core walls in the same row
 
 
 def _cmp_record(checker_id: str, wall: float, peak: int, make_env: EnvFactory) -> RunResult:
@@ -568,7 +570,7 @@ def test_render_terminal_has_tables_without_readme_markers(make_env: EnvFactory)
     assert "| ty@" in out and "| mypy@" in out
     assert out.index("| ty@") < out.index("| mypy@")  # fastest-first preserved
     assert "httpx" in out  # project heading
-    assert "cross-pass" in out.lower()  # shared footnote
+    assert "all-cores" in out.lower()  # shared footnote describes the columns
 
 
 def test_build_report_html_inlines_assets_and_data() -> None:

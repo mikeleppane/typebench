@@ -573,567 +573,184 @@ run counts.
 _Suite `2026-06-10` · generated 2026-06-11T09:10:55.399560+00:00_
 
 
-#### ansible-core — all-cores · all-cores
+### Small projects
 
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 0.644 | 411.9 | 4.454 | 6.60 | 157.1 |
-| ty@0.0.48 | diagnostics | 0.671 | 544.3 | 9.266 | 13.20 | 150.7 |
-| mypy@2.1.0 | diagnostics | 3.153 | 1506.6 | 15.969 | 5.01 | 32.1 |
-| pyright@1.1.410 | diagnostics | 21.844 | 5480.0 | 397.095 | 18.15 | 4.6 |
 
+#### httpx
 
-#### ansible-core — constrained · cores=1
+7,312 code LOC analyzed across 23 files
 
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 2.704 | 336.3 | 2.971 | 1.09 | 37.4 |
-| ty@0.0.48 | diagnostics | 3.135 | 490.9 | 3.993 | 1.26 | 32.3 |
-| mypy@2.1.0 | diagnostics | 4.916 | 254.6 | 5.010 | 1.01 | 20.6 |
-| pyright@1.1.410 | diagnostics | 24.059 | 1061.9 | 24.920 | 1.03 | 4.2 |
+| Checker | All-cores | 1c | 4c | 8c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| ty@0.0.48 | 0.072 | 0.233 | 0.121 | 0.112 | 103.4 | 101.6 |
+| pyrefly@1.0.0 | 0.167 | 0.299 | 0.190 | 0.249 | 124.0 | 43.9 |
+| mypy@2.1.0 | 1.261 | 1.290 | 0.885 | 1.180 | 922.1 | 5.8 |
+| pyright@1.1.410 | 4.174 | 3.590 | 1.710 | 2.096 | 1967.8 | 1.8 |
 
 
-#### ansible-core — constrained · cores=4
+#### click
 
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 0.865 | 348.5 | 2.747 | 3.07 | 116.9 |
-| ty@0.0.48 | diagnostics | 1.251 | 503.1 | 3.634 | 2.83 | 80.8 |
-| mypy@2.1.0 | diagnostics | 2.559 | 534.5 | 6.855 | 2.65 | 39.5 |
-| pyright@1.1.410 | diagnostics | 15.149 | 1111.5 | 26.891 | 1.77 | 6.7 |
+9,373 code LOC analyzed across 17 files
 
+| Checker | All-cores | 1c | 4c | 8c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| ty@0.0.48 | 0.084 | 0.251 | 0.088 | 0.120 | 93.7 | 111.9 |
+| pyrefly@1.0.0 | 0.216 | 0.332 | 0.196 | 0.217 | 128.5 | 43.4 |
+| mypy@2.1.0 | 1.213 | 0.961 | 1.119 | 1.084 | 765.7 | 7.7 |
+| pyright@1.1.410 | 3.156 | 4.753 | 2.050 | 1.838 | 1638.8 | 3.0 |
 
-#### ansible-core — constrained · cores=8
 
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 0.794 | 364.4 | 3.999 | 4.85 | 127.4 |
-| ty@0.0.48 | diagnostics | 1.026 | 515.2 | 5.271 | 4.99 | 98.5 |
-| mypy@2.1.0 | diagnostics | 2.697 | 795.3 | 8.503 | 3.12 | 37.5 |
-| pyright@1.1.410 | diagnostics | 18.341 | 1108.8 | 34.470 | 1.88 | 5.5 |
+#### anyio
 
+11,445 code LOC analyzed across 42 files
 
-#### anyio — all-cores · all-cores
+| Checker | All-cores | 1c | 4c | 8c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| ty@0.0.48 | 0.115 | 0.349 | 0.160 | 0.142 | 120.9 | 99.7 |
+| pyrefly@1.0.0 | 0.199 | 0.376 | 0.307 | 0.299 | 137.9 | 57.5 |
+| mypy@2.1.0 | 1.541 | 1.317 | 1.069 | 1.017 | 868.0 | 7.4 |
+| pyright@1.1.410 | 4.752 | 5.940 | 2.916 | 2.880 | 2112.9 | 2.4 |
 
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.115 | 120.9 | 0.512 | 3.51 | 99.7 |
-| pyrefly@1.0.0 | diagnostics | 0.199 | 137.9 | 0.840 | 3.66 | 57.5 |
-| mypy@2.1.0 | diagnostics | 1.541 | 868.0 | 5.726 | 3.64 | 7.4 |
-| pyright@1.1.410 | diagnostics | 4.752 | 2112.9 | 43.330 | 9.06 | 2.4 |
 
+#### jinja2
 
-#### anyio — constrained · cores=1
+11,564 code LOC analyzed across 25 files
 
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.349 | 75.1 | 0.515 | 1.36 | 32.8 |
-| pyrefly@1.0.0 | diagnostics | 0.376 | 95.2 | 0.450 | 1.10 | 30.4 |
-| mypy@2.1.0 | diagnostics | 1.317 | 97.4 | 1.333 | 0.99 | 8.7 |
-| pyright@1.1.410 | diagnostics | 5.940 | 251.2 | 7.297 | 1.22 | 1.9 |
+| Checker | All-cores | 1c | 4c | 8c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| ty@0.0.48 | 0.158 | 0.378 | 0.132 | 0.158 | 123.9 | 73.4 |
+| pyrefly@1.0.0 | 0.173 | 0.358 | 0.203 | 0.178 | 132.7 | 66.8 |
+| mypy@2.1.0 | 1.451 | 1.205 | 1.037 | 1.105 | 820.6 | 8.0 |
+| pyright@1.1.410 | 5.418 | 5.117 | 2.220 | 2.635 | 2118.2 | 2.1 |
 
 
-#### anyio — constrained · cores=4
+#### fastapi
 
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.160 | 87.7 | 0.560 | 2.92 | 71.3 |
-| pyrefly@1.0.0 | diagnostics | 0.307 | 106.8 | 0.433 | 1.28 | 37.2 |
-| mypy@2.1.0 | diagnostics | 1.069 | 274.9 | 1.918 | 1.74 | 10.7 |
-| pyright@1.1.410 | diagnostics | 2.916 | 254.2 | 5.974 | 2.03 | 3.9 |
+18,287 code LOC analyzed across 48 files
 
+| Checker | All-cores | 1c | 4c | 8c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| ty@0.0.48 | 0.109 | 0.395 | 0.137 | 0.162 | 145.9 | 168.5 |
+| pyrefly@1.0.0 | 0.303 | 0.509 | 0.269 | 0.248 | 192.6 | 60.3 |
+| mypy@2.1.0 | 1.702 | 1.973 | 1.227 | 1.296 | 1072.4 | 10.7 |
+| pyright@1.1.410 | 6.700 | 6.233 | 2.634 | 3.227 | 2970.1 | 2.7 |
 
-#### anyio — constrained · cores=8
 
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.142 | 96.8 | 0.670 | 3.88 | 80.7 |
-| pyrefly@1.0.0 | diagnostics | 0.299 | 117.9 | 0.465 | 1.41 | 38.2 |
-| mypy@2.1.0 | diagnostics | 1.017 | 434.4 | 2.646 | 2.53 | 11.3 |
-| pyright@1.1.410 | diagnostics | 2.880 | 257.6 | 5.305 | 1.82 | 4.0 |
+#### trio
 
+18,745 code LOC analyzed across 78 files
 
-#### click — all-cores · all-cores
+| Checker | All-cores | 1c | 4c | 8c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| ty@0.0.48 | 0.107 | 0.521 | 0.241 | 0.166 | 138.4 | 175.7 |
+| pyrefly@1.0.0 | 0.299 | 0.634 | 0.322 | 0.323 | 172.6 | 62.8 |
+| mypy@2.1.0 | 1.768 | 1.602 | 1.397 | 1.346 | 871.1 | 10.6 |
+| pyright@1.1.410 | 7.511 | 7.155 | 4.087 | 3.770 | 2892.8 | 2.5 |
 
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.084 | 93.7 | 0.516 | 4.50 | 111.9 |
-| pyrefly@1.0.0 | diagnostics | 0.216 | 128.5 | 0.715 | 2.89 | 43.4 |
-| mypy@2.1.0 | clean | 1.213 | 765.7 | 6.282 | 5.05 | 7.7 |
-| pyright@1.1.410 | diagnostics | 3.156 | 1638.8 | 57.098 | 17.91 | 3.0 |
 
+### Medium projects
 
-#### click — constrained · cores=1
 
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.251 | 59.9 | 0.400 | 1.42 | 37.4 |
-| pyrefly@1.0.0 | diagnostics | 0.332 | 86.5 | 0.369 | 1.02 | 28.2 |
-| mypy@2.1.0 | clean | 0.961 | 85.0 | 0.997 | 1.00 | 9.7 |
-| pyright@1.1.410 | diagnostics | 4.753 | 229.2 | 4.261 | 0.89 | 2.0 |
+#### pydantic
 
+27,049 code LOC analyzed across 79 files
 
-#### click — constrained · cores=4
+| Checker | All-cores | 1c | 4c | 8c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| pyrefly@1.0.0 | 0.565 | 0.662 | 0.295 | 0.291 | 195.8 | 47.9 |
+| ty@0.0.48 | 0.597 | 1.756 | 0.844 | 0.609 | 243.7 | 45.3 |
+| mypy@2.1.0 | 1.997 | 1.804 | 1.401 | 1.923 | 897.1 | 13.5 |
+| pyright@1.1.410 | 15.167 | 13.566 | 8.557 | 9.574 | 3497.0 | 1.8 |
 
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.088 | 69.0 | 0.433 | 3.64 | 106.5 |
-| pyrefly@1.0.0 | diagnostics | 0.196 | 100.9 | 0.553 | 2.44 | 47.9 |
-| mypy@2.1.0 | clean | 1.119 | 248.4 | 2.111 | 1.83 | 8.4 |
-| pyright@1.1.410 | diagnostics | 2.050 | 227.2 | 4.538 | 2.18 | 4.6 |
 
+#### hypothesis
 
-#### click — constrained · cores=8
+32,072 code LOC analyzed across 102 files
 
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.120 | 78.7 | 0.330 | 2.18 | 77.9 |
-| pyrefly@1.0.0 | diagnostics | 0.217 | 110.0 | 0.425 | 1.71 | 43.2 |
-| mypy@2.1.0 | clean | 1.084 | 385.9 | 2.738 | 2.46 | 8.6 |
-| pyright@1.1.410 | diagnostics | 1.838 | 230.6 | 4.118 | 2.20 | 5.1 |
+| Checker | All-cores | 1c | 4c | 8c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| pyrefly@1.0.0 | 0.341 | 1.216 | 0.379 | 0.375 | 227.0 | 94.1 |
+| ty@0.0.48 | 0.429 | 1.271 | 0.529 | 0.559 | 251.4 | 74.7 |
+| mypy@2.1.0 | 2.778 | 2.409 | 1.876 | 2.570 | 1046.1 | 11.5 |
+| pyright@1.1.410 | 11.820 | 12.736 | 7.449 | 7.180 | 3333.7 | 2.7 |
 
 
-#### fastapi — all-cores · all-cores
+#### rich
 
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.109 | 145.9 | 0.770 | 5.52 | 168.5 |
-| pyrefly@1.0.0 | diagnostics | 0.303 | 192.6 | 1.031 | 3.08 | 60.3 |
-| mypy@2.1.0 | diagnostics | 1.702 | 1072.4 | 6.626 | 3.82 | 10.7 |
-| pyright@1.1.410 | diagnostics | 6.700 | 2970.1 | 135.589 | 20.14 | 2.7 |
+35,544 code LOC analyzed across 100 files
 
+| Checker | All-cores | 1c | 4c | 8c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| ty@0.0.48 | 0.182 | 0.613 | 0.230 | 0.182 | 146.5 | 194.9 |
+| pyrefly@1.0.0 | 0.305 | 0.690 | 0.422 | 0.345 | 182.6 | 116.5 |
+| mypy@2.1.0 | 1.761 | 1.530 | 1.155 | 1.613 | 883.2 | 20.2 |
+| pyright@1.1.410 | 9.011 | 10.778 | 6.272 | 6.077 | 3247.3 | 3.9 |
 
-#### fastapi — constrained · cores=1
 
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.395 | 101.7 | 0.607 | 1.42 | 46.3 |
-| pyrefly@1.0.0 | diagnostics | 0.509 | 145.5 | 0.543 | 1.01 | 35.9 |
-| mypy@2.1.0 | diagnostics | 1.973 | 132.9 | 1.927 | 0.96 | 9.3 |
-| pyright@1.1.410 | diagnostics | 6.233 | 317.9 | 6.525 | 1.04 | 2.9 |
+#### pylint
 
+39,792 code LOC analyzed across 178 files
 
-#### fastapi — constrained · cores=4
+| Checker | All-cores | 1c | 4c | 8c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| pyrefly@1.0.0 | 0.433 | 1.311 | 0.575 | 0.487 | 249.2 | 91.8 |
+| ty@0.0.48 | 0.514 | 1.498 | 0.640 | 0.429 | 244.3 | 77.4 |
+| mypy@2.1.0 | 2.499 | 2.297 | 1.370 | 1.455 | 1049.7 | 15.9 |
+| pyright@1.1.410 | 12.423 | 14.874 | 7.575 | 7.562 | 3577.1 | 3.2 |
 
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.137 | 112.3 | 0.455 | 2.71 | 133.6 |
-| pyrefly@1.0.0 | diagnostics | 0.269 | 160.1 | 0.585 | 1.95 | 68.0 |
-| mypy@2.1.0 | diagnostics | 1.227 | 357.5 | 2.589 | 2.06 | 14.9 |
-| pyright@1.1.410 | diagnostics | 2.634 | 338.7 | 6.219 | 2.33 | 6.9 |
 
+### Large projects
 
-#### fastapi — constrained · cores=8
 
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.162 | 123.0 | 0.480 | 2.49 | 113.1 |
-| pyrefly@1.0.0 | diagnostics | 0.248 | 169.8 | 0.624 | 2.24 | 73.8 |
-| mypy@2.1.0 | diagnostics | 1.296 | 554.1 | 3.860 | 2.91 | 14.1 |
-| pyright@1.1.410 | diagnostics | 3.227 | 319.4 | 7.484 | 2.30 | 5.7 |
+#### textual
 
+70,948 code LOC analyzed across 247 files
 
-#### httpx — all-cores · all-cores
+| Checker | All-cores | 1c | 4c | 8c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| pyrefly@1.0.0 | 0.452 | 1.469 | 0.670 | 0.636 | 319.6 | —* |
+| ty@0.0.48 | 0.857 | 1.781 | 0.676 | 0.530 | 352.4 | —* |
+| mypy@2.1.0 | 3.066 | 3.592 | 2.726 | 2.551 | 1349.0 | 23.1 |
+| pyright@1.1.410 | 13.965 | 14.763 | 8.438 | 8.420 | 4863.6 | —* |
 
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.072 | 103.4 | 0.565 | 5.49 | 101.6 |
-| pyrefly@1.0.0 | diagnostics | 0.167 | 124.0 | 0.671 | 3.39 | 43.9 |
-| mypy@2.1.0 | diagnostics | 1.261 | 922.1 | 7.105 | 5.50 | 5.8 |
-| pyright@1.1.410 | diagnostics | 4.174 | 1967.8 | 35.060 | 8.34 | 1.8 |
 
+#### ansible-core
 
-#### httpx — constrained · cores=1
+101,119 code LOC analyzed across 575 files
 
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.233 | 59.4 | 0.367 | 1.39 | 31.4 |
-| pyrefly@1.0.0 | diagnostics | 0.299 | 86.5 | 0.479 | 1.45 | 24.4 |
-| mypy@2.1.0 | diagnostics | 1.290 | 105.1 | 1.342 | 1.02 | 5.7 |
-| pyright@1.1.410 | diagnostics | 3.590 | 214.4 | 3.909 | 1.08 | 2.0 |
+| Checker | All-cores | 1c | 4c | 8c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| pyrefly@1.0.0 | 0.644 | 2.704 | 0.865 | 0.794 | 411.9 | 157.1 |
+| ty@0.0.48 | 0.671 | 3.135 | 1.251 | 1.026 | 544.3 | 150.7 |
+| mypy@2.1.0 | 3.153 | 4.916 | 2.559 | 2.697 | 1506.6 | 32.1 |
+| pyright@1.1.410 | 21.844 | 24.059 | 15.149 | 18.341 | 5480.0 | 4.6 |
 
 
-#### httpx — constrained · cores=4
+#### mypy
 
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.121 | 72.0 | 0.286 | 1.88 | 60.4 |
-| pyrefly@1.0.0 | diagnostics | 0.190 | 96.7 | 0.507 | 2.30 | 38.5 |
-| mypy@2.1.0 | diagnostics | 0.885 | 289.5 | 1.847 | 2.02 | 8.3 |
-| pyright@1.1.410 | diagnostics | 1.710 | 216.7 | 3.905 | 2.24 | 4.3 |
+123,278 code LOC analyzed across 247 files
 
+| Checker | All-cores | 1c | 4c | 8c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| ty@0.0.48 | 0.970 | 4.077 | 1.455 | 1.214 | 584.7 | —* |
+| pyrefly@1.0.0 | 1.120 | 4.111 | 1.146 | 0.843 | 542.1 | —* |
+| mypy@2.1.0 | 3.216 | 6.325 | 2.888 | 2.868 | 1374.4 | —* |
+| pyright@1.1.410 | 21.268 | 30.394 | 18.282 | 18.545 | 5391.0 | —* |
 
-#### httpx — constrained · cores=8
 
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.112 | 82.1 | 0.317 | 2.22 | 65.1 |
-| pyrefly@1.0.0 | diagnostics | 0.249 | 105.5 | 0.400 | 1.43 | 29.3 |
-| mypy@2.1.0 | diagnostics | 1.180 | 459.1 | 2.631 | 2.17 | 6.2 |
-| pyright@1.1.410 | diagnostics | 2.096 | 220.2 | 3.466 | 1.63 | 3.5 |
+#### sqlalchemy
 
+200,180 code LOC analyzed across 256 files
 
-#### hypothesis — all-cores · all-cores
+| Checker | All-cores | 1c | 4c | 8c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| ty@0.0.48 | 0.636 | 3.878 | 1.347 | 0.912 | 647.9 | 314.8 |
+| pyrefly@1.0.0 | 0.682 | 2.507 | 0.847 | 0.653 | 315.7 | 293.5 |
+| mypy@2.1.0 | 6.341 | 7.147 | 4.946 | 6.123 | 1609.7 | 31.6 |
+| pyright@1.1.410 | 31.434 | 30.597 | 21.866 | 19.341 | 7359.1 | 6.4 |
 
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 0.341 | 227.0 | 1.561 | 4.20 | 94.1 |
-| ty@0.0.48 | diagnostics | 0.429 | 251.4 | 4.082 | 8.87 | 74.7 |
-| mypy@2.1.0 | diagnostics | 2.778 | 1046.1 | 9.227 | 3.29 | 11.5 |
-| pyright@1.1.410 | diagnostics | 11.820 | 3333.7 | 223.016 | 18.82 | 2.7 |
 
-
-#### hypothesis — constrained · cores=1
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 1.216 | 161.1 | 1.299 | 1.04 | 26.4 |
-| ty@0.0.48 | diagnostics | 1.271 | 203.3 | 1.521 | 1.17 | 25.2 |
-| mypy@2.1.0 | diagnostics | 2.409 | 142.9 | 2.427 | 0.99 | 13.3 |
-| pyright@1.1.410 | diagnostics | 12.736 | 481.7 | 15.484 | 1.21 | 2.5 |
-
-
-#### hypothesis — constrained · cores=4
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 0.379 | 176.3 | 1.534 | 3.74 | 84.6 |
-| ty@0.0.48 | diagnostics | 0.529 | 212.2 | 1.842 | 3.29 | 60.6 |
-| mypy@2.1.0 | diagnostics | 1.876 | 360.2 | 2.934 | 1.54 | 17.1 |
-| pyright@1.1.410 | diagnostics | 7.449 | 497.4 | 15.640 | 2.09 | 4.3 |
-
-
-#### hypothesis — constrained · cores=8
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 0.375 | 193.5 | 1.617 | 3.98 | 85.5 |
-| ty@0.0.48 | diagnostics | 0.559 | 222.9 | 2.101 | 3.56 | 57.4 |
-| mypy@2.1.0 | diagnostics | 2.570 | 552.9 | 4.336 | 1.67 | 12.5 |
-| pyright@1.1.410 | diagnostics | 7.180 | 503.0 | 16.053 | 2.23 | 4.5 |
-
-
-#### jinja2 — all-cores · all-cores
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.158 | 123.9 | 0.591 | 3.14 | 73.4 |
-| pyrefly@1.0.0 | diagnostics | 0.173 | 132.7 | 0.655 | 3.21 | 66.8 |
-| mypy@2.1.0 | clean | 1.451 | 820.6 | 5.916 | 3.99 | 8.0 |
-| pyright@1.1.410 | diagnostics | 5.418 | 2118.2 | 77.821 | 14.28 | 2.1 |
-
-
-#### jinja2 — constrained · cores=1
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 0.358 | 88.4 | 0.475 | 1.22 | 32.3 |
-| ty@0.0.48 | diagnostics | 0.378 | 78.3 | 0.575 | 1.41 | 30.6 |
-| mypy@2.1.0 | clean | 1.205 | 101.5 | 1.218 | 0.98 | 9.6 |
-| pyright@1.1.410 | diagnostics | 5.117 | 243.6 | 5.231 | 1.02 | 2.3 |
-
-
-#### jinja2 — constrained · cores=4
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.132 | 89.0 | 0.441 | 2.71 | 87.7 |
-| pyrefly@1.0.0 | diagnostics | 0.203 | 102.2 | 0.424 | 1.81 | 57.0 |
-| mypy@2.1.0 | clean | 1.037 | 275.8 | 1.752 | 1.64 | 11.1 |
-| pyright@1.1.410 | diagnostics | 2.220 | 250.2 | 5.055 | 2.25 | 5.2 |
-
-
-#### jinja2 — constrained · cores=8
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.158 | 101.2 | 0.479 | 2.53 | 73.1 |
-| pyrefly@1.0.0 | diagnostics | 0.178 | 111.6 | 0.677 | 3.23 | 64.8 |
-| mypy@2.1.0 | clean | 1.105 | 428.1 | 2.348 | 2.07 | 10.5 |
-| pyright@1.1.410 | diagnostics | 2.635 | 249.4 | 6.467 | 2.43 | 4.4 |
-
-
-#### mypy — all-cores · all-cores
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.970 | 584.7 | 8.117 | 8.11 | —* |
-| pyrefly@1.0.0 | diagnostics | 1.120 | 542.1 | 10.240 | 8.90 | —* |
-| mypy@2.1.0 | diagnostics | 3.216 | 1374.4 | 20.780 | 6.40 | —* |
-| pyright@1.1.410 | diagnostics | 21.268 | 5391.0 | 479.757 | 22.53 | —* |
-
-
-#### mypy — constrained · cores=1
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 4.077 | 518.0 | 3.239 | 0.79 | —* |
-| pyrefly@1.0.0 | diagnostics | 4.111 | 387.6 | 4.596 | 1.11 | —* |
-| mypy@2.1.0 | diagnostics | 6.325 | 267.7 | 6.428 | 1.01 | —* |
-| pyright@1.1.410 | diagnostics | 30.394 | 1132.2 | 29.981 | 0.99 | —* |
-
-
-#### mypy — constrained · cores=4
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 1.146 | 417.0 | 3.698 | 3.14 | —* |
-| ty@0.0.48 | diagnostics | 1.455 | 535.2 | 3.968 | 2.67 | —* |
-| mypy@2.1.0 | diagnostics | 2.888 | 480.1 | 8.099 | 2.77 | —* |
-| pyright@1.1.410 | diagnostics | 18.282 | 1138.2 | 30.765 | 1.68 | —* |
-
-
-#### mypy — constrained · cores=8
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 0.843 | 457.1 | 4.720 | 5.40 | —* |
-| ty@0.0.48 | diagnostics | 1.214 | 546.0 | 7.376 | 5.93 | —* |
-| mypy@2.1.0 | diagnostics | 2.868 | 724.2 | 12.363 | 4.27 | —* |
-| pyright@1.1.410 | diagnostics | 18.545 | 1129.6 | 30.780 | 1.66 | —* |
-
-
-#### pydantic — all-cores · all-cores
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 0.565 | 195.8 | 3.460 | 5.81 | 47.9 |
-| ty@0.0.48 | diagnostics | 0.597 | 243.7 | 2.916 | 4.65 | 45.3 |
-| mypy@2.1.0 | diagnostics | 1.997 | 897.1 | 7.760 | 3.83 | 13.5 |
-| pyright@1.1.410 | diagnostics | 15.167 | 3497.0 | 226.118 | 14.88 | 1.8 |
-
-
-#### pydantic — constrained · cores=1
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 0.662 | 138.9 | 0.926 | 1.34 | 40.9 |
-| ty@0.0.48 | diagnostics | 1.756 | 163.1 | 1.590 | 0.89 | 15.4 |
-| mypy@2.1.0 | diagnostics | 1.804 | 115.1 | 2.125 | 1.16 | 15.0 |
-| pyright@1.1.410 | diagnostics | 13.566 | 373.8 | 16.615 | 1.22 | 2.0 |
-
-
-#### pydantic — constrained · cores=4
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 0.295 | 154.5 | 1.033 | 3.17 | 91.6 |
-| ty@0.0.48 | diagnostics | 0.844 | 193.7 | 2.262 | 2.59 | 32.1 |
-| mypy@2.1.0 | diagnostics | 1.401 | 314.5 | 2.317 | 1.62 | 19.3 |
-| pyright@1.1.410 | diagnostics | 8.557 | 408.7 | 13.091 | 1.52 | 3.2 |
-
-
-#### pydantic — constrained · cores=8
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 0.291 | 169.3 | 1.128 | 3.50 | 92.9 |
-| ty@0.0.48 | diagnostics | 0.609 | 212.0 | 2.428 | 3.79 | 44.4 |
-| mypy@2.1.0 | diagnostics | 1.923 | 470.8 | 3.299 | 1.69 | 14.1 |
-| pyright@1.1.410 | diagnostics | 9.574 | 429.0 | 15.507 | 1.61 | 2.8 |
-
-
-#### pylint — all-cores · all-cores
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 0.433 | 249.2 | 1.752 | 3.77 | 91.8 |
-| ty@0.0.48 | diagnostics | 0.514 | 244.3 | 5.123 | 9.40 | 77.4 |
-| mypy@2.1.0 | diagnostics | 2.499 | 1049.7 | 31.470 | 12.44 | 15.9 |
-| pyright@1.1.410 | diagnostics | 12.423 | 3577.1 | 213.855 | 17.17 | 3.2 |
-
-
-#### pylint — constrained · cores=1
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 1.311 | 185.1 | 1.500 | 1.12 | 30.4 |
-| ty@0.0.48 | diagnostics | 1.498 | 197.0 | 1.568 | 1.03 | 26.6 |
-| mypy@2.1.0 | diagnostics | 2.297 | 144.0 | 2.938 | 1.26 | 17.3 |
-| pyright@1.1.410 | diagnostics | 14.874 | 502.2 | 14.524 | 0.97 | 2.7 |
-
-
-#### pylint — constrained · cores=4
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 0.575 | 202.6 | 1.520 | 2.51 | 69.2 |
-| ty@0.0.48 | diagnostics | 0.640 | 205.5 | 1.873 | 2.79 | 62.2 |
-| mypy@2.1.0 | diagnostics | 1.370 | 342.6 | 2.992 | 2.14 | 29.0 |
-| pyright@1.1.410 | diagnostics | 7.575 | 511.2 | 15.329 | 2.02 | 5.3 |
-
-
-#### pylint — constrained · cores=8
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.429 | 217.2 | 2.817 | 6.13 | 92.8 |
-| pyrefly@1.0.0 | diagnostics | 0.487 | 218.9 | 1.787 | 3.45 | 81.7 |
-| mypy@2.1.0 | diagnostics | 1.455 | 528.5 | 4.604 | 3.10 | 27.4 |
-| pyright@1.1.410 | diagnostics | 7.562 | 513.0 | 15.559 | 2.05 | 5.3 |
-
-
-#### rich — all-cores · all-cores
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.182 | 146.5 | 1.141 | 5.35 | 194.9 |
-| pyrefly@1.0.0 | diagnostics | 0.305 | 182.6 | 1.420 | 4.22 | 116.5 |
-| mypy@2.1.0 | diagnostics | 1.761 | 883.2 | 8.371 | 4.67 | 20.2 |
-| pyright@1.1.410 | diagnostics | 9.011 | 3247.3 | 189.160 | 20.92 | 3.9 |
-
-
-#### rich — constrained · cores=1
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.613 | 103.1 | 0.698 | 1.08 | 58.0 |
-| pyrefly@1.0.0 | diagnostics | 0.690 | 127.1 | 1.005 | 1.39 | 51.5 |
-| mypy@2.1.0 | diagnostics | 1.530 | 104.4 | 1.867 | 1.20 | 23.2 |
-| pyright@1.1.410 | diagnostics | 10.778 | 395.9 | 10.360 | 0.96 | 3.3 |
-
-
-#### rich — constrained · cores=4
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.230 | 110.1 | 0.749 | 2.87 | 154.4 |
-| pyrefly@1.0.0 | diagnostics | 0.422 | 141.9 | 0.736 | 1.63 | 84.3 |
-| mypy@2.1.0 | diagnostics | 1.155 | 289.7 | 2.130 | 1.80 | 30.8 |
-| pyright@1.1.410 | diagnostics | 6.272 | 396.7 | 10.311 | 1.64 | 5.7 |
-
-
-#### rich — constrained · cores=8
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.182 | 119.5 | 0.842 | 3.96 | 195.6 |
-| pyrefly@1.0.0 | diagnostics | 0.345 | 154.5 | 0.936 | 2.49 | 103.0 |
-| mypy@2.1.0 | diagnostics | 1.613 | 454.2 | 2.824 | 1.72 | 22.0 |
-| pyright@1.1.410 | diagnostics | 6.077 | 403.6 | 12.380 | 2.03 | 5.8 |
-
-
-#### sqlalchemy — all-cores · all-cores
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.636 | 647.9 | 7.537 | 11.30 | 314.8 |
-| pyrefly@1.0.0 | diagnostics | 0.682 | 315.7 | 5.681 | 7.97 | 293.5 |
-| mypy@2.1.0 | diagnostics | 6.341 | 1609.7 | 17.675 | 2.77 | 31.6 |
-| pyright@1.1.410 | diagnostics | 31.434 | 7359.1 | 567.415 | 18.03 | 6.4 |
-
-
-#### sqlalchemy — constrained · cores=1
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 2.507 | 203.0 | 2.556 | 1.01 | 79.9 |
-| ty@0.0.48 | diagnostics | 3.878 | 588.7 | 4.680 | 1.20 | 51.6 |
-| mypy@2.1.0 | diagnostics | 7.147 | 277.0 | 7.865 | 1.10 | 28.0 |
-| pyright@1.1.410 | diagnostics | 30.597 | 1186.8 | 36.502 | 1.19 | 6.5 |
-
-
-#### sqlalchemy — constrained · cores=4
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 0.847 | 208.2 | 2.566 | 2.92 | 236.4 |
-| ty@0.0.48 | diagnostics | 1.347 | 597.2 | 4.200 | 3.05 | 148.6 |
-| mypy@2.1.0 | diagnostics | 4.946 | 597.0 | 7.290 | 1.46 | 40.5 |
-| pyright@1.1.410 | diagnostics | 21.866 | 1221.3 | 33.551 | 1.53 | 9.2 |
-
-
-#### sqlalchemy — constrained · cores=8
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 0.653 | 255.0 | 2.885 | 4.22 | 306.6 |
-| ty@0.0.48 | diagnostics | 0.912 | 616.6 | 6.324 | 6.71 | 219.5 |
-| mypy@2.1.0 | diagnostics | 6.123 | 872.5 | 8.843 | 1.44 | 32.7 |
-| pyright@1.1.410 | diagnostics | 19.341 | 1221.6 | 29.420 | 1.52 | 10.4 |
-
-
-#### textual — all-cores · all-cores
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 0.452 | 319.6 | 3.323 | 6.88 | —* |
-| ty@0.0.48 | diagnostics | 0.857 | 352.4 | 6.783 | 7.64 | —* |
-| mypy@2.1.0 | diagnostics | 3.066 | 1349.0 | 10.580 | 3.42 | 23.1 |
-| pyright@1.1.410 | diagnostics | 13.965 | 4863.6 | 293.590 | 20.98 | —* |
-
-
-#### textual — constrained · cores=1
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 1.469 | 245.8 | 1.506 | 1.00 | —* |
-| ty@0.0.48 | diagnostics | 1.781 | 305.0 | 2.149 | 1.19 | —* |
-| mypy@2.1.0 | diagnostics | 3.592 | 198.1 | 3.615 | 1.00 | 19.7 |
-| pyright@1.1.410 | diagnostics | 14.763 | 726.2 | 14.936 | 1.01 | —* |
-
-
-#### textual — constrained · cores=4
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| pyrefly@1.0.0 | diagnostics | 0.670 | 267.1 | 1.998 | 2.85 | —* |
-| ty@0.0.48 | diagnostics | 0.676 | 313.9 | 2.631 | 3.72 | —* |
-| mypy@2.1.0 | diagnostics | 2.726 | 465.2 | 5.031 | 1.82 | 26.0 |
-| pyright@1.1.410 | diagnostics | 8.438 | 728.3 | 15.840 | 1.87 | —* |
-
-
-#### textual — constrained · cores=8
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.530 | 326.0 | 3.277 | 5.84 | —* |
-| pyrefly@1.0.0 | diagnostics | 0.636 | 281.7 | 2.559 | 3.84 | —* |
-| mypy@2.1.0 | diagnostics | 2.551 | 692.7 | 5.440 | 2.11 | 27.8 |
-| pyright@1.1.410 | diagnostics | 8.420 | 738.1 | 16.551 | 1.96 | —* |
-
-
-#### trio — all-cores · all-cores
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.107 | 138.4 | 1.077 | 7.82 | 175.7 |
-| pyrefly@1.0.0 | diagnostics | 0.299 | 172.6 | 1.283 | 3.89 | 62.8 |
-| mypy@2.1.0 | diagnostics | 1.768 | 871.1 | 6.921 | 3.85 | 10.6 |
-| pyright@1.1.410 | diagnostics | 7.511 | 2892.8 | 152.329 | 20.20 | 2.5 |
-
-
-#### trio — constrained · cores=1
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.521 | 95.5 | 0.684 | 1.24 | 36.0 |
-| pyrefly@1.0.0 | diagnostics | 0.634 | 126.7 | 0.733 | 1.10 | 29.6 |
-| mypy@2.1.0 | diagnostics | 1.602 | 105.8 | 1.555 | 0.95 | 11.7 |
-| pyright@1.1.410 | diagnostics | 7.155 | 321.1 | 8.007 | 1.11 | 2.6 |
-
-
-#### trio — constrained · cores=4
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.241 | 103.4 | 0.743 | 2.73 | 77.7 |
-| pyrefly@1.0.0 | diagnostics | 0.322 | 135.7 | 0.885 | 2.51 | 58.2 |
-| mypy@2.1.0 | diagnostics | 1.397 | 297.3 | 2.229 | 1.56 | 13.4 |
-| pyright@1.1.410 | diagnostics | 4.087 | 341.3 | 6.954 | 1.69 | 4.6 |
-
-
-#### trio — constrained · cores=8
-
-| Checker | Result | Wall median (s) | Peak cgroup mem (MB) | CPU time (s) | Parallel eff. (cross-pass) | kLOC/s (code) |
-|------|--------|-----------------|----------------------|--------------|----------------------------|---------------|
-| ty@0.0.48 | diagnostics | 0.166 | 112.9 | 0.809 | 4.10 | 112.7 |
-| pyrefly@1.0.0 | diagnostics | 0.323 | 147.1 | 0.972 | 2.75 | 58.0 |
-| mypy@2.1.0 | diagnostics | 1.346 | 457.6 | 3.449 | 2.51 | 13.9 |
-| pyright@1.1.410 | diagnostics | 3.770 | 330.6 | 9.820 | 2.58 | 5.0 |
-
-
-> kLOC/s denominator is the canonical analyzed code-LOC (tokei; blanks+comments excluded), identical across tools. `—*` = throughput withheld because the tool over-reports its analyzed set vs the canonical denominator. `!` = swap observed during the memory pass, so peak memory may be understated. Parallel efficiency is cross-pass (cold cgroup CPU-time ÷ warm hyperfine wall). Checker issue counts are intentionally omitted — they are not comparable across tools and are not a ranking.
+> Wall is the hyperfine median in seconds, fastest first. **All-cores** uses the whole machine; **1c/4c/8c** are the constrained track pinned to that many cores. Peak mem and kLOC/s are from the all-cores pass. kLOC/s denominator is the canonical analyzed code-LOC (tokei; blanks+comments excluded), identical across tools. `—*` = throughput withheld because the tool over-reports its analyzed set vs the canonical denominator. `!` = swap observed during the memory pass, so peak memory may be understated. Checker issue counts are intentionally omitted — they are not comparable across tools and are not a ranking.
 
 
 > Measured on 13th Gen Intel(R) Core(TM) i7-13850HX (20 cores), Linux 6.18.33.1-microsoft-standard-WSL2; 10 timed runs, 3 warmup. Absolute times are machine-specific — compare rows within the same suite, or the normalized trend lines on the site; do not compare raw seconds across machines.
