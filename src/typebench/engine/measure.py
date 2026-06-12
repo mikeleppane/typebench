@@ -20,7 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from typebench.engine.wrapper import RawRun, run_command, universal_failure_prefix
+from typebench.contracts.proc import RawRun
+from typebench.engine.wrapper import run_command, universal_failure_prefix
 
 if TYPE_CHECKING:
     from collections.abc import Callable
