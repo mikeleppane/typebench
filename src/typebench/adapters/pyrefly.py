@@ -15,9 +15,8 @@ from typing import TYPE_CHECKING
 
 from typebench.adapters._support import confirm_clean, probe_version
 from typebench.adapters.base import ParallelismCap, coerce_count
-from typebench.contracts.models import ResultClass, ThreadMode
 from typebench.contracts.policy import PRESETS, CheckerPosture, Policy
-from typebench.contracts.taxonomy import is_constrained
+from typebench.contracts.taxonomy import ResultClass, ThreadMode, is_constrained
 from typebench.engine.proc import SYSTEM_HOST
 from typebench.engine.wrapper import universal_failure_prefix
 

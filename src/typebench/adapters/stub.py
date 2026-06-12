@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from typebench.contracts.config import NormalizedConfig
-    from typebench.contracts.models import ResultClass, ThreadMode
+    from typebench.contracts.taxonomy import ResultClass, ThreadMode
     from typebench.engine.wrapper import RawRun
 
 

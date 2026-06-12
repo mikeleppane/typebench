@@ -20,8 +20,8 @@ if TYPE_CHECKING:
 
     from typebench.contracts.config import NormalizedConfig
     from typebench.contracts.identity import CheckerRuntime, CheckerSpec
-    from typebench.contracts.models import ResultClass, ThreadMode
     from typebench.contracts.proc import RawRun
+    from typebench.contracts.taxonomy import ResultClass, ThreadMode
 
 
 @dataclass(frozen=True)
