@@ -6,6 +6,7 @@ import pytest
 import typebench.suite.runner as runner_mod
 from typebench.adapters.base import CheckerHandle
 from typebench.adapters.stub import StubAdapter
+from typebench.contracts.config import MeasurementPlan, NormalizedConfig
 from typebench.contracts.identity import CheckerRuntime, CheckerSpec
 from typebench.contracts.models import (
     CalibrationStats,
@@ -26,6 +27,7 @@ from typebench.engine.collector import RunManifest
 from typebench.suite.runner import SuiteCell, build_matrix, run_suite, shard
 
 type EnvFactory = Callable[..., EnvFingerprint]
+type CellKey = tuple[str, str, ThreadMode, int | None]
 
 
 def test_build_matrix_is_project_major() -> None:
@@ -241,6 +243,8 @@ class FakeEngine:
     make_env: EnvFactory
     report: PreflightReport | None = None
     run_should_fail: bool = False
+    preflight_failures: set[str] = field(default_factory=set)
+    run_cell_failures: set[CellKey] = field(default_factory=set)
     calibration_calls: list[int] = field(default_factory=list)
     preflight_timeouts: list[float] = field(default_factory=list)
     run_manifests: list[RunManifest] = field(default_factory=list)
@@ -260,6 +264,8 @@ class FakeEngine:
         policy: Policy,
     ) -> PreflightReport:
         self.preflight_timeouts.append(timeout)
+        if prepared.name in self.preflight_failures:
+            raise RuntimeError(f"preflight exploded for {prepared.name}")
         if self.report is not None:
             return self.report
         return _ready_report(prepared.name, [checker.tool for checker in checkers])
@@ -269,15 +275,17 @@ class FakeEngine:
         checker: CheckerHandle,
         *,
         project: str,
-        config: object,
+        config: NormalizedConfig,
         thread_mode: ThreadMode,
-        plan: object,
+        plan: MeasurementPlan,
         manifest: RunManifest,
         calibration: CalibrationStats | None,
         policy: Policy,
     ) -> RunResult:
         if self.run_should_fail:
             raise AssertionError("run_cell must NOT be called")
+        if (project, checker.checker_id, thread_mode, config.cores) in self.run_cell_failures:
+            raise RuntimeError(f"run_cell exploded for {project} {checker.checker_id}")
         self.events.append("run_cell")
         self.run_manifests.append(manifest)
         self.run_plans.append(plan)
@@ -431,6 +439,71 @@ def test_run_suite_excluded_project_emits_failed_records(make_env: EnvFactory) -
     assert rec.result_class == ResultClass.FAILED_ENV
     assert rec.error_detail is not None and "pyrefly env error" in rec.error_detail
     assert rec.checker_id == "stub@1.0"
+
+
+def test_run_suite_preflight_crash_emits_failed_env_for_all_cells(
+    make_env: EnvFactory,
+) -> None:
+    envelope = run_suite(
+        config=RunConfig(
+            checkers=(CheckerSpec(tool="stub", version="1.0"),),
+            thread_modes=(ThreadMode.ALL_CORES, ThreadMode.CONSTRAINED),
+            runs=1,
+            warmup=1,
+            timeout=10,
+            mem_runs=1,
+            measure=False,
+            calibrate=False,
+        ),
+        corpus=FakeCorpus([_entry("demo"), _entry("second")]),
+        resolver=FakeResolver(),
+        engine=FakeEngine(make_env, preflight_failures={"demo"}),
+        generated_at="t",
+    )
+
+    demo_records = [record for record in envelope.runs if record.project == "demo"]
+    second_records = [record for record in envelope.runs if record.project == "second"]
+
+    assert len(demo_records) == 2
+    assert all(record.result_class is ResultClass.FAILED_ENV for record in demo_records)
+    assert all(record.failure_phase is FailurePhase.PROBE for record in demo_records)
+    assert all("preflight crashed" in (record.error_detail or "") for record in demo_records)
+    assert len(second_records) == 2
+    assert all(record.result_class is ResultClass.CLEAN for record in second_records)
+
+
+def test_run_suite_run_cell_crash_emits_failed_env_for_that_cell(
+    make_env: EnvFactory,
+) -> None:
+    envelope = run_suite(
+        config=RunConfig(
+            checkers=(CheckerSpec(tool="stub", version="1.0"),),
+            thread_modes=(ThreadMode.ALL_CORES, ThreadMode.CONSTRAINED),
+            runs=1,
+            warmup=1,
+            timeout=10,
+            mem_runs=1,
+            measure=False,
+            calibrate=False,
+        ),
+        corpus=FakeCorpus([_entry("demo")]),
+        resolver=FakeResolver(),
+        engine=FakeEngine(
+            make_env,
+            run_cell_failures={("demo", "stub@1.0", ThreadMode.ALL_CORES, 1)},
+        ),
+        generated_at="t",
+    )
+
+    crashed = [record for record in envelope.runs if record.thread_mode is ThreadMode.ALL_CORES]
+    siblings = [record for record in envelope.runs if record.thread_mode is ThreadMode.CONSTRAINED]
+
+    assert len(crashed) == 1
+    assert crashed[0].result_class is ResultClass.FAILED_ENV
+    assert crashed[0].failure_phase is FailurePhase.PROBE
+    assert "run_cell crashed" in (crashed[0].error_detail or "")
+    assert len(siblings) == 1
+    assert siblings[0].result_class is ResultClass.CLEAN
 
 
 def test_run_suite_checker_resolve_failure_emits_failed_records(
