@@ -112,6 +112,10 @@ def test_measured_path_imports_stay_pydantic_free() -> None:
         "import typebench.engine.measure\n"
         "import typebench.engine.calibration\n"
         "import typebench.contracts.taxonomy\n"
+        # fake_checker ships in the wheel and runs as `python -m
+        # typebench._internal.fake_checker` under the stub's measured path, so it
+        # must stay pydantic-free too.
+        "import typebench._internal.fake_checker\n"
         "bad = sorted(m for m in sys.modules if m.split('.')[0] == 'pydantic')\n"
         "assert not bad, bad\n"
     )
@@ -122,6 +126,29 @@ def test_measured_path_imports_stay_pydantic_free() -> None:
         check=False,
     )
     assert proc.returncode == 0, proc.stderr
+
+
+def test_runtime_import_visitor_catches_from_package_import_form() -> None:
+    # `from typebench import cli` imports the cli submodule but leaves node.module
+    # as the bare "typebench"; the visitor must still resolve it to typebench.cli,
+    # else an upward import written this way would evade the layering check.
+    tree = ast.parse("from typebench import cli, engine\nimport typebench.suite.runner\n")
+    assert _runtime_internal_imports(tree) == [
+        "typebench.cli",
+        "typebench.engine",
+        "typebench.suite.runner",
+    ]
+
+
+def test_runtime_import_visitor_skips_type_checking_block() -> None:
+    tree = ast.parse(
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    from typebench import cli\n"
+        "import typebench.engine.timing\n"
+    )
+    # The TYPE_CHECKING import is excluded; only the runtime import is recorded.
+    assert _runtime_internal_imports(tree) == ["typebench.engine.timing"]
 
 
 def _imports_subprocess(node: ast.AST) -> bool:
@@ -166,7 +193,15 @@ class _RuntimeInternalImportVisitor(ast.NodeVisitor):
 
     @override
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        if node.module is not None and node.module.startswith("typebench."):
+        if node.module is None:
+            return
+        if node.module == "typebench":
+            # `from typebench import engine` -> the imported name IS the submodule,
+            # so resolve each alias to typebench.<name>; otherwise this form evades
+            # the layer check entirely (the module is bare "typebench").
+            for alias in node.names:
+                self.imports.append(f"typebench.{alias.name}")
+        elif node.module.startswith("typebench."):
             self.imports.append(node.module)
 
 
