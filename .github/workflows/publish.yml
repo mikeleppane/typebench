@@ -6,12 +6,14 @@ name: publish
 # This job does NOT measure anything — official numbers are produced on the
 # maintainer's benchmark PC and committed to data/official/ (hosted runners are
 # too noisy for trustworthy timings; see docs/plans/2026-06-10-results-representation.md).
-# Here we only transform committed JSON into README tables + trends.json.
+# Here we only render site/data/trends.json from committed JSON and deploy the site.
 #
-# Loop safety: the only file committed back to the branch is README.md, which is
-# deliberately absent from the `paths` filter below, so the bot push cannot
-# re-trigger this workflow. site/data/trends.json is gitignored — it is rebuilt
-# here and shipped as a Pages artifact, never committed.
+# This workflow never commits back to main. The README results block is rendered
+# and committed by the author in the same PR that changes data/official/ or the
+# renderer, and the smoke `quality` job fails if README is stale (it re-renders and
+# diffs). That keeps README in sync without CI pushing to a protected branch.
+# site/data/trends.json is gitignored — it is rebuilt here and shipped as a Pages
+# artifact, never committed.
 
 on:
   push:
@@ -23,7 +25,7 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: write # commit the refreshed README.md back to main
+  contents: read # read-only: this workflow never pushes to the branch
   pages: write # deploy to GitHub Pages
   id-token: write # OIDC token for the Pages deployment
 
@@ -48,24 +50,15 @@ jobs:
       - name: Sync project
         run: uv sync --frozen
 
-      - name: Render README + trends
+      - name: Render trends for the Pages site
+        # Renders site/data/trends.json (the only artifact input). README is also
+        # written into the runner checkout but never committed — the committed
+        # README is kept fresh by the author + the smoke `quality` gate instead.
         run: >
           uv run typebench render
           --results-dir data/official
           --readme README.md
           --trends site/data/trends.json
-
-      - name: Commit refreshed README
-        run: |
-          if git diff --quiet -- README.md; then
-            echo "README unchanged — nothing to commit."
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add README.md
-            git commit -m "docs(readme): refresh benchmark results [skip ci]"
-            git push origin HEAD:main
-          fi
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v5
