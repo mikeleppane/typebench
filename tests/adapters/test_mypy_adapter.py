@@ -213,6 +213,39 @@ def test_version_is_no_raise_when_binary_absent() -> None:
     assert MypyAdapter(host=host).version() == "unknown"
 
 
+def test_mypy_version_is_probed_once_per_binary(tmp_path: Path) -> None:
+    host = FakeHost({("mypy", "--version"): fake_raw(stdout="mypy 2.1.0 (compiled: yes)\n")})
+    adapter = MypyAdapter(host=host)
+    cfg = NormalizedConfig(src_roots=("/abs/src",), cores=4)
+
+    assert adapter.version() == "mypy 2.1.0 (compiled: yes)"
+    adapter.command("demo", cfg, ThreadMode.CONSTRAINED, tmp_path)
+    adapter.parallelism_cap(ThreadMode.CONSTRAINED, 4)
+
+    version_probe_count = sum(call.argv == ("mypy", "--version") for call in host.calls)
+    assert version_probe_count == 1
+
+
+def test_mypy_version_distinct_binaries_probe_independently() -> None:
+    host = FakeHost(
+        {
+            ("mypy", "--version"): fake_raw(stdout="mypy 2.1.0 (compiled: yes)\n"),
+            ("/opt/mypy", "--version"): fake_raw(stdout="mypy 2.1.0 (compiled: yes)\n"),
+        }
+    )
+    adapter = MypyAdapter(host=host)
+
+    assert adapter.version() == "mypy 2.1.0 (compiled: yes)"
+    assert adapter.version("/opt/mypy") == "mypy 2.1.0 (compiled: yes)"
+    assert adapter.version() == "mypy 2.1.0 (compiled: yes)"
+    assert adapter.version("/opt/mypy") == "mypy 2.1.0 (compiled: yes)"
+
+    default_probe_count = sum(call.argv == ("mypy", "--version") for call in host.calls)
+    explicit_probe_count = sum(call.argv == ("/opt/mypy", "--version") for call in host.calls)
+    assert default_probe_count == 1
+    assert explicit_probe_count == 1
+
+
 def test_missing_mypy_yields_schema_valid_failed_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PATH", "")
     cfg = NormalizedConfig(src_roots=("/abs/src",))

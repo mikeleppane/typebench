@@ -94,9 +94,15 @@ class MypyAdapter:
 
     def __init__(self, host: ProcessHost = SYSTEM_HOST) -> None:
         self._host = host
+        self._version_cache: dict[str | None, str] = {}
 
     def version(self, binary: str | None = None) -> str:
-        return probe_version([binary or "mypy", "--version"], host=self._host)
+        cached = self._version_cache.get(binary)
+        if cached is not None:
+            return cached
+        version = probe_version([binary or "mypy", "--version"], host=self._host)
+        self._version_cache[binary] = version
+        return version
 
     def install(self) -> str:
         # Records the version string, which carries "(compiled: yes)" for the lock
