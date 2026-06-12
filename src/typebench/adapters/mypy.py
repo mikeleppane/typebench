@@ -17,9 +17,8 @@ from typing import TYPE_CHECKING
 
 from typebench.adapters._support import confirm_clean, probe_version
 from typebench.adapters.base import ParallelismCap
-from typebench.contracts.models import ResultClass, ThreadMode
 from typebench.contracts.policy import PRESETS, CheckerPosture, Policy
-from typebench.contracts.taxonomy import is_constrained
+from typebench.contracts.taxonomy import ResultClass, ThreadMode, is_constrained
 from typebench.engine.proc import SYSTEM_HOST
 from typebench.engine.wrapper import universal_failure_prefix
 
@@ -95,9 +94,15 @@ class MypyAdapter:
 
     def __init__(self, host: ProcessHost = SYSTEM_HOST) -> None:
         self._host = host
+        self._version_cache: dict[str | None, str] = {}
 
     def version(self, binary: str | None = None) -> str:
-        return probe_version([binary or "mypy", "--version"], host=self._host)
+        cached = self._version_cache.get(binary)
+        if cached is not None:
+            return cached
+        version = probe_version([binary or "mypy", "--version"], host=self._host)
+        self._version_cache[binary] = version
+        return version
 
     def install(self) -> str:
         # Records the version string, which carries "(compiled: yes)" for the lock

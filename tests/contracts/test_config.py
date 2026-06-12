@@ -1,8 +1,14 @@
 import dataclasses
+from collections.abc import Callable
 
 import pytest
 
-from typebench.contracts.config import NORMALIZED_POLICY_VERSION, NormalizedConfig, config_hash
+from typebench.contracts.config import (
+    NORMALIZED_POLICY_VERSION,
+    MeasurementPlan,
+    NormalizedConfig,
+    config_hash,
+)
 
 
 def test_defaults_are_neutral() -> None:
@@ -53,3 +59,28 @@ def test_config_hash_changes_on_policy_or_inputs() -> None:
     assert base != config_hash(("httpx",), ("**/tests/**",), "3.12", "darwin")
     assert base != config_hash(("other",), ("**/tests/**",), "3.12", "linux")
     assert NORMALIZED_POLICY_VERSION  # non-empty tag is part of the payload
+
+
+def test_measurement_plan_accepts_valid_knobs() -> None:
+    plan = MeasurementPlan(runs=10, warmup=3, timeout_s=900.0, mem_runs=3, measure=True)
+    assert plan.runs == 10
+    assert plan.mem_runs == 3
+
+
+@pytest.mark.parametrize(
+    ("plan_factory", "match"),
+    [
+        (lambda: MeasurementPlan(runs=0), "runs"),
+        (lambda: MeasurementPlan(warmup=-1), "warmup"),
+        (lambda: MeasurementPlan(timeout_s=0.0), "timeout_s"),
+        (lambda: MeasurementPlan(mem_runs=0), "mem_runs"),
+    ],
+)
+def test_measurement_plan_rejects_out_of_range_knob(
+    plan_factory: Callable[[], MeasurementPlan], match: str
+) -> None:
+    # These bounds are the invariant run_single used to guard inline (the mem_runs
+    # check in particular); they now live only in MeasurementPlan.__post_init__, so
+    # they must be enforced at construction on every call path.
+    with pytest.raises(ValueError, match=match):
+        plan_factory()

@@ -268,6 +268,22 @@ def test_prepare_project_cleans_partial_dest_on_failure(tmp_path: Path) -> None:
     assert prepared.canonical_files == 2
 
 
+def test_prepare_project_unexpected_failure_removes_partial_dest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = tmp_path / "cache"
+    run = _CloningHost({("uv", "pip"): fake_raw(stdout="idna==3.0\n")})
+
+    def _boom(_roots: object, _exclude_globs: object) -> object:
+        raise RuntimeError("unexpected count failure")
+
+    monkeypatch.setattr(typebench.corpus.envman, "count_first_party", _boom)
+    with pytest.raises(RuntimeError, match="unexpected count failure"):
+        prepare_project(_httpx_entry(), cache, host=run)
+
+    assert not (cache / "demo@abc123").exists()
+
+
 def test_prepare_project_rejects_missing_src_root(tmp_path: Path) -> None:
     cache = tmp_path / "cache"
     run = _CloningHost({("uv", "pip"): fake_raw(stdout="idna==3.0\n")})
@@ -365,6 +381,17 @@ def _prepared_stub(code_loc: int | None) -> PreparedProject:
         canonical_code_loc=code_loc,
         fingerprint="fp",
     )
+
+
+def test_write_sidecar_atomic_leaves_no_tmp_and_round_trips(tmp_path: Path) -> None:
+    sidecar = tmp_path / "nested" / _SIDECAR
+    prepared = _prepared_stub(42)
+
+    typebench.corpus.envman._write_sidecar_atomic(sidecar, prepared.model_dump_json(indent=2))
+
+    assert sidecar.exists()
+    assert not list(sidecar.parent.glob("*.tmp"))
+    assert PreparedProject.model_validate_json(sidecar.read_text(encoding="utf-8")) == prepared
 
 
 def test_backfill_code_loc_refreshes_missing_count(

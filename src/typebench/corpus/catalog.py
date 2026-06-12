@@ -44,6 +44,18 @@ class CorpusProject(BaseModel):
     # always excluded; restricted to dir-segment globs by the validator.
     exclude_globs: tuple[str, ...] = ()
 
+    @field_validator("name")
+    @classmethod
+    def _name_is_cache_path_safe(cls, name: str) -> str:
+        """Reject corpus names that could escape the cache root."""
+        return _cache_path_safe("name", name)
+
+    @field_validator("sha")
+    @classmethod
+    def _sha_is_cache_path_safe(cls, sha: str) -> str:
+        """Reject corpus SHAs that could escape the cache root."""
+        return _cache_path_safe("sha", sha)
+
     @field_validator("exclude_globs")
     @classmethod
     def _only_dir_segment_globs(cls, globs: tuple[str, ...]) -> tuple[str, ...]:
@@ -58,6 +70,16 @@ class CorpusProject(BaseModel):
     def effective_excludes(self) -> tuple[str, ...]:
         """Return the default excludes followed by this entry's extensions."""
         return DEFAULT_EXCLUDES + self.exclude_globs
+
+
+def _cache_path_safe(field: str, value: str) -> str:
+    if not value or value.strip() != value:
+        msg = f"{field} must be non-empty and have no leading or trailing whitespace"
+        raise ValueError(msg)
+    if "/" in value or "\\" in value or ".." in value or "\x00" in value:
+        msg = f"{field} must not contain path separators, '..', or NUL"
+        raise ValueError(msg)
+    return value
 
 
 def load_suite(path: Path) -> list[CorpusProject]:

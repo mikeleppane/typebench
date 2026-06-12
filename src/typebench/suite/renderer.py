@@ -4,7 +4,7 @@ No filesystem I/O here (the CLI does it); golden-tested. Hard rules: diagnostics
 counts are NEVER a headline column; kLOC/s uses the canonical code-LOC denominator
 and is withheld for over-reporting tools. The README results block is one compact
 table per project (ecosystem library), grouped into size tiers, folding the
-all-cores and constrained 1/4/8-core walls into columns.
+all-cores and constrained core-sweep walls into columns.
 """
 
 from __future__ import annotations
@@ -179,11 +179,12 @@ def _bold_best(
 def _compact_table(
     records: list[RunResult],
     *,
+    constrained_cores: tuple[int, ...],
     harness_mem_baseline_bytes: int | None,
     harness_wall_overhead_s: float | None,
 ) -> str:
     """One row per checker for a single project: all-cores wall + the constrained
-    1/4/8-core sweep folded into columns, plus peak mem and kLOC/s from the all-cores
+    core sweep folded into columns, plus peak mem and kLOC/s from the all-cores
     pass. Fastest (all-cores wall) first; the best cell in each metric column is bold."""
     by_checker: dict[str, dict[tuple[str, int | None], RunResult]] = {}
     for r in records:
@@ -227,18 +228,18 @@ def _compact_table(
             {cid: wall_cell(by_checker[cid].get(("constrained", c))) for cid in cids},
             higher_is_better=False,
         )
-        for c in _CONSTRAINED_CORES
+        for c in constrained_cores
     }
     mem_col = _bold_best({cid: mem_cell(all_cores(cid)) for cid in cids}, higher_is_better=False)
     kloc_col = _bold_best({cid: kloc_cell(all_cores(cid)) for cid in cids}, higher_is_better=True)
 
-    header = (
-        "| Checker | All-cores | 1c | 4c | 8c | Peak mem (MB) | kLOC/s |\n"
-        "|------|--:|--:|--:|--:|--:|--:|\n"
-    )
+    constrained_headers = [f"{cores}c" for cores in constrained_cores]
+    headers = ["Checker", "All-cores", *constrained_headers, "Peak mem (MB)", "kLOC/s"]
+    alignments = ["------", *["--:"] * (len(headers) - 1)]
+    header = f"| {' | '.join(headers)} |\n|{'|'.join(alignments)}|\n"
     rows: list[str] = []
     for cid in cids:
-        cells = [all_col[cid]] + [sweep_cols[c][cid] for c in _CONSTRAINED_CORES]
+        cells = [all_col[cid]] + [sweep_cols[c][cid] for c in constrained_cores]
         cells += [mem_col[cid], kloc_col[cid]]
         rows.append(f"| {cid} | " + " | ".join(cells) + " |")
     return header + "\n".join(rows) + "\n"
@@ -246,8 +247,9 @@ def _compact_table(
 
 _FOOTNOTE = (
     "\n> Wall is the hyperfine median in seconds, fastest first; the best cell in each metric "
-    "column is in **bold**. **All-cores** uses the whole machine; **1c/4c/8c** are the "
-    "constrained track pinned to that many cores. Peak mem and kLOC/s are from the all-cores "
+    "column is in **bold**. **All-cores** uses the whole machine; the per-core columns are the "
+    "constrained track, each pinned to the core count in its header. Peak mem and kLOC/s are from "
+    "the all-cores "
     "pass. kLOC/s denominator is the canonical analyzed code-LOC, identical across tools. "
     "`—*` = throughput withheld because the tool over-reports its analyzed set vs the canonical "
     "denominator. `!` = swap observed during the memory pass, so peak memory may be "
@@ -282,6 +284,9 @@ def _result_tables(envelope: ResultsEnvelope) -> list[str]:
     for record in envelope.runs:
         by_project.setdefault(record.project, []).append(record)
     rep = {project: recs[0] for project, recs in by_project.items()}
+    constrained_cores = (
+        envelope.run_config.cores if envelope.run_config is not None else _CONSTRAINED_CORES
+    )
 
     def project_key(project: str) -> tuple[int, int, str]:
         rec = rep[project]
@@ -301,6 +306,7 @@ def _result_tables(envelope: ResultsEnvelope) -> list[str]:
         parts.append(
             _compact_table(
                 by_project[project],
+                constrained_cores=constrained_cores,
                 harness_mem_baseline_bytes=envelope.harness_mem_baseline_bytes,
                 harness_wall_overhead_s=envelope.harness_wall_overhead_s,
             )

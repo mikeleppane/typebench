@@ -12,7 +12,8 @@ import argparse
 import os
 import subprocess
 import sys
-from typing import TYPE_CHECKING
+from contextlib import suppress
+from typing import TYPE_CHECKING, Final
 
 from typebench.contracts.proc import RawRun
 from typebench.contracts.taxonomy import ResultClass
@@ -25,6 +26,22 @@ if TYPE_CHECKING:
 # non-cgroup probe path. The cgroup-scoped resource pass sets RawRun.oom
 # authoritatively from memory.events.oom_kill when available.
 _SIGKILL = 9
+# Bounds the post-kill pipe drain when a detached grandchild survives and keeps
+# stdout/stderr open after the benchmarked process group was killed.
+_DRAIN_TIMEOUT_S: Final = 10.0
+
+
+def _close_pipes(proc: subprocess.Popen[str]) -> None:
+    for pipe in (proc.stdout, proc.stderr):
+        if pipe is None:
+            continue
+        with suppress(OSError):
+            pipe.close()
+
+
+def _kill_again(proc: subprocess.Popen[str]) -> None:
+    with suppress(OSError):
+        proc.kill()
 
 
 def _terminate_tree(proc: subprocess.Popen[str]) -> None:
@@ -82,7 +99,12 @@ def run_command(
             stdout, stderr = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired:
             _terminate_tree(proc)
-            stdout, stderr = proc.communicate()
+            try:
+                stdout, stderr = proc.communicate(timeout=_DRAIN_TIMEOUT_S)
+            except subprocess.TimeoutExpired:
+                _close_pipes(proc)
+                _kill_again(proc)
+                stdout, stderr = "", ""
             return RawRun(
                 exit_code=-1,
                 signal=None,

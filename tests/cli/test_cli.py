@@ -2,11 +2,12 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+import typer
 from typer.testing import CliRunner, Result
 
 from typebench import cli
 from typebench.cli import app
-from typebench.contracts.config import NormalizedConfig
+from typebench.contracts.config import MeasurementPlan, NormalizedConfig
 from typebench.contracts.models import (
     CalibrationStats,
     EnvFingerprint,
@@ -90,6 +91,19 @@ def test_cli_run_rejects_unwritable_output_dir(tmp_path: Path) -> None:
     assert "writable" in result.output.lower()
 
 
+def test_assert_output_writable_raises_exit_when_parent_missing(tmp_path: Path) -> None:
+    missing = tmp_path / "does-not-exist" / "results.json"
+
+    with pytest.raises(typer.Exit) as exc_info:
+        cli._assert_output_writable(missing)
+
+    assert exc_info.value.exit_code == 2
+
+
+def test_assert_output_writable_passes_for_writable_dir(tmp_path: Path) -> None:
+    cli._assert_output_writable(tmp_path / "out.json")
+
+
 def test_run_passes_measure_and_calibration_flags(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, make_env: EnvFactory
 ) -> None:
@@ -132,7 +146,9 @@ def test_run_passes_measure_and_calibration_flags(
         ]
     )
     assert result.exit_code == 0
-    assert captured["mem_runs"] == 4
+    plan = captured["plan"]
+    assert isinstance(plan, MeasurementPlan)
+    assert plan.mem_runs == 4
     assert captured["calibration"] is None
 
 
@@ -245,6 +261,9 @@ def test_run_corpus_mode_builds_manifest(
     assert man.canonical_code_loc == 3200
     assert man.tool_install_source == "PyPI wheel (mypyc-compiled)"
     assert man.config_hash is not None and len(man.config_hash) == 64
+    plan = captured["plan"]
+    assert isinstance(plan, MeasurementPlan)
+    assert plan.measure is False
 
 
 def test_run_threads_cores_into_normalized_config(

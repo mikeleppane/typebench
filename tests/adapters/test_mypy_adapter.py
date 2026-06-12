@@ -7,7 +7,7 @@ from typebench._internal.test_fakes import FakeHost, fake_raw
 from typebench.adapters import mypy as mypy_mod
 from typebench.adapters.base import Adapter
 from typebench.adapters.mypy import MypyAdapter
-from typebench.contracts.config import NormalizedConfig
+from typebench.contracts.config import MeasurementPlan, NormalizedConfig
 from typebench.contracts.models import ResultClass, RunResult, ThreadMode
 from typebench.engine.collector import run_single
 from typebench.engine.wrapper import RawRun, run_command
@@ -213,6 +213,39 @@ def test_version_is_no_raise_when_binary_absent() -> None:
     assert MypyAdapter(host=host).version() == "unknown"
 
 
+def test_mypy_version_is_probed_once_per_binary(tmp_path: Path) -> None:
+    host = FakeHost({("mypy", "--version"): fake_raw(stdout="mypy 2.1.0 (compiled: yes)\n")})
+    adapter = MypyAdapter(host=host)
+    cfg = NormalizedConfig(src_roots=("/abs/src",), cores=4)
+
+    assert adapter.version() == "mypy 2.1.0 (compiled: yes)"
+    adapter.command("demo", cfg, ThreadMode.CONSTRAINED, tmp_path)
+    adapter.parallelism_cap(ThreadMode.CONSTRAINED, 4)
+
+    version_probe_count = sum(call.argv == ("mypy", "--version") for call in host.calls)
+    assert version_probe_count == 1
+
+
+def test_mypy_version_distinct_binaries_probe_independently() -> None:
+    host = FakeHost(
+        {
+            ("mypy", "--version"): fake_raw(stdout="mypy 2.1.0 (compiled: yes)\n"),
+            ("/opt/mypy", "--version"): fake_raw(stdout="mypy 2.1.0 (compiled: yes)\n"),
+        }
+    )
+    adapter = MypyAdapter(host=host)
+
+    assert adapter.version() == "mypy 2.1.0 (compiled: yes)"
+    assert adapter.version("/opt/mypy") == "mypy 2.1.0 (compiled: yes)"
+    assert adapter.version() == "mypy 2.1.0 (compiled: yes)"
+    assert adapter.version("/opt/mypy") == "mypy 2.1.0 (compiled: yes)"
+
+    default_probe_count = sum(call.argv == ("mypy", "--version") for call in host.calls)
+    explicit_probe_count = sum(call.argv == ("/opt/mypy", "--version") for call in host.calls)
+    assert default_probe_count == 1
+    assert explicit_probe_count == 1
+
+
 def test_missing_mypy_yields_schema_valid_failed_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PATH", "")
     cfg = NormalizedConfig(src_roots=("/abs/src",))
@@ -221,9 +254,7 @@ def test_missing_mypy_yields_schema_valid_failed_env(monkeypatch: pytest.MonkeyP
         project="demo",
         config=cfg,
         thread_mode=ThreadMode.CONSTRAINED,
-        warmup=1,
-        runs=2,
-        timeout=10,
+        plan=MeasurementPlan(warmup=1, runs=2, timeout_s=10),
     )
     assert isinstance(result, RunResult)
     assert result.result_class == ResultClass.FAILED_ENV

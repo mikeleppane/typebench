@@ -26,7 +26,7 @@ from typebench.engine.wrapper import run_command
 
 if TYPE_CHECKING:
     from typebench.adapters.base import Adapter
-    from typebench.contracts.config import NormalizedConfig
+    from typebench.contracts.config import MeasurementPlan, NormalizedConfig
     from typebench.contracts.models import CalibrationStats
 
 
@@ -87,16 +87,12 @@ def _apply_affinity(argv: list[str], thread_mode: ThreadMode, cores: int) -> tup
     return (argv, False)
 
 
-def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threaded from the CLI; the probe→time→assemble phases intentionally share ONE workdir scope because the workdir must outlive every timed run, so they stay in one function by design
+def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration identity/context knobs; MeasurementPlan groups the execution knobs, and the probe→time→assemble phases intentionally share ONE workdir scope because the workdir must outlive every timed run
     adapter: Adapter,
     project: str,
     config: NormalizedConfig,
     thread_mode: ThreadMode,
-    warmup: int,
-    runs: int,
-    timeout: float,
-    mem_runs: int = 3,
-    measure_enabled: bool = True,
+    plan: MeasurementPlan,
     calibration: CalibrationStats | None = None,
     manifest: RunManifest | None = None,
     binary: str | None = None,
@@ -104,8 +100,7 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
     policy: Policy = Policy.STANDARD,
     headline_eligible: bool = True,
 ) -> RunResult:
-    if mem_runs < 1:
-        raise ValueError(f"mem_runs must be >= 1, got {mem_runs}")
+    # MeasurementPlan validates runs/warmup/timeout/memory knobs at construction.
     # Lock-manifest stamp. loc_denominator records which throughput denominator
     # the headline kLOC/s should use: "code" when tokei produced a
     # reconciled code-LOC, else "physical". None when no canonical denominator
@@ -178,13 +173,13 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
         # to a plain run_command so the record is NEVER dropped. The prepare
         # callback clears the checker cache before each cold repeat.
         resource: measure.ResourceResult | None = None
-        if measure_enabled and _resource_capable():
+        if plan.measure and _resource_capable():
             try:
                 resource = _scoped_probe(
                     argv,
                     extra_env=extra_env,
-                    timeout=timeout,
-                    repeats=mem_runs,
+                    timeout=plan.timeout_s,
+                    repeats=plan.mem_runs,
                     prepare=lambda: adapter.clear_cache(project),
                 )
             except (
@@ -202,7 +197,7 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
             memory_summary = resource.memory
             cpu_time_s = resource.cpu_time_s
         else:
-            raw = run_command(argv, timeout=timeout, env=extra_env)
+            raw = run_command(argv, timeout=plan.timeout_s, env=extra_env)
             memory_summary = None
             cpu_time_s = None
         result_class = adapter.classify(raw)
@@ -221,9 +216,9 @@ def run_single(  # noqa: PLR0913, PLR0915 — distinct orchestration knobs threa
                 timing = run_timing(
                     argv,
                     prepare_cmd=adapter.prepare_command(project),
-                    warmup=warmup,
-                    runs=runs,
-                    timeout=timeout,
+                    warmup=plan.warmup,
+                    runs=plan.runs,
+                    timeout=plan.timeout_s,
                     extra_env=extra_env,
                 )
             except TimingCommandError as exc:

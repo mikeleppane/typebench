@@ -2,12 +2,114 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Mapping
 from pathlib import Path
+from types import TracebackType
+from typing import ClassVar
 
 import pytest
 
 from typebench.contracts.models import ResultClass
+from typebench.engine import wrapper
 from typebench.engine.wrapper import RawRun, classify_default, run_command, universal_failure_prefix
+
+
+class _ClosablePipe:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _timeout_expired(argv: list[str], timeout: float | None) -> subprocess.TimeoutExpired:
+    return subprocess.TimeoutExpired(argv, timeout if timeout is not None else 0.0)
+
+
+class _TimeoutThenBlockedDrainPopen:
+    created: ClassVar["_TimeoutThenBlockedDrainPopen | None"] = None
+
+    def __init__(
+        self,
+        argv: list[str],
+        *,
+        stdout: int,
+        stderr: int,
+        text: bool,
+        env: Mapping[str, str] | None,
+        cwd: Path | None,
+        start_new_session: bool,
+    ) -> None:
+        self.argv = argv
+        self.communicate_calls = 0
+        self.kill_calls = 0
+        self.pid = 12345
+        self.returncode: int | None = None
+        self.stdout = _ClosablePipe()
+        self.stderr = _ClosablePipe()
+        _TimeoutThenBlockedDrainPopen.created = self
+
+    def __enter__(self) -> "_TimeoutThenBlockedDrainPopen":
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        return None
+
+    def kill(self) -> None:
+        self.kill_calls += 1
+
+    def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+        self.communicate_calls += 1
+        raise _timeout_expired(self.argv, timeout)
+
+
+class _TimeoutThenCleanDrainPopen:
+    created: ClassVar["_TimeoutThenCleanDrainPopen | None"] = None
+
+    def __init__(
+        self,
+        argv: list[str],
+        *,
+        stdout: int,
+        stderr: int,
+        text: bool,
+        env: Mapping[str, str] | None,
+        cwd: Path | None,
+        start_new_session: bool,
+    ) -> None:
+        self.argv = argv
+        self.communicate_calls = 0
+        self.kill_calls = 0
+        self.pid = 12345
+        self.returncode: int | None = None
+        self.stdout = _ClosablePipe()
+        self.stderr = _ClosablePipe()
+        _TimeoutThenCleanDrainPopen.created = self
+
+    def __enter__(self) -> "_TimeoutThenCleanDrainPopen":
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        return None
+
+    def kill(self) -> None:
+        self.kill_calls += 1
+
+    def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+        self.communicate_calls += 1
+        if self.communicate_calls == 1:
+            raise _timeout_expired(self.argv, timeout)
+        return "partial stdout", "partial stderr"
 
 
 def test_run_command_captures_clean_exit() -> None:
@@ -27,6 +129,45 @@ def test_run_command_captures_nonzero_exit() -> None:
 def test_run_command_times_out() -> None:
     raw = run_command([sys.executable, "-c", "import time; time.sleep(5)"], timeout=1)
     assert raw.timed_out is True
+
+
+def test_run_command_timeout_blocked_post_kill_drain_returns_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _TimeoutThenBlockedDrainPopen.created = None
+    monkeypatch.setattr(wrapper.subprocess, "Popen", _TimeoutThenBlockedDrainPopen)
+
+    raw = run_command(["fake-checker"], timeout=0.1)
+
+    proc = _TimeoutThenBlockedDrainPopen.created
+    assert proc is not None
+    assert proc.communicate_calls == 2
+    assert proc.kill_calls >= 1
+    assert proc.stdout.closed is True
+    assert proc.stderr.closed is True
+    assert raw.timed_out is True
+    assert raw.exit_code == -1
+    assert raw.oom is False
+    assert raw.stdout == ""
+    assert raw.stderr == ""
+
+
+def test_run_command_timeout_clean_post_kill_drain_preserves_captured_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _TimeoutThenCleanDrainPopen.created = None
+    monkeypatch.setattr(wrapper.subprocess, "Popen", _TimeoutThenCleanDrainPopen)
+
+    raw = run_command(["fake-checker"], timeout=0.1)
+
+    proc = _TimeoutThenCleanDrainPopen.created
+    assert proc is not None
+    assert proc.communicate_calls == 2
+    assert raw.timed_out is True
+    assert raw.exit_code == -1
+    assert raw.oom is False
+    assert raw.stdout == "partial stdout"
+    assert raw.stderr == "partial stderr"
 
 
 def test_run_command_reports_env_error_for_missing_binary() -> None:

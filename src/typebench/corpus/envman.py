@@ -121,6 +121,14 @@ def lock_hash(frozen: tuple[str, ...]) -> str:
 _SIDECAR = "prepared.json"
 
 
+def _write_sidecar_atomic(sidecar: Path, payload: str) -> None:
+    """Write the completion marker last via temp file and atomic rename."""
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    tmp = sidecar.with_suffix(".json.tmp")
+    tmp.write_text(payload, encoding="utf-8")
+    tmp.replace(sidecar)
+
+
 def _resolve_constraints(entry: CorpusProject) -> tuple[Path | None, str | None]:
     """Resolve the entry's checked-in constraints lock to an absolute path."""
     if entry.constraints is None:
@@ -223,7 +231,7 @@ def _backfill_code_loc(
     if code_loc is None:
         return cached
     refreshed = cached.model_copy(update={"canonical_code_loc": code_loc})
-    sidecar.write_text(refreshed.model_dump_json(indent=2), encoding="utf-8")
+    _write_sidecar_atomic(sidecar, refreshed.model_dump_json(indent=2))
     return refreshed
 
 
@@ -258,6 +266,7 @@ def prepare_project(
 
     repo = dest / "repo"
     venv = dest / "venv"
+    completed = False
     try:
         _clone(entry.repo_url, entry.tag, entry.sha, repo, host)
         venv_python = _make_venv(entry.python_version, venv, host)
@@ -297,8 +306,9 @@ def prepare_project(
             canonical_code_loc=code_loc,
             fingerprint=fingerprint,
         )
-        sidecar.write_text(prepared.model_dump_json(indent=2), encoding="utf-8")
+        _write_sidecar_atomic(sidecar, prepared.model_dump_json(indent=2))
+        completed = True
         return prepared
-    except PrepareError:
-        shutil.rmtree(dest, ignore_errors=True)
-        raise
+    finally:
+        if not completed:
+            shutil.rmtree(dest, ignore_errors=True)

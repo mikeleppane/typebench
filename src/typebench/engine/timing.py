@@ -10,13 +10,37 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Final, Protocol, cast
 
 from typebench.contracts.models import TimingStats
+
+# `--prepare` clears caches before every hyperfine iteration; budget a few
+# seconds for large cache directories so the outer cap does not false-positive.
+_PREPARE_BUDGET_S: Final = 5.0
+# hyperfine startup, JSON export, and process teardown sit outside the wrapped
+# checker timeout, so keep this comfortably above ordinary scheduler noise.
+_HYPERFINE_OVERHEAD_S: Final = 45.0
+
+
+class _PopenFactory(Protocol):
+    def __call__(
+        self,
+        args: list[str],
+        *,
+        stdout: int,
+        stderr: int,
+        text: bool,
+        env: dict[str, str] | None,
+        start_new_session: bool,
+    ) -> subprocess.Popen[str]: ...
+
+
+_popen = cast("_PopenFactory", subprocess.Popen)
 
 
 class TimingCommandError(RuntimeError):
@@ -57,6 +81,53 @@ def _wrapped_command_string(argv: list[str], timeout: float) -> str:
     return shlex.join(parts)
 
 
+def _outer_timeout(warmup: int, runs: int, per_run_timeout: float) -> float:
+    """Derive a generous wall-clock cap for the hyperfine process itself."""
+    iterations = warmup + runs
+    return iterations * (per_run_timeout + _PREPARE_BUDGET_S) + _HYPERFINE_OVERHEAD_S
+
+
+def _terminate_tree(proc: subprocess.Popen[str]) -> None:
+    if os.name == "posix":
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            return
+        except (ProcessLookupError, PermissionError):
+            pass
+    proc.kill()
+
+
+def _run_hyperfine(cmd: list[str], env: dict[str, str] | None, timeout: float) -> None:
+    proc = _popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        start_new_session=os.name == "posix",
+    )
+
+    with proc:
+        try:
+            _stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            _terminate_tree(proc)
+            try:
+                _stdout, _stderr = proc.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                if proc.stdout is not None:
+                    proc.stdout.close()
+                if proc.stderr is not None:
+                    proc.stderr.close()
+            raise TimingCommandError(
+                f"outer timeout: hyperfine exceeded {timeout:.1f}s wall-clock budget"
+            ) from exc
+
+        if proc.returncode != 0:
+            raise TimingCommandError(stderr)
+
+
 def run_timing(
     argv: list[str],
     prepare_cmd: str | None,
@@ -87,10 +158,6 @@ def run_timing(
         if prepare_cmd:
             cmd += ["--prepare", prepare_cmd]
         cmd.append(_wrapped_command_string(argv, timeout))
-        try:
-            subprocess.run(cmd, check=True, capture_output=True, text=True, env=run_env)
-        except subprocess.CalledProcessError as exc:
-            stderr = exc.stderr if isinstance(exc.stderr, str) else ""
-            raise TimingCommandError(stderr) from exc
+        _run_hyperfine(cmd, run_env, _outer_timeout(warmup, runs, timeout))
         data: dict[str, Any] = json.loads(json_path.read_text())
         return parse_hyperfine_json(data)

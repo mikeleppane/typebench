@@ -130,6 +130,31 @@ def _excluded_record(
     )
 
 
+def _exclude_cells(
+    project_cells: list[SuiteCell],
+    handle_by_id: dict[str, CheckerHandle],
+    prepared: PreparedProject | None,
+    entry: CorpusProject,
+    detail: str,
+    calibration: CalibrationStats | None,
+    policy: Policy,
+) -> list[RunResult]:
+    headline_eligible = policy is Policy.STANDARD
+    return [
+        _excluded_record(
+            cell,
+            handle_by_id[cell.checker_id],
+            prepared,
+            entry,
+            detail,
+            calibration,
+            policy,
+            headline_eligible,
+        )
+        for cell in project_cells
+    ]
+
+
 def _checker_resolve_failed_record(
     cell: SuiteCell,
     spec: CheckerSpec,
@@ -337,67 +362,74 @@ def run_suite(
         # Broad by intent: prepare_project raises PrepareError, but a failure of ANY
         # kind must still emit records for the project's cells, never abort the suite.
         except Exception as exc:
-            for cell in project_cells:
-                handle = handle_by_id[cell.checker_id]
-                results.append(
-                    _excluded_record(
-                        cell,
-                        handle,
-                        None,
-                        entry,
-                        f"prepare failed: {exc}",
-                        calibration,
-                        config.policy,
-                        config.policy is Policy.STANDARD,
-                    )
+            results.extend(
+                _exclude_cells(
+                    project_cells,
+                    handle_by_id,
+                    None,
+                    entry,
+                    f"prepare failed: {exc}",
+                    calibration,
+                    config.policy,
                 )
+            )
             continue
 
         try:
             prewarm_project_sources(prepared)
         except Exception as exc:
-            for cell in project_cells:
-                handle = handle_by_id[cell.checker_id]
-                results.append(
-                    _excluded_record(
-                        cell,
-                        handle,
-                        prepared,
-                        entry,
-                        f"source pre-warm failed: {exc}",
-                        calibration,
-                        config.policy,
-                        config.policy is Policy.STANDARD,
-                    )
+            results.extend(
+                _exclude_cells(
+                    project_cells,
+                    handle_by_id,
+                    prepared,
+                    entry,
+                    f"source pre-warm failed: {exc}",
+                    calibration,
+                    config.policy,
                 )
+            )
             continue
 
-        report = engine.preflight(
-            prepared,
-            project_handles,
-            timeout=plan.timeout_s,
-            policy=config.policy,
-        )
+        try:
+            report = engine.preflight(
+                prepared,
+                project_handles,
+                timeout=plan.timeout_s,
+                policy=config.policy,
+            )
+        # Broad by intent: any preflight crash must still emit records for every
+        # project cell, never abort the suite and leave cells silently absent.
+        except Exception as exc:
+            results.extend(
+                _exclude_cells(
+                    project_cells,
+                    handle_by_id,
+                    prepared,
+                    entry,
+                    f"preflight crashed: {exc}",
+                    calibration,
+                    config.policy,
+                )
+            )
+            continue
         if not report.ready:
             detail = "; ".join(
                 f"{t.tool}: {t.result_class.value} {t.error_detail or ''}".strip()
                 for t in report.tools
                 if not (t.result_class.is_measured_success and t.scope_ok)
             )
-            for cell in project_cells:
-                handle = handle_by_id[cell.checker_id]
-                results.append(
-                    _excluded_record(
-                        cell,
-                        handle,
-                        prepared,
-                        entry,
-                        detail or "preflight not ready",
-                        calibration,
-                        config.policy,
-                        config.policy is Policy.STANDARD,
-                    )
+            results.extend(
+                _exclude_cells(
+                    project_cells,
+                    handle_by_id,
+                    prepared,
+                    entry,
+                    detail or "preflight not ready",
+                    calibration,
+                    config.policy,
                 )
+            )
             continue
 
         over_by_checker = {t.checker_id: t.over_reports for t in report.tools}
@@ -421,18 +453,34 @@ def run_suite(
                 tool_install_source=handle.install_source,
                 over_reports=over_by_checker.get(handle.checker_id, False),
             )
-            results.append(
-                engine.run_cell(
-                    handle,
-                    project=project,
-                    config=cell_config,
-                    thread_mode=cell.thread_mode,
-                    plan=plan,
-                    calibration=calibration,
-                    manifest=manifest,
-                    policy=config.policy,
+            try:
+                results.append(
+                    engine.run_cell(
+                        handle,
+                        project=project,
+                        config=cell_config,
+                        thread_mode=cell.thread_mode,
+                        plan=plan,
+                        calibration=calibration,
+                        manifest=manifest,
+                        policy=config.policy,
+                    )
                 )
-            )
+            # Broad by intent: a crashed cell is a visible FAILED_ENV record, and
+            # sibling cells must continue so the matrix never drops a failure.
+            except Exception as exc:
+                results.append(
+                    _excluded_record(
+                        cell,
+                        handle,
+                        prepared,
+                        entry,
+                        f"run_cell crashed: {exc}",
+                        calibration,
+                        config.policy,
+                        config.policy is Policy.STANDARD,
+                    )
+                )
 
     resolved_checkers = tuple(
         ResolvedChecker(

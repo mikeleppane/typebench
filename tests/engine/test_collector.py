@@ -5,7 +5,7 @@ import pytest
 
 from typebench._internal.test_fakes import FakeHost
 from typebench.adapters.stub import StubAdapter
-from typebench.contracts.config import NormalizedConfig
+from typebench.contracts.config import MeasurementPlan, NormalizedConfig
 from typebench.contracts.models import FailurePhase, ResultClass, ThreadMode, TimingStats
 from typebench.engine import collector, measure
 from typebench.engine.collector import RunManifest, run_single
@@ -41,9 +41,7 @@ def test_run_single_failure_skips_timing() -> None:
         project="demo",
         config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
-        warmup=1,
-        runs=2,
-        timeout=10,
+        plan=MeasurementPlan(warmup=1, runs=2, timeout_s=10),
     )
     assert result.result_class == ResultClass.FAILED_CRASH
     assert result.real_exit_code == 2
@@ -61,9 +59,7 @@ def test_run_single_env_failure_is_recorded() -> None:
         project="demo",
         config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
-        warmup=1,
-        runs=2,
-        timeout=10,
+        plan=MeasurementPlan(warmup=1, runs=2, timeout_s=10),
     )
     assert result.result_class == ResultClass.FAILED_ENV
     assert result.timing is None
@@ -77,9 +73,7 @@ def test_run_single_diagnostics_records_counts() -> None:
         project="demo",
         config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
-        warmup=1,
-        runs=2,
-        timeout=10,
+        plan=MeasurementPlan(warmup=1, runs=2, timeout_s=10),
     )
     assert result.result_class == ResultClass.DIAGNOSTICS
     assert result.diagnostics == 3
@@ -94,9 +88,7 @@ def test_run_single_success_includes_timing() -> None:
         project="demo",
         config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
-        warmup=1,
-        runs=3,
-        timeout=30,
+        plan=MeasurementPlan(warmup=1, runs=3, timeout_s=30),
     )
     assert result.result_class == ResultClass.CLEAN
     assert result.timing is not None
@@ -115,9 +107,7 @@ def test_run_single_records_timing_phase_failure(tmp_path: Path) -> None:
         project="demo",
         config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
-        warmup=1,
-        runs=2,
-        timeout=10,
+        plan=MeasurementPlan(warmup=1, runs=2, timeout_s=10),
     )
     assert result.result_class == ResultClass.FAILED_CRASH
     assert result.failure_phase == FailurePhase.TIMING
@@ -145,9 +135,7 @@ def test_run_single_timing_crash_marks_timing_phase(monkeypatch: pytest.MonkeyPa
         project="demo",
         config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
-        warmup=1,
-        runs=2,
-        timeout=10,
+        plan=MeasurementPlan(warmup=1, runs=2, timeout_s=10),
     )
     assert result.result_class == ResultClass.FAILED_CRASH
     assert result.failure_phase == FailurePhase.TIMING
@@ -175,14 +163,59 @@ def test_run_single_timing_harness_error_is_failed_env(monkeypatch: pytest.Monke
         project="demo",
         config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
-        warmup=1,
-        runs=2,
-        timeout=10,
+        plan=MeasurementPlan(warmup=1, runs=2, timeout_s=10),
     )
     assert result.result_class == ResultClass.FAILED_ENV
     assert result.failure_phase == FailurePhase.TIMING
     assert result.error_detail
     assert result.timing is None
+
+
+def test_run_single_threads_measurement_plan_into_timing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        collector,
+        "_process_host",
+        FakeHost(which={"hyperfine": "/usr/bin/hyperfine"}),
+    )
+    captured: dict[str, object] = {}
+
+    def fake_run_timing(
+        argv: list[str],
+        *,
+        prepare_cmd: str | None,
+        warmup: int,
+        runs: int,
+        timeout: float,
+        extra_env: dict[str, str],
+    ) -> TimingStats:
+        captured["warmup"] = warmup
+        captured["runs"] = runs
+        captured["timeout"] = timeout
+        return TimingStats(
+            runs=runs,
+            min_s=1.0,
+            median_s=1.0,
+            mean_s=1.0,
+            stddev_s=0.0,
+            max_s=1.0,
+            times_s=[1.0] * runs,
+        )
+
+    monkeypatch.setattr(collector, "run_timing", fake_run_timing)
+    plan = MeasurementPlan(runs=5, warmup=2, timeout_s=12.5, mem_runs=1, measure=True)
+
+    result = run_single(
+        StubAdapter(exit_code=0),
+        project="demo",
+        config=NormalizedConfig(),
+        thread_mode=ThreadMode.ALL_CORES,
+        plan=plan,
+    )
+
+    assert result.result_class == ResultClass.CLEAN
+    assert captured == {"warmup": 2, "runs": 5, "timeout": 12.5}
 
 
 def test_run_single_command_construction_failure_is_recorded(
@@ -202,9 +235,7 @@ def test_run_single_command_construction_failure_is_recorded(
         project="demo",
         config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
-        warmup=1,
-        runs=2,
-        timeout=10,
+        plan=MeasurementPlan(warmup=1, runs=2, timeout_s=10),
     )
     assert result.result_class == ResultClass.FAILED_ENV
     assert result.failure_phase == FailurePhase.PROBE
@@ -231,9 +262,7 @@ def test_one_core_prepends_taskset_and_enforces(monkeypatch: pytest.MonkeyPatch)
         project="demo",
         config=NormalizedConfig(),
         thread_mode=ThreadMode.CONSTRAINED,
-        warmup=1,
-        runs=2,
-        timeout=10,
+        plan=MeasurementPlan(warmup=1, runs=2, timeout_s=10),
     )
     assert captured["argv"][:3] == ["taskset", "-c", "0"]
     assert result.thread_mode_enforced is True
@@ -260,9 +289,7 @@ def test_multi_core_pins_range_and_records_cores(monkeypatch: pytest.MonkeyPatch
         project="demo",
         config=NormalizedConfig(cores=4),
         thread_mode=ThreadMode.CONSTRAINED,
-        warmup=1,
-        runs=2,
-        timeout=10,
+        plan=MeasurementPlan(warmup=1, runs=2, timeout_s=10),
     )
     assert captured["argv"][:3] == ["taskset", "-c", "0-3"]
     assert result.thread_mode_enforced is True
@@ -297,9 +324,7 @@ def test_one_core_without_taskset_is_not_enforced(monkeypatch: pytest.MonkeyPatc
         project="demo",
         config=NormalizedConfig(),
         thread_mode=ThreadMode.CONSTRAINED,
-        warmup=1,
-        runs=2,
-        timeout=10,
+        plan=MeasurementPlan(warmup=1, runs=2, timeout_s=10),
     )
     # taskset missing -> we did NOT pin -> must not claim enforcement OR the cap
     # (the adapter mechanism string bakes in "cpu-affinity"), §5.3 honesty.
@@ -325,9 +350,7 @@ def test_all_cores_no_taskset_no_enforcement(monkeypatch: pytest.MonkeyPatch) ->
         project="demo",
         config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
-        warmup=1,
-        runs=2,
-        timeout=10,
+        plan=MeasurementPlan(warmup=1, runs=2, timeout_s=10),
     )
     assert captured["argv"][0] != "taskset"  # ALL_CORES is never pinned
     assert result.thread_mode_enforced is False
@@ -400,10 +423,7 @@ def test_resource_pass_populates_memory_cpu_efficiency(
         project="demo",
         config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
-        warmup=1,
-        runs=2,
-        timeout=10,
-        mem_runs=3,
+        plan=MeasurementPlan(warmup=1, runs=2, timeout_s=10, mem_runs=3),
     )
     assert result.result_class == ResultClass.CLEAN
     assert result.files == 5
@@ -441,9 +461,7 @@ def test_resource_pass_oom_reclassifies(monkeypatch: pytest.MonkeyPatch) -> None
         project="demo",
         config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
-        warmup=1,
-        runs=2,
-        timeout=10,
+        plan=MeasurementPlan(warmup=1, runs=2, timeout_s=10),
     )
     assert result.result_class == ResultClass.FAILED_OOM
     assert result.oom is True
@@ -480,9 +498,7 @@ def test_resource_pass_falls_back_to_plain_probe_on_measure_error(
         project="demo",
         config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
-        warmup=1,
-        runs=2,
-        timeout=10,
+        plan=MeasurementPlan(warmup=1, runs=2, timeout_s=10),
     )
     # Record still produced via the plain probe; just no memory.
     assert result.result_class == ResultClass.CLEAN
@@ -531,9 +547,7 @@ def test_run_single_stamps_manifest_fields() -> None:
         project="httpx",
         config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
-        warmup=1,
-        runs=1,
-        timeout=10,
+        plan=MeasurementPlan(warmup=1, runs=1, timeout_s=10),
         manifest=manifest,
     )
     assert result.project_sha == "80960fa"
@@ -553,9 +567,7 @@ def test_run_single_loc_denominator_physical_when_no_code_loc() -> None:
         project="demo",
         config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
-        warmup=1,
-        runs=1,
-        timeout=10,
+        plan=MeasurementPlan(warmup=1, runs=1, timeout_s=10),
         manifest=manifest,
     )
     assert result.loc_denominator == "physical"
@@ -568,9 +580,7 @@ def test_run_single_no_manifest_leaves_scalars_none() -> None:
         project="demo",
         config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
-        warmup=1,
-        runs=1,
-        timeout=10,
+        plan=MeasurementPlan(warmup=1, runs=1, timeout_s=10),
     )
     assert result.project_sha is None
     assert result.loc_denominator is None
