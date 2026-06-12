@@ -617,13 +617,13 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "mypy" },
+    { name = "mypy", specifier = ">=2.1" },
     { name = "pre-commit", specifier = ">=3.7" },
     { name = "pyrefly", specifier = ">=0.16" },
     { name = "pyright", specifier = ">=1.1.400" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "ruff", specifier = ">=0.8" },
-    { name = "ty" },
+    { name = "ty", specifier = ">=0.0.44" },
 ]
 
 [[package]]
