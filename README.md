@@ -71,9 +71,9 @@ For each run, typebench can record:
 - Checker-reported file and diagnostic counts when the adapter can parse them.
 - Environment details such as OS, kernel, CPU model, core count, and Python version.
 
-Current output is a structured JSON record for one `(project x checker x
-thread-mode)` run. Generated result tables and long-running trend data are not
-published yet.
+The source-of-truth output is a structured JSON record for one `(project x checker
+x thread-mode)` run. The curated official store in `data/official/` is rendered
+into the README results table below and the GitHub Pages trend site.
 
 ---
 
@@ -479,8 +479,9 @@ publish.yml CI  ->  GitHub Pages trend site
 ```
 
 That separation is important: raw JSON remains the source of truth, while tables
-and charts are views over the recorded measurements. The pipeline is wired; what is
-still pending is the curated `data/official/` dataset that feeds it.
+and charts are views over the recorded measurements. The pipeline is live: the
+curated `data/official/` dataset feeds it, and the first official snapshot is
+published.
 
 ---
 
