@@ -53,6 +53,22 @@ jobs:
       - name: Tests
         run: uv run pytest -q
 
+      - name: README is rendered from data/official
+        # The committed README results block is generated output. Re-render it and
+        # fail if it drifts, so a data/official or renderer change must ship the
+        # refreshed README in the same PR. render is deterministic from the
+        # envelope (provenance comes from the stored env, not this runner), so the
+        # CI render matches a local one. This replaces the old publish.yml push to
+        # main, which branch protection rejected.
+        run: |
+          uv run typebench render \
+            --results-dir data/official \
+            --readme README.md \
+            --trends "$RUNNER_TEMP/trends.json"
+          git diff --exit-code -- README.md || {
+            echo "::error::README is stale. Run 'typebench render --results-dir data/official --readme README.md --trends site/data/trends.json' and commit the result."
+            exit 1; }
+
       - name: Action install-source sanity
         run: |
           # The action must install typebench from its OWN checkout (github.action_path),

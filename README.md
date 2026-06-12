@@ -752,7 +752,7 @@ _Corpus snapshot 2026-06-10 · measured 2026-06-11 09:10 UTC_
 | pyright@1.1.410 | 31.434 | 30.597 | 21.866 | 19.341 | 7359.1 | 6.4 |
 
 
-> Wall is the hyperfine median in seconds, fastest first; the best cell in each metric column is in **bold**. **All-cores** uses the whole machine; **1c/4c/8c** are the constrained track pinned to that many cores. Peak mem and kLOC/s are from the all-cores pass. kLOC/s denominator is the canonical analyzed code-LOC, identical across tools. `—*` = throughput withheld because the tool over-reports its analyzed set vs the canonical denominator. `!` = swap observed during the memory pass, so peak memory may be understated. Checker issue counts are intentionally omitted — they are not comparable across tools and are not a ranking.
+> Wall is the hyperfine median in seconds, fastest first; the best cell in each metric column is in **bold**. **All-cores** uses the whole machine; the per-core columns are the constrained track, each pinned to the core count in its header. Peak mem and kLOC/s are from the all-cores pass. kLOC/s denominator is the canonical analyzed code-LOC, identical across tools. `—*` = throughput withheld because the tool over-reports its analyzed set vs the canonical denominator. `!` = swap observed during the memory pass, so peak memory may be understated. Checker issue counts are intentionally omitted — they are not comparable across tools and are not a ranking.
 
 
 > Measured on 13th Gen Intel(R) Core(TM) i7-13850HX (20 cores), Linux 6.18.33.1-microsoft-standard-WSL2; 10 timed runs, 3 warmup. Absolute times are machine-specific — compare rows within the same suite, or the normalized trend lines on the site; do not compare raw seconds across machines.
