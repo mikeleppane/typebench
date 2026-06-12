@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from typebench.adapters._support import confirm_clean, probe_version
@@ -18,8 +19,6 @@ from typebench.engine.proc import SYSTEM_HOST
 from typebench.engine.wrapper import classify_with_map
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from typebench.contracts.config import NormalizedConfig
     from typebench.contracts.proc import ProcessHost, RawRun
 
@@ -112,6 +111,20 @@ class TyAdapter:
         ]
         for glob in config.exclude_globs:
             argv += ["--exclude", glob]  # belt-and-suspenders alongside [src].exclude
+        # CRITICAL: ty resolves FIRST-PARTY modules from its search paths, NOT from the
+        # checked path. When a src_root IS the package dir (e.g. .../repo/httpx), ty
+        # needs the PARENT (.../repo) on the search path to map httpx/_client.py -> the
+        # module httpx._client. Without it ty cannot resolve the project's OWN imports
+        # and emits a flood of spurious unresolved-import errors while skipping the real
+        # type analysis (far less work -> non-neutral speed AND junk diagnostics). Add
+        # each src_root's parent as a search path; the third-party venv (--python below)
+        # is a separate concern. (Verified on httpx: 105 spurious unresolved -> 0.)
+        seen_parents: set[str] = set()
+        for root in config.src_roots:
+            parent = str(Path(root).parent)
+            if parent not in seen_parents:
+                seen_parents.add(parent)
+                argv += ["--extra-search-path", parent]
         if config.venv_python is not None:
             argv += ["--python", config.venv_python]  # resolve third-party from venv
 

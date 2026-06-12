@@ -165,6 +165,46 @@ def test_command_disables_ignore_file_filtering() -> None:
     assert "--no-respect-ignore-files" in argv
 
 
+def test_command_adds_parent_as_first_party_search_path(tmp_path: Path) -> None:
+    # Regression: ty resolves FIRST-PARTY modules from its search paths, not the
+    # checked path. When a src_root IS the package dir, ty needs the PARENT on the
+    # search path to map <pkg>/x.py -> module <pkg>.x; without it ty fails the
+    # project's OWN imports (flood of spurious unresolved-import, far less real
+    # work -> non-neutral). Each src_root's parent must be an --extra-search-path.
+    cfg = NormalizedConfig(src_roots=("/abs/repo/httpx",))
+    argv, _env = TyAdapter().command("demo", cfg, ThreadMode.CONSTRAINED, tmp_path)
+    assert "--extra-search-path" in argv
+    assert argv[argv.index("--extra-search-path") + 1] == "/abs/repo"
+
+
+def test_command_dedupes_search_paths_across_roots(tmp_path: Path) -> None:
+    # Multiple roots sharing a parent yield ONE search path; distinct parents both
+    # appear, in first-seen order.
+    cfg = NormalizedConfig(src_roots=("/abs/repo/a", "/abs/repo/b", "/abs/other/c"))
+    argv, _env = TyAdapter().command("demo", cfg, ThreadMode.CONSTRAINED, tmp_path)
+    paths = [argv[i + 1] for i, a in enumerate(argv) if a == "--extra-search-path"]
+    assert paths == ["/abs/repo", "/abs/other"]
+
+
+@pytest.mark.skipif(not _HAS_TY, reason="ty not installed")
+def test_live_first_party_package_imports_resolve(tmp_path: Path) -> None:
+    # The package dir IS the src_root and its modules import each other (absolute
+    # first-party). ty must resolve these via the parent search path instead of
+    # emitting spurious unresolved-import. Guards the search-path fix end to end.
+    pkg = tmp_path / "proj" / "mypkg"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("from mypkg.sub import VALUE\n\nx: int = VALUE\n")
+    (pkg / "sub.py").write_text("VALUE: int = 1\n")
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    cfg = NormalizedConfig(src_roots=(str(pkg),))
+    argv, env = TyAdapter().command("fp", cfg, ThreadMode.CONSTRAINED, workdir)
+    raw = run_command(argv, timeout=120, env=env)
+    body = raw.stdout + raw.stderr
+    assert "unresolved-import" not in body, body
+    assert TyAdapter().classify(raw) == ResultClass.CLEAN, body
+
+
 @pytest.mark.skipif(not _HAS_TY, reason="ty not installed")
 def test_live_gitignored_first_party_file_is_still_checked(tmp_path: Path) -> None:
     # In a real git repo, a .gitignore'd source file with a type error must STILL

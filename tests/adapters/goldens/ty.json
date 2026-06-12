@@ -21,6 +21,8 @@
     "**/tests/**",
     "--exclude",
     "**/_vendor/**",
+    "--extra-search-path",
+    "<ROOT>/project",
     "--python",
     "<ROOT>/venv/bin/python"
   ],
