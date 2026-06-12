@@ -247,8 +247,9 @@ def _compact_table(
 
 _FOOTNOTE = (
     "\n> Wall is the hyperfine median in seconds, fastest first; the best cell in each metric "
-    "column is in **bold**. **All-cores** uses the whole machine; **1c/4c/8c** are the "
-    "constrained track pinned to that many cores. Peak mem and kLOC/s are from the all-cores "
+    "column is in **bold**. **All-cores** uses the whole machine; the per-core columns are the "
+    "constrained track, each pinned to the core count in its header. Peak mem and kLOC/s are from "
+    "the all-cores "
     "pass. kLOC/s denominator is the canonical analyzed code-LOC, identical across tools. "
     "`—*` = throughput withheld because the tool over-reports its analyzed set vs the canonical "
     "denominator. `!` = swap observed during the memory pass, so peak memory may be "

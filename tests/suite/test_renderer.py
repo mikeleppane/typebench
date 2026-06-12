@@ -541,6 +541,11 @@ def test_compact_table_renders_constrained_cores_from_run_config(make_env: EnvFa
     assert "| 4c |" not in lines[header_index]
     assert "| 8c |" not in lines[header_index]
     assert lines[header_index + 1].count("--:") == 6
+    # The footnote must not name a fixed sweep either, or it goes stale for
+    # non-default cores; the whole render carries no 4c/8c token.
+    full = render_readme(env)
+    assert "4c" not in full
+    assert "8c" not in full
 
 
 def test_compact_table_falls_back_to_default_cores_without_run_config(
