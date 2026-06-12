@@ -92,6 +92,40 @@ def test_shard_rejects_bad_index() -> None:
         shard(cells, 0, 0)
 
 
+@pytest.mark.parametrize(
+    ("policy", "expected_headline_eligible"),
+    [(Policy.STANDARD, True), (Policy.STRICT, False)],
+)
+def test_exclude_cells_records_failed_env_for_each_cell(
+    policy: Policy, expected_headline_eligible: bool
+) -> None:
+    specs = (CheckerSpec(tool="stub", version="1.0"), CheckerSpec(tool="pyright", version="1.1.0"))
+    handles = [FakeResolver().resolve(spec) for spec in specs]
+    handle_by_id = {handle.checker_id: handle for handle in handles}
+    cells = [
+        SuiteCell("demo", "stub@1.0", ThreadMode.ALL_CORES, None),
+        SuiteCell("demo", "pyright@1.1.0", ThreadMode.CONSTRAINED, 4),
+    ]
+    detail = f" {'0123456789' * 60} "
+
+    records = runner_mod._exclude_cells(
+        cells,
+        handle_by_id,
+        _prepared("demo"),
+        _entry("demo"),
+        detail,
+        _calib(),
+        policy,
+    )
+
+    assert len(records) == len(cells)
+    assert [record.checker_id for record in records] == ["stub@1.0", "pyright@1.1.0"]
+    assert all(record.result_class is ResultClass.FAILED_ENV for record in records)
+    assert all(record.failure_phase is FailurePhase.PROBE for record in records)
+    assert all(record.error_detail == detail.strip()[-500:] for record in records)
+    assert all(record.headline_eligible is expected_headline_eligible for record in records)
+
+
 def _prepared(name: str) -> PreparedProject:
     return PreparedProject(
         name=name,

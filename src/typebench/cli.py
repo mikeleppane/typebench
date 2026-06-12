@@ -133,6 +133,16 @@ mem_runs = 3
 """
 
 
+def _assert_output_writable(output: Path) -> None:
+    # Fail fast on a bad --output: a single run can take many minutes, so a
+    # non-existent or read-only output directory must not surface only after all
+    # the measurement work is already done and unrecoverable.
+    out_dir = output.parent
+    if not out_dir.exists() or not os.access(out_dir, os.W_OK):
+        typer.echo(f"Output directory not writable: {out_dir}", err=True)
+        raise typer.Exit(code=2)
+
+
 def _available_cores() -> int:
     """Cores this process may actually use — the CPU-affinity mask size on Linux
     (honors container/cpuset limits), else the logical CPU count. The upper bound
@@ -355,7 +365,7 @@ def _empty_readme_block() -> str:
 
 
 @app.command()
-def run(  # noqa: PLR0912, PLR0913, PLR0915 — many user-facing CLI options + linear arg-validation/manifest/run setup; one command by design
+def run(  # noqa: PLR0913, PLR0915 — many user-facing CLI options + linear arg-validation/manifest/run setup; one command by design
     tool: Annotated[str, typer.Option(help="Checker to run (e.g. stub).")],
     output: Annotated[Path, typer.Option(help="Where to write the results JSON.")],
     config: Annotated[
@@ -448,13 +458,7 @@ def run(  # noqa: PLR0912, PLR0913, PLR0915 — many user-facing CLI options + l
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
 
-    # Fail fast on a bad --output: a single run can take many minutes, so a
-    # non-existent or read-only output directory must not surface only after all
-    # the measurement work is already done and unrecoverable.
-    out_dir = output.parent
-    if not out_dir.exists() or not os.access(out_dir, os.W_OK):
-        typer.echo(f"Output directory not writable: {out_dir}", err=True)
-        raise typer.Exit(code=2)
+    _assert_output_writable(output)
     if mem_runs < 1:
         typer.echo("--mem-runs must be >= 1 (>= 3 recommended).", err=True)
         raise typer.Exit(code=2)
@@ -620,10 +624,7 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
     ] = None,
 ) -> None:
     """Run the (project x tool x thread-mode) matrix and write a results envelope."""
-    out_dir = output.parent
-    if not out_dir.exists() or not os.access(out_dir, os.W_OK):
-        typer.echo(f"Output directory not writable: {out_dir}", err=True)
-        raise typer.Exit(code=2)
+    _assert_output_writable(output)
     config_path = config or discover_config(Path.cwd())
     base = (
         _load_config_or_exit(config_path)
@@ -741,10 +742,7 @@ def compare(  # noqa: PLR0913 — distinct user-facing CLI options for one comma
     if len(checker) < _MIN_COMPARE_CHECKERS:
         typer.echo("compare needs >=2 --checker specs.", err=True)
         raise typer.Exit(code=2)
-    out_dir = output.parent
-    if not out_dir.exists() or not os.access(out_dir, os.W_OK):
-        typer.echo(f"Output directory not writable: {out_dir}", err=True)
-        raise typer.Exit(code=2)
+    _assert_output_writable(output)
     cores = _validate_cores(cores)
 
     try:
@@ -847,10 +845,7 @@ def ab(  # noqa: PLR0913 — distinct user-facing CLI options for one command
     if not target:
         typer.echo("ab needs >=1 --target.", err=True)
         raise typer.Exit(code=2)
-    out_dir = output.parent
-    if not out_dir.exists() or not os.access(out_dir, os.W_OK):
-        typer.echo(f"Output directory not writable: {out_dir}", err=True)
-        raise typer.Exit(code=2)
+    _assert_output_writable(output)
     try:
         create_adapter(checker)
     except UnknownToolError as exc:
@@ -1000,10 +995,7 @@ def preflight(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
     checkers = tuple(CheckerHandle(spec=spec, adapter=create_adapter(spec.tool)) for spec in specs)
-    out_dir = output.parent
-    if not out_dir.exists() or not os.access(out_dir, os.W_OK):
-        typer.echo(f"Output directory not writable: {out_dir}", err=True)
-        raise typer.Exit(code=2)
+    _assert_output_writable(output)
     try:
         prepared = prepare_project(entry, cache_root)
     except PrepareError as exc:

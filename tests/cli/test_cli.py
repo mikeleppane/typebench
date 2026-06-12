@@ -2,6 +2,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+import typer
 from typer.testing import CliRunner, Result
 
 from typebench import cli
@@ -88,6 +89,19 @@ def test_cli_run_rejects_unwritable_output_dir(tmp_path: Path) -> None:
     )
     assert result.exit_code == 2
     assert "writable" in result.output.lower()
+
+
+def test_assert_output_writable_raises_exit_when_parent_missing(tmp_path: Path) -> None:
+    missing = tmp_path / "does-not-exist" / "results.json"
+
+    with pytest.raises(typer.Exit) as exc_info:
+        cli._assert_output_writable(missing)
+
+    assert exc_info.value.exit_code == 2
+
+
+def test_assert_output_writable_passes_for_writable_dir(tmp_path: Path) -> None:
+    cli._assert_output_writable(tmp_path / "out.json")
 
 
 def test_run_passes_measure_and_calibration_flags(
