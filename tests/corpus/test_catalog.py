@@ -1,10 +1,24 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from typebench.corpus.catalog import CorpusProject, SizeBucket, load_suite, load_suite_version
 
 _SUITE = Path(__file__).resolve().parents[2] / "corpus" / "suite.toml"
+
+
+def _corpus_project(*, name: str = "demo", sha: str = "S") -> CorpusProject:
+    return CorpusProject(
+        name=name,
+        repo_url="https://example.invalid/demo",
+        sha=sha,
+        tag="v1",
+        size_bucket=SizeBucket.SMALL,
+        python_version="3.12",
+        src_roots=("demo",),
+        install=("uv pip install .",),
+    )
 
 
 def test_load_suite_reads_httpx_entry() -> None:
@@ -48,6 +62,26 @@ def test_effective_excludes_merges_defaults_then_entry() -> None:
     assert "**/tests/**" in eff  # §6 default preserved
     assert "**/extra/**" in eff  # entry extension appended
     assert eff[-1] == "**/extra/**"
+
+
+@pytest.mark.parametrize("bad_name", ["../etc", "etc/passwd", r"etc\passwd"])
+def test_corpus_project_rejects_name_with_path_separator(bad_name: str) -> None:
+    with pytest.raises(ValidationError):
+        _corpus_project(name=bad_name)
+
+
+@pytest.mark.parametrize("bad_sha", ["../x", "x/y", r"x\y"])
+def test_corpus_project_rejects_sha_with_traversal(bad_sha: str) -> None:
+    with pytest.raises(ValidationError):
+        _corpus_project(sha=bad_sha)
+
+
+def test_corpus_project_accepts_plain_name_and_short_sha() -> None:
+    short = _corpus_project(name="httpx", sha="80960fa")
+    full = _corpus_project(name="httpx", sha="0" * 40)
+
+    assert short.sha == "80960fa"
+    assert full.sha == "0" * 40
 
 
 def test_corpus_rejects_non_dir_segment_exclude_glob() -> None:
