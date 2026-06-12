@@ -501,6 +501,87 @@ def test_render_readme_folds_constrained_cores_into_columns(make_env: EnvFactory
     assert "2.000" in md and "1.500" in md  # 1-core and 4-core walls in the same row
 
 
+def test_compact_table_renders_constrained_cores_from_run_config(make_env: EnvFactory) -> None:
+    env = ResultsEnvelope(
+        suite_version="v",
+        generated_at="t",
+        run_config=RunConfig(checkers=(), cores=(1, 2, 16)),
+        runs=[
+            _record_versioned("mypy@1.19.0", "mypy", 0.8, make_env),
+            _record_versioned(
+                "mypy@1.19.0",
+                "mypy",
+                2.0,
+                make_env,
+                thread_mode=ThreadMode.CONSTRAINED,
+                cores=1,
+            ),
+            _record_versioned(
+                "mypy@1.19.0",
+                "mypy",
+                1.7,
+                make_env,
+                thread_mode=ThreadMode.CONSTRAINED,
+                cores=2,
+            ),
+            _record_versioned(
+                "mypy@1.19.0",
+                "mypy",
+                1.2,
+                make_env,
+                thread_mode=ThreadMode.CONSTRAINED,
+                cores=16,
+            ),
+        ],
+    )
+
+    lines = render_readme(env).splitlines()
+    header_index = lines.index("| Checker | All-cores | 1c | 2c | 16c | Peak mem (MB) | kLOC/s |")
+
+    assert "| 4c |" not in lines[header_index]
+    assert "| 8c |" not in lines[header_index]
+    assert lines[header_index + 1].count("--:") == 6
+
+
+def test_compact_table_falls_back_to_default_cores_without_run_config(
+    make_env: EnvFactory,
+) -> None:
+    env = ResultsEnvelope(
+        suite_version="v",
+        generated_at="t",
+        run_config=None,
+        runs=[
+            _record_versioned("mypy@1.19.0", "mypy", 0.8, make_env),
+            _record_versioned(
+                "mypy@1.19.0",
+                "mypy",
+                2.0,
+                make_env,
+                thread_mode=ThreadMode.CONSTRAINED,
+                cores=1,
+            ),
+            _record_versioned(
+                "mypy@1.19.0",
+                "mypy",
+                1.5,
+                make_env,
+                thread_mode=ThreadMode.CONSTRAINED,
+                cores=4,
+            ),
+            _record_versioned(
+                "mypy@1.19.0",
+                "mypy",
+                1.3,
+                make_env,
+                thread_mode=ThreadMode.CONSTRAINED,
+                cores=8,
+            ),
+        ],
+    )
+
+    assert "| Checker | All-cores | 1c | 4c | 8c | Peak mem (MB) | kLOC/s |" in render_readme(env)
+
+
 def _cmp_record(checker_id: str, wall: float, peak: int, make_env: EnvFactory) -> RunResult:
     tool, version = checker_id.split("@", 1)
     return RunResult(
