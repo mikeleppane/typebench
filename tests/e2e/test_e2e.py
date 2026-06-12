@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from typebench.adapters.stub import StubAdapter
-from typebench.contracts.config import NormalizedConfig
+from typebench.contracts.config import MeasurementPlan, NormalizedConfig
 from typebench.contracts.models import ResultClass, RunResult, ThreadMode
 from typebench.engine.collector import run_single
 
@@ -38,9 +38,7 @@ def test_pipeline_classes_round_trip_to_json(
         project="demo",
         config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
-        warmup=1,
-        runs=2,
-        timeout=10,
+        plan=MeasurementPlan(warmup=1, runs=2, timeout_s=10),
     )
     assert result.result_class == expected
     # ALL_CORES is unconstrained by design, so the 1-core affinity floor is never
@@ -62,9 +60,7 @@ def test_pipeline_records_timeout(tmp_path: Path) -> None:
         project="demo",
         config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
-        warmup=1,
-        runs=2,
-        timeout=1,
+        plan=MeasurementPlan(warmup=1, runs=2, timeout_s=1),
     )
     assert result.result_class == ResultClass.FAILED_TIMEOUT
     assert result.timing is None
@@ -84,9 +80,7 @@ def test_pipeline_records_oom_heuristic(tmp_path: Path) -> None:
         project="demo",
         config=NormalizedConfig(),
         thread_mode=ThreadMode.ALL_CORES,
-        warmup=1,
-        runs=2,
-        timeout=10,
+        plan=MeasurementPlan(warmup=1, runs=2, timeout_s=10),
     )
     assert result.result_class == ResultClass.FAILED_OOM
     assert result.timing is None

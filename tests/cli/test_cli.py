@@ -7,7 +7,7 @@ from typer.testing import CliRunner, Result
 
 from typebench import cli
 from typebench.cli import app
-from typebench.contracts.config import NormalizedConfig
+from typebench.contracts.config import MeasurementPlan, NormalizedConfig
 from typebench.contracts.models import (
     CalibrationStats,
     EnvFingerprint,
@@ -146,7 +146,9 @@ def test_run_passes_measure_and_calibration_flags(
         ]
     )
     assert result.exit_code == 0
-    assert captured["mem_runs"] == 4
+    plan = captured["plan"]
+    assert isinstance(plan, MeasurementPlan)
+    assert plan.mem_runs == 4
     assert captured["calibration"] is None
 
 
@@ -259,6 +261,9 @@ def test_run_corpus_mode_builds_manifest(
     assert man.canonical_code_loc == 3200
     assert man.tool_install_source == "PyPI wheel (mypyc-compiled)"
     assert man.config_hash is not None and len(man.config_hash) == 64
+    plan = captured["plan"]
+    assert isinstance(plan, MeasurementPlan)
+    assert plan.measure is False
 
 
 def test_run_threads_cores_into_normalized_config(

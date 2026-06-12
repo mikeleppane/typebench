@@ -531,16 +531,19 @@ def run(  # noqa: PLR0913, PLR0915 — many user-facing CLI options + linear arg
             over_reports=None,
         )
     calibration = calibrate(runs=calib_runs) if calibrate_baseline else None
+    plan = MeasurementPlan(
+        runs=runs,
+        warmup=warmup,
+        timeout_s=timeout,
+        mem_runs=mem_runs,
+        measure=measure,
+    )
     result = run_single(
         adapter,
         project=project,
         config=normalized_config,
         thread_mode=thread_mode,
-        warmup=warmup,
-        runs=runs,
-        timeout=timeout,
-        mem_runs=mem_runs,
-        measure_enabled=measure,
+        plan=plan,
         calibration=calibration,
         manifest=manifest,
     )

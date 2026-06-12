@@ -8,7 +8,7 @@ import pytest
 from typebench._internal.test_fakes import FakeHost, fake_raw
 from typebench.adapters.base import Adapter
 from typebench.adapters.ty import TyAdapter
-from typebench.contracts.config import NormalizedConfig
+from typebench.contracts.config import MeasurementPlan, NormalizedConfig
 from typebench.contracts.models import ResultClass, RunResult, ThreadMode
 from typebench.engine.collector import run_single
 from typebench.engine.wrapper import RawRun, run_command
@@ -129,9 +129,7 @@ def test_missing_ty_yields_schema_valid_failed_env(monkeypatch: pytest.MonkeyPat
         project="demo",
         config=cfg,
         thread_mode=ThreadMode.CONSTRAINED,
-        warmup=1,
-        runs=2,
-        timeout=10,
+        plan=MeasurementPlan(warmup=1, runs=2, timeout_s=10),
     )
     assert isinstance(result, RunResult)
     assert result.result_class == ResultClass.FAILED_ENV
