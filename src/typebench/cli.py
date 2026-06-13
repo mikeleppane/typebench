@@ -310,6 +310,22 @@ def _load_suite_or_exit(corpus: Path) -> list[CorpusProject]:
         raise typer.Exit(code=2) from exc
 
 
+def _max_checker_python(entries: list[CorpusProject], selected: list[str]) -> str:
+    """Highest python_version among the SELECTED projects — the interpreter the
+    shared checker venvs must be built on so mypy/pyright can parse the newest
+    target syntax in the run. Falls back to 3.12 for an empty selection."""
+
+    def _key(version: str) -> tuple[int, ...]:
+        try:
+            return tuple(int(part) for part in version.split("."))
+        except ValueError:
+            return (0,)
+
+    chosen = set(selected)
+    versions = [entry.python_version for entry in entries if entry.name in chosen]
+    return max(versions, key=_key, default="3.12")
+
+
 def _load_config_or_exit(path: Path) -> RunConfig:
     """Load typebench.toml, translating file/validation failures to a CLI error."""
     try:
@@ -690,7 +706,9 @@ def suite(  # noqa: PLR0913 — each parameter is a distinct user-facing CLI opt
     envelope = run_suite(
         config=run_config,
         corpus=CorpusCache(effective_corpus, cache_root, projects=selected),
-        resolver=UvCheckerResolver(cache_root),
+        resolver=UvCheckerResolver(
+            cache_root, python_version=_max_checker_python(corpus_entries, selected)
+        ),
         engine=LocalBenchEngine(),
         generated_at=datetime.now(UTC).isoformat(),
         shard_index=shard_index,
@@ -792,7 +810,9 @@ def compare(  # noqa: PLR0913 — distinct user-facing CLI options for one comma
     envelope = run_suite(
         config=run_config,
         corpus=CorpusCache(effective_corpus, cache_root, projects=selected),
-        resolver=UvCheckerResolver(cache_root),
+        resolver=UvCheckerResolver(
+            cache_root, python_version=_max_checker_python(corpus_entries, selected)
+        ),
         engine=LocalBenchEngine(),
         generated_at=datetime.now(UTC).isoformat(),
     )
