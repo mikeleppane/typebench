@@ -68,7 +68,11 @@ doubt, prefer the honest, conservative, reproducible choice over the convenient 
       become visible FAILED_ENV records ("didn't compete", never silently absent).
     - `suite/preflight` — `preflight_project`: probes the four tools, records the
       self-reported-vs-canonical divergence, and gates readiness on mis-scope
-      (self < canonical) while flagging over-report for the renderer.
+      (self < canonical) while flagging over-report for the renderer. Readiness is
+      all-or-nothing (`ready = all(success and scope_ok)`), so a project that comes
+      back entirely FAILED_ENV is usually **one** tool failing — run
+      `typebench preflight --corpus … --project <name> --output <f>` for the
+      per-tool probe instead of guessing from the synthesized envelope records.
     - `suite/renderer` — `render_readme` (latest envelope → README table) +
       `build_trends` (full history → `trends.json`, per-CPU-model calibration anchor).
   - `_internal/` — private support code.
@@ -146,6 +150,16 @@ requested change and not ignored by default.
 - **Benchmark isolation.** On timeout, kill the whole process group
   (`start_new_session` + `killpg`), not just the direct child, or stragglers
   contaminate later runs.
+- **Adapter output parsing must survive scale.** Tools print human-formatted
+  numbers — pyrefly's `--summary=full` emits a thousands separator past 999 files
+  ("8,792 modules"). A bare `\d+` silently captures the trailing group ("792"),
+  undercounts, and fails the scope gate. Parse digit groups with separators and
+  strip them. Applies to any count/line/duration that grows with project size.
+- **Corpus `python_version` may exceed the 3.12 floor.** home-assistant targets
+  3.13. Checker venvs are built at the **corpus-max** target (`_max_checker_python`)
+  so mypy/pyright can parse newer syntax — don't reintroduce a single hardcoded
+  checker interpreter. A project whose target syntax outruns the checker
+  interpreter fails the probe instead of producing an honest result.
 
 ## Testing
 
@@ -170,7 +184,7 @@ build behavior behind them early.
 Conventional Commits, **required scope**, atomic, body explains the *why*. Scopes in
 use: `scaffold, contracts, models, taxonomy, config, engine, wrapper, timing, measure,
 calibration, env, collector, adapters, corpus, catalog, counting, envman, suite,
-preflight, renderer, cli, docs, skills, ci, ruff`. **No AI/assistant attribution** in commit
+preflight, renderer, cli, data, docs, skills, ci, ruff`. **No AI/assistant attribution** in commit
 messages or PR bodies — commits read as the author's own work. See the
 `git-conventions` skill.
 
