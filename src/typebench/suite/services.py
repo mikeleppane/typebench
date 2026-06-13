@@ -66,8 +66,15 @@ class CorpusCache:
 class UvCheckerResolver:
     """Resolve checker specs through the adapter registry and uv checker cache."""
 
-    def __init__(self, cache_root: Path, *, host: ProcessHost = SYSTEM_HOST) -> None:
+    def __init__(
+        self,
+        cache_root: Path,
+        *,
+        python_version: str = "3.12",
+        host: ProcessHost = SYSTEM_HOST,
+    ) -> None:
         self._cache_root = cache_root
+        self._python_version = python_version
         self._host = host
 
     def resolve(self, spec: CheckerSpec) -> CheckerHandle:
@@ -76,6 +83,7 @@ class UvCheckerResolver:
             spec,
             self._cache_root,
             install_source=adapter.install_source,
+            python_version=self._python_version,
             host=self._host,
         )
         return CheckerHandle(spec=spec, adapter=adapter, runtime=runtime)

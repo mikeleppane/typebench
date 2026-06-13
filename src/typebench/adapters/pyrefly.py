@@ -26,7 +26,10 @@ if TYPE_CHECKING:
     from typebench.contracts.config import NormalizedConfig
     from typebench.contracts.proc import ProcessHost, RawRun
 
-_MODULES_RE = re.compile(r"(\d+) modules?")  # singular "1 module" is real output
+# Match the digit group WITH thousands separators: pyrefly's --summary=full prints
+# "8,792 modules" once a project exceeds 999 files, so a comma-blind \d+ would
+# capture only the trailing "792". Commas are stripped before int() in _files.
+_MODULES_RE = re.compile(r"([\d,]+) modules?")  # singular "1 module" is real output
 
 # Exit codes where the meaning is unambiguous (exit 1 is overloaded — handled in classify).
 _EXIT_ENV = 3
@@ -125,7 +128,7 @@ class PyreflyAdapter:
 
     def _files(self, stderr: str) -> int | None:
         m = _MODULES_RE.search(stderr)
-        return coerce_count(int(m.group(1))) if m is not None else None
+        return coerce_count(int(m.group(1).replace(",", ""))) if m is not None else None
 
     def parse(self, stdout: str, stderr: str, exit_code: int) -> tuple[int | None, int | None]:
         files = self._files(stderr)

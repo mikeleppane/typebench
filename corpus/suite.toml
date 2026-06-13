@@ -1,5 +1,5 @@
 [suite]
-version = "2026-06-10"
+version = "2026-06-13"
 
 # typebench corpus (spec §4). Each entry is pinned to a release-tag SHA so
 # third-party imports resolve identically over time. Checkers always float to
@@ -7,9 +7,9 @@ version = "2026-06-10"
 # exclude_globs are repo-relative. install is the explicit per-entry recipe,
 # run with the prepared venv active.
 #
-# Three buckets, bucketed on tokei code-LOC (blanks + comments excluded) over
+# Four buckets, bucketed on tokei code-LOC (blanks + comments excluded) over
 # src_roots with tests excluded — the same denominator the engine reports:
-#   small  ~5-18k   medium  ~18-40k   large  >70k
+#   small  ~5-18k   medium  ~18-40k   large  >70k   giant  >500k
 # constraints=None for this seed; locks are frozen from the prepared cache and
 # wired in afterwards (a later hardening pass).
 
@@ -187,3 +187,16 @@ python_platform = "linux"
 # annotations" data point. Flagged asymmetry, not apples-to-apples density.
 src_roots = ["lib/ansible"]
 install = ["uv pip install ."]
+
+# ===================== GIANT =====================
+
+[[project]]
+name = "home-assistant"
+repo_url = "https://github.com/home-assistant/core"
+sha = "9c640fe0fa008d6e80aa4cc88c9c1734605fb3e0"  # tag 2026.2.3
+tag = "2026.2.3"
+size_bucket = "giant"
+python_version = "3.13"
+python_platform = "linux"
+src_roots = ["homeassistant"]
+install = ["uv pip install -r requirements_all.txt"]
