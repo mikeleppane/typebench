@@ -47,6 +47,15 @@ def test_parse_counts_singular_module() -> None:
     assert PyreflyAdapter().parse(json.dumps({"errors": []}), "INFO 1 module\n", 0) == (0, 1)
 
 
+def test_parse_counts_modules_with_thousands_separator() -> None:
+    # pyrefly's --summary=full prints a thousands separator once a project exceeds
+    # 999 files ("8,792 modules"). A comma-blind \d+ captures only "792", which then
+    # fails the preflight scope gate (self < canonical) and silently disqualifies
+    # every large project. Observed on home-assistant (8,792 files), pyrefly 1.0.0.
+    stderr = "INFO 8,792 modules (285 dependent modules); 1,396,121 lines; took 1.93s\n"
+    assert PyreflyAdapter().parse(json.dumps({"errors": []}), stderr, 0) == (0, 8792)
+
+
 def test_parse_files_none_without_summary() -> None:
     assert PyreflyAdapter().parse(json.dumps({"errors": []}), "", 0) == (0, None)
 
