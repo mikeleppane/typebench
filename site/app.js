@@ -1,10 +1,12 @@
-// Fetch the committed trends.json and render the latest-snapshot bars plus a
-// per-checker trend line chart. Series are keyed by checker_id and viewed per
-// CPU budget (thread mode + cores), so same-day version or cores sweeps stay
-// visually distinct. No build step: vanilla JS + vendored Chart.js.
+// Fetch the committed trends.json and render a selectable per-snapshot matrix
+// plus a per-tool trend line chart. The trend draws ONE line per tool viewed per
+// CPU budget (thread mode + cores); version bumps are markers on that line, not
+// separate series, so the legend stays bounded as history grows. No build step:
+// vanilla JS + vendored Chart.js.
 
-// Per-tool base colors (close to each tool's brand), with a deterministic
-// lightness shift per checker_id so two versions of one tool never collide.
+// Per-tool base colors (close to each tool's brand). One line per tool means a
+// tool always reads as one color; the active version is shown via the marker
+// and tooltip rather than a per-version color shift.
 const TOOL_COLORS = {
   mypy: "#3572A5",
   pyright: "#1f8a3b",
@@ -26,17 +28,12 @@ function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-function colorFor(checkerId) {
-  const tool = checkerId.split("@")[0];
-  const base = TOOL_COLORS[tool] || "#5c6470";
-  let hash = 0;
-  for (let i = 0; i < checkerId.length; i += 1) {
-    hash = (hash * 31 + checkerId.charCodeAt(i)) >>> 0;
-  }
-  // ±28 lightness spread across versions of the same tool, centered near base.
-  return shiftLightness(base, (hash % 3) * 22 - 22);
+function colorFor(tool) {
+  return TOOL_COLORS[tool] || "#5c6470";
 }
 
+// Only used when one tool has two versions on the SAME date (an A/B comparison):
+// the lines split per checker_id and need distinct shades of the tool's color.
 function shiftLightness(hex, amount) {
   const digits = hex.slice(1);
   const expanded = digits.length === 3 ? digits.replace(/./g, "$&$&") : digits;
@@ -46,6 +43,19 @@ function shiftLightness(hex, amount) {
   const g = clamp(((value >> 8) & 255) + amount);
   const b = clamp((value & 255) + amount);
   return `rgb(${r}, ${g}, ${b})`;
+}
+
+// Trend range presets bound the x-axis as history accrues. Anchored to the latest
+// date in the series, so the window is stable regardless of which project is shown.
+const WINDOW_DAYS = { "90d": 90, "1y": 365, all: null };
+
+function windowDates(dates, key) {
+  const days = WINDOW_DAYS[key];
+  if (!days || dates.length === 0) return dates;
+  const cutoff = new Date(dates[dates.length - 1] + "T00:00:00Z");
+  cutoff.setUTCDate(cutoff.getUTCDate() - days);
+  const iso = cutoff.toISOString().slice(0, 10);
+  return dates.filter((d) => d >= iso);
 }
 
 function coresLabel(c) {
@@ -82,9 +92,16 @@ function applyChartTheme() {
 
 function fillStats(points, markers, cpuModels) {
   const dates = [...new Set(points.map((p) => p.date))].sort();
-  setText("stat-date", dates.length ? dates[dates.length - 1] : "—");
+  const latest = dates.length ? dates[dates.length - 1] : null;
+  setText("stat-date", latest || "—");
   setText("stat-projects", new Set(points.map((p) => p.project)).size || "—");
-  setText("stat-checkers", new Set(points.map((p) => p.checker_id)).size || "—");
+  // Count distinct *tools* in the latest snapshot, not checker_ids: a version
+  // bump (ty@0.0.48 -> ty@0.0.49) is the same checker, so it must not inflate
+  // the headline count. Within one snapshot each tool runs a single version.
+  const latestTools = new Set(
+    points.filter((p) => p.date === latest).map((p) => p.tool)
+  );
+  setText("stat-checkers", latestTools.size || "—");
   setText("stat-runs", markers.length || "—");
 
   const prov = document.getElementById("provenance");
@@ -113,16 +130,18 @@ function rankTint(t) {
 // rows are every project (tiered small -> large), columns the checkers, each cell
 // the metric value. The best cell in a row is highlighted; cells are rank-tinted.
 // Clicking a row calls onSelect(project) so the trend chart below can follow it.
-function renderMatrix(sel, metricKey, meta, budgetLabel, selected, onSelect) {
+function renderMatrix(sel, metricKey, meta, budgetLabel, selected, snapshotDate, onSelect) {
   const card = document.getElementById("snap-card");
   const headEl = document.getElementById("snap-head");
   const bodyEl = document.getElementById("snap-body");
   const dates = [...new Set(sel.map((p) => p.date))].sort();
-  const latest = dates[dates.length - 1];
-  // Build rows, columns, and cells from the latest date only. Checker versions or
-  // corpus projects that existed solely in earlier runs must not leave stale,
-  // all-dashes lines in the snapshot once history accrues.
-  const latestRows = sel.filter((p) => p.date === latest);
+  // Render the picked snapshot date; fall back to the latest available in this
+  // budget when that date has no rows here (e.g. a budget that started later).
+  const date = dates.includes(snapshotDate) ? snapshotDate : dates[dates.length - 1];
+  // Build rows, columns, and cells from this one date only. Checker versions or
+  // corpus projects that existed solely in other runs must not leave stale,
+  // all-dashes lines in the snapshot.
+  const latestRows = sel.filter((p) => p.date === date);
 
   const checkers = [...new Set(latestRows.map((p) => p.checker_id))].sort();
   const projMeta = new Map();
@@ -142,7 +161,7 @@ function renderMatrix(sel, metricKey, meta, budgetLabel, selected, onSelect) {
   });
 
   card.classList.toggle("is-empty", projects.length === 0 || checkers.length === 0);
-  setText("snap-title", latest ? `Latest snapshot — ${latest}` : "Latest snapshot");
+  setText("snap-title", date ? `Snapshot — ${date}` : "Snapshot");
   setText("snap-meta", projects.length ? `${budgetLabel} · ${meta.better} is better` : "");
   if (!projects.length || !checkers.length) {
     headEl.innerHTML = "";
@@ -255,6 +274,33 @@ async function main() {
     .map((b) => `<option value="${escapeHtml(b.key)}">${escapeHtml(b.label)}</option>`)
     .join("");
 
+  // Snapshot picker drives the matrix date (newest first, latest selected). The
+  // matrix no longer hardcodes "latest", so older official runs are reachable from
+  // the page itself instead of only via the committed JSON on GitHub.
+  const budgetEl = document.getElementById("budget");
+  const snapshotEl = document.getElementById("snapshot");
+  let selectedSnapshot = null;
+
+  // Options are scoped to the SELECTED budget: a date with no rows for the current
+  // budget (e.g. a 4-core sweep absent from a later run) must not appear, so the
+  // picker can never name a date the table is not actually showing. Called on init
+  // and whenever the budget changes; the selection is clamped to an available date.
+  function syncSnapshots() {
+    const avail = [
+      ...new Set(points.filter((p) => budgetKey(p) === budgetEl.value).map((p) => p.date)),
+    ].sort();
+    if (!avail.includes(selectedSnapshot)) {
+      selectedSnapshot = avail[avail.length - 1] || null;
+    }
+    snapshotEl.innerHTML = avail
+      .slice()
+      .reverse()
+      .map((d) => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`)
+      .join("");
+    if (selectedSnapshot) snapshotEl.value = selectedSnapshot;
+  }
+  syncSnapshots();
+
   const card = document.getElementById("chart-card");
   const titleEl = document.getElementById("chart-title");
   const metaEl = document.getElementById("chart-meta");
@@ -271,36 +317,91 @@ async function main() {
     // The matrix sees every project at this budget; clicking a row repoints the
     // trend chart below. The trend stays pinned to one project (its time axis).
     const selByBudget = points.filter((p) => budgetKey(p) === budget);
-    renderMatrix(selByBudget, metricKey, meta, budgetLabel, selectedProject, (project) => {
-      selectedProject = project;
-      render();
-    });
+    renderMatrix(
+      selByBudget,
+      metricKey,
+      meta,
+      budgetLabel,
+      selectedProject,
+      selectedSnapshot,
+      (project) => {
+        selectedProject = project;
+        render();
+      }
+    );
 
     const project = selectedProject;
     const sel = selByBudget.filter((p) => p.project === project);
-    const dates = [...new Set(sel.map((p) => p.date))].sort();
-    const checkerIds = [...new Set(sel.map((p) => p.checker_id))].sort();
+    const allDates = [...new Set(sel.map((p) => p.date))].sort();
+    const dates = windowDates(allDates, document.getElementById("window").value);
 
-    const datasets = checkerIds.map((checkerId) => {
-      const color = colorFor(checkerId);
+    // Default to ONE line per tool, so version bumps across dates collapse into a
+    // single series (markers flag where the version changed) and the legend stays
+    // bounded as history grows. Exception: when a tool has >1 version on the SAME
+    // date (an A/B comparison), that tool splits into one line per checker_id so
+    // neither version is silently hidden — build_trends keeps both rows (see
+    // tests/suite/test_renderer.py::test_build_trends_distinguishes_same_day_versions).
+    const byTool = new Map();
+    for (const p of sel) {
+      if (!byTool.has(p.tool)) byTool.set(p.tool, []);
+      byTool.get(p.tool).push(p);
+    }
+    const lines = [];
+    for (const tool of [...byTool.keys()].sort()) {
+      const recs = byTool.get(tool);
+      const versionsByDate = new Map();
+      let split = false;
+      for (const p of recs) {
+        if (!versionsByDate.has(p.date)) versionsByDate.set(p.date, new Set());
+        const ids = versionsByDate.get(p.date);
+        ids.add(p.checker_id);
+        if (ids.size > 1) split = true;
+      }
+      const base = colorFor(tool);
+      if (!split) {
+        lines.push({ label: tool, color: base, match: (p) => p.tool === tool });
+      } else {
+        const cids = [...new Set(recs.map((r) => r.checker_id))].sort();
+        cids.forEach((cid, i) => {
+          const color = shiftLightness(base, (i - (cids.length - 1) / 2) * 34);
+          lines.push({ label: cid, color, match: (p) => p.checker_id === cid });
+        });
+      }
+    }
+
+    const datasets = lines.map((line) => {
+      const color = line.color;
+      // sel is pinned to one (project, thread_mode, cores) budget, and each line
+      // matches a single row per date; the version lives in checker_id, carried for
+      // the tooltip and for marking bumps on the collapsed per-tool lines.
+      const rows = dates.map((d) => sel.find((p) => p.date === d && line.match(p)) || null);
+      const cids = rows.map((r) => (r ? r.checker_id : null));
+      // A "bump" is a point whose version changed vs the previous present date on
+      // this line; the first present point is the baseline, not a bump. Split
+      // (per-checker_id) lines hold one version, so they never flag a bump.
+      let prev = null;
+      const bumps = cids.map((cid) => {
+        if (cid === null) return false;
+        const changed = prev !== null && cid !== prev;
+        prev = cid;
+        return changed;
+      });
       return {
-        label: checkerId,
+        label: line.label,
         borderColor: color,
         backgroundColor: color,
-        pointBackgroundColor: color,
-        pointBorderColor: cssVar("--surface"),
-        pointBorderWidth: 1.5,
-        pointRadius: 3.5,
-        pointHoverRadius: 5,
+        pointBackgroundColor: rows.map((_, i) => (bumps[i] ? cssVar("--surface") : color)),
+        pointBorderColor: color,
+        pointBorderWidth: rows.map((_, i) => (bumps[i] ? 2 : 1.5)),
+        pointStyle: rows.map((_, i) => (bumps[i] ? "rectRot" : "circle")),
+        pointRadius: rows.map((r, i) => (r === null ? 0 : bumps[i] ? 5.5 : 3.5)),
+        pointHoverRadius: 6,
         borderWidth: 2,
         tension: 0.25,
         spanGaps: true,
-        data: dates.map((d) => {
-          // sel is already pinned to one (project, thread_mode, cores) budget,
-          // so date + checker_id uniquely identifies a point.
-          const hit = sel.find((p) => p.date === d && p.checker_id === checkerId);
-          return hit ? hit[metricKey] : null;
-        }),
+        data: rows.map((r) => (r ? r[metricKey] : null)),
+        cids,
+        bumps,
       };
     });
 
@@ -309,7 +410,7 @@ async function main() {
     titleEl.textContent = `${project ?? "—"} — ${meta.axis.replace(/ \(.*\)/, "")}`;
     metaEl.textContent = hasData
       ? `${budgetLabel} · ${meta.better} is better` +
-        (dates.length === 1 ? " · history accrues with each official run" : "")
+        (allDates.length === 1 ? " · history accrues with each official run" : "")
       : "";
     card.classList.toggle("is-empty", !hasData);
 
@@ -344,11 +445,16 @@ async function main() {
             usePointStyle: true,
             boxPadding: 4,
             callbacks: {
+              // Legend shows the tool; the tooltip surfaces the exact checker_id
+              // (tool@version) active at that date, so version is never lost.
               label: (item) => {
+                const name = item.dataset.cids?.[item.dataIndex] || item.dataset.label;
                 const v = item.parsed.y;
-                if (v === null || v === undefined) return `${item.dataset.label}: —`;
-                return `${item.dataset.label}: ${v.toFixed(meta.digits)} ${meta.unit}`;
+                if (v === null || v === undefined) return `${name}: —`;
+                return `${name}: ${v.toFixed(meta.digits)} ${meta.unit}`;
               },
+              afterLabel: (item) =>
+                item.dataset.bumps?.[item.dataIndex] ? "↑ new version" : undefined,
             },
           },
         },
@@ -368,9 +474,19 @@ async function main() {
     });
   }
 
-  for (const id of ["metric", "budget"]) {
+  for (const id of ["metric", "window"]) {
     document.getElementById(id).addEventListener("change", render);
   }
+  // Budget changes the set of available snapshot dates, so rebuild + clamp the
+  // picker before re-rendering — otherwise it could name a date this budget lacks.
+  budgetEl.addEventListener("change", () => {
+    syncSnapshots();
+    render();
+  });
+  snapshotEl.addEventListener("change", () => {
+    selectedSnapshot = snapshotEl.value;
+    render();
+  });
 
   // Re-theme on light/dark switch so the chart matches the page live.
   if (window.matchMedia) {

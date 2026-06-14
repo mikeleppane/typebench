@@ -278,6 +278,14 @@
       color: var(--text-faint);
     }
 
+    /* Quiet parenthetical noting which card a control drives (table vs chart). */
+    .field__scope {
+      font-weight: 400;
+      letter-spacing: 0;
+      text-transform: none;
+      opacity: 0.75;
+    }
+
     select {
       appearance: none;
       width: 100%;
@@ -571,11 +579,23 @@
         <label for="budget">CPU budget</label>
         <select id="budget"></select>
       </div>
+      <div class="field field--grow">
+        <label for="snapshot">Snapshot <span class="field__scope">(table)</span></label>
+        <select id="snapshot"></select>
+      </div>
+      <div class="field field--grow">
+        <label for="window">Trend range <span class="field__scope">(chart)</span></label>
+        <select id="window">
+          <option value="90d">Last 90 days</option>
+          <option value="1y">Last year</option>
+          <option value="all">All time</option>
+        </select>
+      </div>
     </section>
 
     <section class="card reveal" id="snap-card" aria-label="Latest results comparison">
       <div class="card__head">
-        <h2><span class="sec-num" aria-hidden="true">01</span><span id="snap-title">Latest snapshot</span></h2>
+        <h2><span class="sec-num" aria-hidden="true">01</span><span id="snap-title">Snapshot</span></h2>
         <span class="card__meta" id="snap-meta"></span>
       </div>
       <div class="matrix-scroll">
@@ -617,14 +637,12 @@
     </section>
 
     <p class="footnote reveal">
-      The <strong>calibration-normalized</strong> wall series divides each run by its
-      per-CPU-model calibration anchor, so VM hardware variance does not masquerade as a
-      checker change. Throughput uses the canonical analyzed code-LOC denominator
-      (<code>tokei</code>; blanks and comments excluded), identical across tools; it is
-      withheld for tools that over-report their analyzed set. Checker issue counts are
-      intentionally omitted — they are not comparable across tools and are not a ranking.
-      Methodology and raw envelopes live in the
-      <a href="https://github.com/mikeleppane/typebench">typebench repository</a>.
+      <strong>Calibration-normalized</strong> wall divides each run by its per-CPU
+      calibration anchor, so VM variance can't pass for a checker change.
+      <strong>Throughput</strong> uses one shared code-LOC denominator (<code>tokei</code>,
+      code only) and is withheld for tools that over-report their analyzed set. Issue
+      counts are omitted — not comparable across tools, not a ranking. Full methodology and
+      raw envelopes: the <a href="https://github.com/mikeleppane/typebench">typebench repo</a>.
     </p>
     <p class="provenance reveal" id="provenance" hidden></p>
   </div>
