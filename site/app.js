@@ -299,6 +299,17 @@ async function main() {
       .join("");
     if (selectedSnapshot) snapshotEl.value = selectedSnapshot;
   }
+
+  // Open on a budget that actually covers the latest snapshot, so the newest run
+  // is visible by default even when it dropped a budget the older runs carried
+  // (e.g. a desktop sweep with no all-cores pass). Budgets keep their order, so
+  // the default returns to all-cores automatically once a run re-includes it.
+  const latestDate = [...new Set(points.map((p) => p.date))].sort().pop();
+  budgetEl.value = (
+    budgets.find((b) => points.some((p) => p.date === latestDate && budgetKey(p) === b.key)) ||
+    budgets[0]
+  ).key;
+
   syncSnapshots();
 
   const card = document.getElementById("chart-card");
