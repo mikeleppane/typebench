@@ -55,6 +55,8 @@
       --accent-soft: rgba(15, 118, 110, 0.1);
       --delta-good: #15803d;
       --delta-bad: #b4332b;
+      --delta-good-soft: rgba(21, 128, 61, 0.13);
+      --delta-bad-soft: rgba(180, 51, 43, 0.13);
       --grid: rgba(32, 34, 42, 0.08);
       --shadow: 0 1px 2px rgba(32, 34, 42, 0.04), 0 1px 3px rgba(32, 34, 42, 0.06);
     }
@@ -76,6 +78,8 @@
         --accent-soft: rgba(45, 212, 191, 0.12);
         --delta-good: #4ade80;
         --delta-bad: #f87171;
+        --delta-good-soft: rgba(74, 222, 128, 0.16);
+        --delta-bad-soft: rgba(248, 113, 113, 0.16);
         --grid: rgba(231, 233, 238, 0.08);
         --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.25);
       }
@@ -428,22 +432,38 @@
 
     .matrix td.cell.na .c { color: var(--text-faint); }
 
-    /* Version-over-version delta, tucked under the cell value. Color encodes
-       better/worse for the metric; the arrow encodes the raw direction of change
-       so it stays legible without color. A trailing * marks a cross-CPU pair. */
-    .matrix td.cell .delta {
-      display: block;
-      margin-top: -3px;
-      padding: 0 var(--space-3) var(--space-2);
-      font-size: 0.58rem;
-      line-height: 1.1;
+    /* Version-over-version delta, shown as a compact pill so it reads as a real
+       metric rather than subscript noise. Color encodes better/worse; the arrow
+       encodes the raw direction so it stays legible without color. A cross-machine
+       pair the metric can't support is shown neutral + dotted ("≈") instead of a
+       confident green/red. Shared by the matrix cells and the legend key. */
+    .delta {
+      display: inline-flex;
+      align-items: center;
+      gap: 1px;
+      padding: 1px 6px;
+      font-family: var(--font-mono);
+      font-size: 0.62rem;
+      font-weight: 600;
+      line-height: 1.4;
+      border-radius: var(--radius-pill);
       font-variant-numeric: tabular-nums;
       white-space: nowrap;
-      color: var(--text-faint);
+      color: var(--text-muted);
+      background: var(--surface-2);
     }
-    .matrix td.cell .delta.good { color: var(--delta-good); }
-    .matrix td.cell .delta.bad { color: var(--delta-bad); }
-    .matrix td.cell .delta .x { opacity: 0.7; margin-left: 1px; }
+    .delta.good { color: var(--delta-good); background: var(--delta-good-soft); }
+    .delta.bad { color: var(--delta-bad); background: var(--delta-bad-soft); }
+    .delta.approx {
+      color: var(--text-muted);
+      background: transparent;
+      border-bottom: 1px dotted var(--border-strong);
+      border-radius: 0;
+      padding: 1px 1px 0;
+    }
+    /* In a cell the pill sits on its own line under the value (the value's .c is
+       block), tucked up and right-aligned beneath the number. */
+    .matrix td.cell .delta { margin: -3px var(--space-3) var(--space-2) 0; }
 
     .matrix tr.tier-row td {
       background: var(--surface-2);
@@ -480,6 +500,17 @@
     }
 
     .matrix-legend__hint { color: var(--text-faint); }
+
+    /* The delta key only appears when the matrix shows at least one delta, so the
+       encoding is taught exactly when it is on screen. */
+    .matrix-legend__delta {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-2);
+      flex-wrap: wrap;
+    }
+    .matrix-legend__delta[hidden] { display: none; }
+    .matrix-legend__delta .delta { cursor: default; }
 
     /* ---------- Empty state ---------- */
     .empty {
@@ -628,6 +659,7 @@
       <div class="matrix-legend" id="snap-legend" aria-hidden="true">
         <span>best</span><span class="matrix-legend__ramp"></span><span>worst (per row)</span>
         <span class="matrix-legend__hint">· click a row to chart that project over time</span>
+        <span class="matrix-legend__delta" id="snap-delta-key" hidden></span>
       </div>
       <div class="empty" role="status">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
