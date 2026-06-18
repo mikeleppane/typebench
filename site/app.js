@@ -126,6 +126,42 @@ function rankTint(t) {
   return `hsla(${h}, ${s}%, ${l}%, 0.3)`;
 }
 
+// Short CPU label (e.g. "i9-14900K") for a delta tooltip, so a cross-machine
+// comparison names the other machine instead of a full marketing string.
+function shortCpu(model) {
+  if (!model) return "?";
+  const m = /i\d-\d{3,5}\w*/i.exec(model);
+  return m ? m[0] : model;
+}
+
+// Version-over-version delta for one cell: the most recent EARLIER run that ran
+// the same tool on the same project + budget at a DIFFERENT version and has a
+// value for the active metric. Returns null when there is no such prior, so a
+// first-ever version simply shows no delta. CPU is ignored on purpose; a pair on
+// different machines is flagged (crossCpu) because raw times are not comparable
+// across machines — the calibration-normalized wall metric is the one that is.
+function versionDelta(sel, cur, metricKey) {
+  if (!cur || cur[metricKey] === null || cur[metricKey] === undefined) return null;
+  const priors = sel.filter(
+    (p) =>
+      p.project === cur.project &&
+      p.tool === cur.tool &&
+      p.date < cur.date &&
+      p.version !== cur.version &&
+      p[metricKey] !== null &&
+      p[metricKey] !== undefined
+  );
+  if (!priors.length) return null;
+  const prior = priors.reduce((a, b) => (b.date > a.date ? b : a));
+  const base = prior[metricKey];
+  if (!base) return null;
+  return {
+    pct: ((cur[metricKey] - base) / base) * 100,
+    prior,
+    crossCpu: prior.cpu_model !== cur.cpu_model,
+  };
+}
+
 // Latest-date comparison as a projects × checkers matrix for one metric + budget:
 // rows are every project (tiered small -> large), columns the checkers, each cell
 // the metric value. The best cell in a row is highlighted; cells are rank-tinted.
@@ -176,6 +212,8 @@ function renderMatrix(sel, metricKey, meta, budgetLabel, selected, snapshotDate,
 
   let html = "";
   let currentTier = null;
+  let anyDelta = false;
+  let crossCpuShown = false;
   for (const project of projects) {
     const { tier, loc } = projMeta.get(project);
     if (tier !== currentTier) {
@@ -185,12 +223,12 @@ function renderMatrix(sel, metricKey, meta, budgetLabel, selected, snapshotDate,
       )} projects</td></tr>`;
     }
 
-    const values = checkers.map((c) => {
+    const cells = checkers.map((c) => {
       const hit = latestRows.find((p) => p.project === project && p.checker_id === c);
-      const v = hit ? hit[metricKey] : null;
-      return v === null || v === undefined ? null : v;
+      const v = hit && hit[metricKey] !== null && hit[metricKey] !== undefined ? hit[metricKey] : null;
+      return { hit, v };
     });
-    const present = values.filter((v) => v !== null);
+    const present = cells.map((c) => c.v).filter((v) => v !== null);
     const best = present.length
       ? meta.better === "lower"
         ? Math.min(...present)
@@ -209,7 +247,7 @@ function renderMatrix(sel, metricKey, meta, budgetLabel, selected, snapshotDate,
       `role="button" tabindex="0" aria-pressed="${isSel}" ` +
       `aria-label="Show ${escapeHtml(project)} trend over time">`;
     html += `<td class="proj">${escapeHtml(project)}${locHint}</td>`;
-    for (const v of values) {
+    for (const { hit, v } of cells) {
       if (v === null) {
         html += `<td class="cell na"><span class="c">—</span></td>`;
         continue;
@@ -217,13 +255,40 @@ function renderMatrix(sel, metricKey, meta, budgetLabel, selected, snapshotDate,
       const t =
         span > 0 ? (meta.better === "lower" ? (v - lo) / span : (hi - v) / span) : 0;
       const isBest = present.length > 1 && v === best;
+      let deltaHtml = "";
+      const d = versionDelta(sel, hit, metricKey);
+      if (d) {
+        anyDelta = true;
+        crossCpuShown = crossCpuShown || d.crossCpu;
+        const better = meta.better === "lower" ? d.pct < 0 : d.pct > 0;
+        const cls = Math.abs(d.pct) < 0.05 ? "" : better ? " good" : " bad";
+        const arrow = d.pct > 0 ? "▲" : d.pct < 0 ? "▼" : "•";
+        const star = d.crossCpu ? `<span class="x">*</span>` : "";
+        const title =
+          `vs ${d.prior.version} · ${d.prior.date}` +
+          (d.crossCpu ? ` · ${shortCpu(d.prior.cpu_model)} (cross-CPU)` : "");
+        deltaHtml =
+          `<span class="delta${cls}" title="${escapeHtml(title)}">` +
+          `${arrow}${Math.abs(d.pct).toFixed(1)}%${star}</span>`;
+      }
       html += `<td class="cell${isBest ? " best" : ""}"><span class="c" style="background:${rankTint(
         t
-      )}">${v.toFixed(meta.digits)}</span></td>`;
+      )}">${v.toFixed(meta.digits)}</span>${deltaHtml}</td>`;
     }
     html += `</tr>`;
   }
   bodyEl.innerHTML = html;
+
+  // Spell out what the deltas mean only when at least one is shown, and warn
+  // about the cross-CPU asterisk when one appears so a raw delta is never read
+  // as machine-neutral.
+  if (anyDelta) {
+    setText(
+      "snap-meta",
+      `${budgetLabel} · ${meta.better} is better · Δ vs previous different version` +
+        (crossCpuShown ? " (* = cross-CPU; use normalized wall)" : "")
+    );
+  }
 
   for (const row of bodyEl.querySelectorAll(".proj-row")) {
     const pick = () => onSelect(row.dataset.project);
@@ -299,6 +364,17 @@ async function main() {
       .join("");
     if (selectedSnapshot) snapshotEl.value = selectedSnapshot;
   }
+
+  // Open on a budget that actually covers the latest snapshot, so the newest run
+  // is visible by default even when it dropped a budget the older runs carried
+  // (e.g. a desktop sweep with no all-cores pass). Budgets keep their order, so
+  // the default returns to all-cores automatically once a run re-includes it.
+  const latestDate = [...new Set(points.map((p) => p.date))].sort().pop();
+  budgetEl.value = (
+    budgets.find((b) => points.some((p) => p.date === latestDate && budgetKey(p) === b.key)) ||
+    budgets[0]
+  ).key;
+
   syncSnapshots();
 
   const card = document.getElementById("chart-card");

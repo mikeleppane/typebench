@@ -53,6 +53,8 @@
       --text-faint: #8d909a;
       --accent: #0f766e;
       --accent-soft: rgba(15, 118, 110, 0.1);
+      --delta-good: #15803d;
+      --delta-bad: #b4332b;
       --grid: rgba(32, 34, 42, 0.08);
       --shadow: 0 1px 2px rgba(32, 34, 42, 0.04), 0 1px 3px rgba(32, 34, 42, 0.06);
     }
@@ -72,6 +74,8 @@
         --text-faint: #6b7382;
         --accent: #2dd4bf;
         --accent-soft: rgba(45, 212, 191, 0.12);
+        --delta-good: #4ade80;
+        --delta-bad: #f87171;
         --grid: rgba(231, 233, 238, 0.08);
         --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.25);
       }
@@ -423,6 +427,23 @@
     }
 
     .matrix td.cell.na .c { color: var(--text-faint); }
+
+    /* Version-over-version delta, tucked under the cell value. Color encodes
+       better/worse for the metric; the arrow encodes the raw direction of change
+       so it stays legible without color. A trailing * marks a cross-CPU pair. */
+    .matrix td.cell .delta {
+      display: block;
+      margin-top: -3px;
+      padding: 0 var(--space-3) var(--space-2);
+      font-size: 0.58rem;
+      line-height: 1.1;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      color: var(--text-faint);
+    }
+    .matrix td.cell .delta.good { color: var(--delta-good); }
+    .matrix td.cell .delta.bad { color: var(--delta-bad); }
+    .matrix td.cell .delta .x { opacity: 0.7; margin-left: 1px; }
 
     .matrix tr.tier-row td {
       background: var(--surface-2);
