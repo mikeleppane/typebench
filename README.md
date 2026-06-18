@@ -572,7 +572,7 @@ line beneath the tables records the exact CPU and run counts.
 
 <!-- TYPEBENCH:BEGIN -->
 
-_Corpus snapshot 2026-06-13 · measured 2026-06-13 12:11 UTC_
+_Corpus snapshot 2026-06-13 · measured 2026-06-18 09:15 UTC_
 
 
 ### Small projects
@@ -582,72 +582,72 @@ _Corpus snapshot 2026-06-13 · measured 2026-06-13 12:11 UTC_
 
 7,312 code LOC analyzed across 23 files
 
-| Checker | All-cores | 1c | Peak mem (MB) | kLOC/s |
-|------|--:|--:|--:|--:|
-| ty@0.0.49 | **0.074** | **0.252** | **103.2** | **99.3** |
-| pyrefly@1.0.0 | 0.165 | 0.300 | 123.3 | 44.2 |
-| mypy@2.1.0 | 1.057 | 1.301 | 924.5 | 6.9 |
-| pyright@1.1.410 | 2.267 | 3.527 | 1987.7 | 3.2 |
+| Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| ty@0.0.50 | **0.166** | **0.077** | **0.056** | **0.046** | **91.9** | **159.0** |
+| pyrefly@1.1.0 | 0.192 | 0.125 | 0.105 | 0.095 | 106.0 | 77.4 |
+| mypy@2.1.0 | 0.912 | 0.689 | 0.628 | 0.657 | 736.8 | 11.1 |
+| pyright@1.1.410 | 1.714 | 1.047 | 0.911 | 0.898 | 311.3 | 8.1 |
 
 
 #### click
 
 9,373 code LOC analyzed across 17 files
 
-| Checker | All-cores | 1c | Peak mem (MB) | kLOC/s |
-|------|--:|--:|--:|--:|
-| ty@0.0.49 | **0.083** | **0.242** | **92.4** | **113.6** |
-| pyrefly@1.0.0 | 0.170 | 0.325 | 128.9 | 55.2 |
-| mypy@2.1.0 | 0.947 | 0.942 | 775.6 | 9.9 |
-| pyright@1.1.410 | 2.382 | 4.134 | 1666.0 | 3.9 |
+| Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| ty@0.0.50 | **0.164** | **0.078** | **0.059** | **0.051** | **86.4** | **184.6** |
+| pyrefly@1.1.0 | 0.216 | 0.138 | 0.110 | 0.100 | 113.0 | 93.8 |
+| mypy@2.1.0 | 0.666 | 0.621 | 0.582 | 0.594 | 605.1 | 15.8 |
+| pyright@1.1.410 | 1.983 | 1.186 | 1.038 | 1.027 | 330.4 | 9.1 |
 
 
 #### anyio
 
 11,445 code LOC analyzed across 42 files
 
-| Checker | All-cores | 1c | Peak mem (MB) | kLOC/s |
-|------|--:|--:|--:|--:|
-| ty@0.0.49 | **0.111** | **0.324** | **115.2** | **102.7** |
-| pyrefly@1.0.0 | 0.188 | 0.364 | 137.5 | 60.8 |
-| mypy@2.1.0 | 1.132 | 1.293 | 862.2 | 10.1 |
-| pyright@1.1.410 | 2.904 | 4.853 | 2169.7 | 3.9 |
+| Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| ty@0.0.50 | **0.207** | **0.115** | **0.087** | **0.070** | **106.2** | **164.3** |
+| pyrefly@1.1.0 | 0.231 | 0.142 | 0.130 | 0.118 | 116.5 | 97.0 |
+| mypy@2.1.0 | 0.924 | 0.780 | 0.728 | 0.735 | 695.7 | 15.6 |
+| pyright@1.1.410 | 2.331 | 1.411 | 1.234 | 1.224 | 365.2 | 9.3 |
 
 
 #### jinja2
 
 11,564 code LOC analyzed across 25 files
 
-| Checker | All-cores | 1c | Peak mem (MB) | kLOC/s |
-|------|--:|--:|--:|--:|
-| ty@0.0.49 | **0.091** | 0.308 | **122.1** | **127.8** |
-| pyrefly@1.0.0 | 0.150 | **0.304** | 131.8 | 77.2 |
-| mypy@2.1.0 | 1.151 | 1.187 | 822.5 | 10.0 |
-| pyright@1.1.410 | 3.184 | 4.340 | 2091.5 | 3.6 |
+| Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| ty@0.0.50 | 0.249 | **0.117** | **0.079** | **0.070** | **112.5** | **165.4** |
+| pyrefly@1.1.0 | **0.239** | 0.145 | 0.115 | 0.100 | 118.9 | 115.7 |
+| mypy@2.1.0 | 0.843 | 0.764 | 0.725 | 0.741 | 651.1 | 15.6 |
+| pyright@1.1.410 | 2.423 | 1.436 | 1.240 | 1.226 | 355.4 | 9.4 |
 
 
 #### fastapi
 
 18,287 code LOC analyzed across 48 files
 
-| Checker | All-cores | 1c | Peak mem (MB) | kLOC/s |
-|------|--:|--:|--:|--:|
-| ty@0.0.49 | **0.103** | **0.359** | **135.9** | **178.3** |
-| pyrefly@1.0.0 | 0.204 | 0.510 | 192.5 | 89.6 |
-| mypy@2.1.0 | 1.263 | 1.853 | 1068.1 | 14.5 |
-| pyright@1.1.410 | 4.339 | 6.237 | 2968.9 | 4.2 |
+| Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| ty@0.0.50 | **0.246** | **0.130** | **0.092** | **0.072** | **124.5** | **252.9** |
+| pyrefly@1.1.0 | 0.346 | 0.202 | 0.162 | 0.135 | 172.3 | 135.9 |
+| mypy@2.1.0 | 1.316 | 0.869 | 0.803 | 0.835 | 874.9 | 21.9 |
+| pyright@1.1.410 | 3.035 | 1.779 | 1.540 | 1.520 | 437.6 | 12.0 |
 
 
 #### trio
 
 18,745 code LOC analyzed across 78 files
 
-| Checker | All-cores | 1c | Peak mem (MB) | kLOC/s |
-|------|--:|--:|--:|--:|
-| ty@0.0.49 | **0.089** | **0.401** | **125.8** | **209.6** |
-| pyrefly@1.0.0 | 0.200 | 0.544 | 170.2 | 93.7 |
-| mypy@2.1.0 | 1.235 | 1.425 | 876.1 | 15.2 |
-| pyright@1.1.410 | 4.042 | 6.876 | 2915.7 | 4.6 |
+| Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| ty@0.0.50 | **0.257** | **0.122** | **0.075** | **0.060** | **110.2** | **314.9** |
+| pyrefly@1.1.0 | 0.355 | 0.197 | 0.139 | 0.133 | 148.8 | 140.8 |
+| mypy@2.1.0 | 1.011 | 0.869 | 0.810 | 0.822 | 697.1 | 22.8 |
+| pyright@1.1.410 | 3.185 | 1.908 | 1.649 | 1.633 | 426.0 | 11.5 |
 
 
 ### Medium projects
@@ -657,48 +657,48 @@ _Corpus snapshot 2026-06-13 · measured 2026-06-13 12:11 UTC_
 
 27,049 code LOC analyzed across 79 files
 
-| Checker | All-cores | 1c | Peak mem (MB) | kLOC/s |
-|------|--:|--:|--:|--:|
-| pyrefly@1.0.0 | **0.230** | **0.640** | **198.0** | **117.8** |
-| ty@0.0.49 | 0.460 | 1.506 | 238.4 | 58.8 |
-| mypy@2.1.0 | 1.453 | 1.750 | 896.0 | 18.6 |
-| pyright@1.1.410 | 7.700 | 12.627 | 3517.0 | 3.5 |
+| Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| pyrefly@1.1.0 | **0.424** | **0.225** | **0.171** | **0.156** | **175.8** | **173.5** |
+| ty@0.0.50 | 0.993 | 0.521 | 0.345 | 0.295 | 214.4 | 91.7 |
+| mypy@2.1.0 | 1.232 | 0.999 | 0.941 | 0.952 | 720.0 | 28.4 |
+| pyright@1.1.410 | 7.022 | 4.583 | 4.040 | 4.028 | 550.4 | 6.7 |
 
 
 #### hypothesis
 
 32,072 code LOC analyzed across 102 files
 
-| Checker | All-cores | 1c | Peak mem (MB) | kLOC/s |
-|------|--:|--:|--:|--:|
-| ty@0.0.49 | **0.162** | 1.024 | **220.8** | **198.3** |
-| pyrefly@1.0.0 | 0.256 | **0.990** | 227.6 | 125.3 |
-| mypy@2.1.0 | 1.929 | 2.343 | 1042.4 | 16.6 |
-| pyright@1.1.410 | 5.776 | 12.232 | 3366.3 | 5.6 |
+| Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| ty@0.0.50 | 0.706 | **0.305** | **0.183** | **0.120** | 209.1 | **267.4** |
+| pyrefly@1.1.0 | **0.675** | 0.318 | 0.208 | 0.170 | **202.7** | 188.1 |
+| mypy@2.1.0 | 1.652 | 1.346 | 1.247 | 1.268 | 860.2 | 25.3 |
+| pyright@1.1.410 | 6.142 | 3.846 | 3.413 | 3.367 | 619.9 | 9.5 |
 
 
 #### rich
 
 35,544 code LOC analyzed across 100 files
 
-| Checker | All-cores | 1c | Peak mem (MB) | kLOC/s |
-|------|--:|--:|--:|--:|
-| ty@0.0.49 | **0.088** | **0.445** | **132.9** | **404.8** |
-| pyrefly@1.0.0 | 0.206 | 0.642 | 181.2 | 172.7 |
-| mypy@2.1.0 | 1.213 | 1.451 | 880.6 | 29.3 |
-| pyright@1.1.410 | 4.629 | 9.155 | 3237.8 | 7.7 |
+| Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| ty@0.0.50 | **0.303** | **0.139** | **0.083** | **0.060** | **120.6** | **596.3** |
+| pyrefly@1.1.0 | 0.427 | 0.216 | 0.158 | 0.128 | 158.8 | 277.7 |
+| mypy@2.1.0 | 1.016 | 0.843 | 0.784 | 0.793 | 705.9 | 44.8 |
+| pyright@1.1.410 | 4.731 | 2.991 | 2.649 | 2.648 | 522.5 | 13.4 |
 
 
 #### pylint
 
 39,792 code LOC analyzed across 178 files
 
-| Checker | All-cores | 1c | Peak mem (MB) | kLOC/s |
-|------|--:|--:|--:|--:|
-| ty@0.0.49 | **0.173** | **1.040** | **216.7** | **230.2** |
-| pyrefly@1.0.0 | 0.263 | 1.089 | 250.1 | 151.5 |
-| mypy@2.1.0 | 1.317 | 2.167 | 1046.5 | 30.2 |
-| pyright@1.1.410 | 5.693 | 11.439 | 3528.5 | 7.0 |
+| Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| ty@0.0.50 | **0.683** | **0.297** | **0.179** | **0.131** | **199.2** | **303.2** |
+| pyrefly@1.1.0 | 0.724 | 0.334 | 0.228 | 0.175 | 225.3 | 227.9 |
+| mypy@2.1.0 | 1.528 | 0.975 | 0.867 | 0.845 | 848.7 | 47.1 |
+| pyright@1.1.410 | 5.824 | 3.538 | 3.079 | 3.092 | 625.0 | 12.9 |
 
 
 ### Large projects
@@ -708,66 +708,66 @@ _Corpus snapshot 2026-06-13 · measured 2026-06-13 12:11 UTC_
 
 70,948 code LOC analyzed across 247 files
 
-| Checker | All-cores | 1c | Peak mem (MB) | kLOC/s |
-|------|--:|--:|--:|--:|
-| ty@0.0.49 | **0.246** | **1.487** | **284.8** | —* |
-| pyrefly@1.0.0 | 0.302 | 1.584 | 320.2 | —* |
-| mypy@2.1.0 | 2.668 | 3.464 | 1344.4 | 26.6 |
-| pyright@1.1.410 | 8.092 | 14.793 | 4878.0 | —* |
+| Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| ty@0.0.50 | **1.009** | **0.437** | **0.244** | **0.162** | **267.6** | —* |
+| pyrefly@1.1.0 | 1.061 | 0.471 | 0.306 | 0.231 | 288.6 | —* |
+| mypy@2.1.0 | 2.437 | 1.891 | 1.755 | 1.759 | 1094.1 | 40.3 |
+| pyright@1.1.410 | 7.818 | 5.057 | 4.503 | 4.484 | 852.0 | —* |
 
 
 #### ansible-core
 
 101,119 code LOC analyzed across 575 files
 
-| Checker | All-cores | 1c | Peak mem (MB) | kLOC/s |
-|------|--:|--:|--:|--:|
-| pyrefly@1.0.0 | **0.427** | **2.645** | **410.1** | **236.9** |
-| ty@0.0.49 | 0.489 | 2.716 | 477.7 | 206.8 |
-| mypy@2.1.0 | 2.239 | 5.042 | 1514.5 | 45.2 |
-| pyright@1.1.410 | 12.472 | 24.715 | 5477.3 | 8.1 |
+| Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| pyrefly@1.1.0 | **1.768** | **0.759** | **0.449** | **0.312** | **363.5** | **323.6** |
+| ty@0.0.50 | 2.050 | 0.894 | 0.497 | 0.352 | 533.2 | 287.3 |
+| mypy@2.1.0 | 3.602 | 2.050 | 1.623 | 1.532 | 1246.0 | 66.0 |
+| pyright@1.1.410 | 13.463 | 8.995 | 8.089 | 8.088 | 1246.1 | 12.5 |
 
 
 #### mypy
 
 123,278 code LOC analyzed across 247 files
 
-| Checker | All-cores | 1c | Peak mem (MB) | kLOC/s |
-|------|--:|--:|--:|--:|
-| ty@0.0.49 | **0.395** | **2.673** | **461.8** | —* |
-| pyrefly@1.0.0 | 0.593 | 2.981 | 541.0 | —* |
-| mypy@2.1.0 | 1.917 | 4.873 | 1370.2 | —* |
-| pyright@1.1.410 | 10.906 | 23.515 | 5383.7 | —* |
+| Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| ty@0.0.50 | **1.860** | **0.786** | **0.468** | **0.300** | **430.8** | —* |
+| pyrefly@1.1.0 | 2.076 | 0.882 | 0.525 | 0.383 | 500.6 | —* |
+| mypy@2.1.0 | 3.464 | 1.850 | 1.386 | 1.237 | 1128.0 | —* |
+| pyright@1.1.410 | 12.915 | 8.442 | 7.583 | 7.548 | 1343.5 | —* |
 
 
 #### sqlalchemy
 
 200,180 code LOC analyzed across 256 files
 
-| Checker | All-cores | 1c | Peak mem (MB) | kLOC/s |
-|------|--:|--:|--:|--:|
-| pyrefly@1.0.0 | **0.405** | **2.422** | **310.2** | **494.1** |
-| ty@0.0.49 | 0.556 | 3.578 | 646.4 | 360.3 |
-| mypy@2.1.0 | 4.557 | 6.026 | 1603.7 | 43.9 |
-| pyright@1.1.410 | 14.301 | 27.839 | 7305.2 | 14.0 |
+| Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| pyrefly@1.1.0 | **1.675** | **0.752** | **0.452** | **0.309** | **286.0** | **648.0** |
+| ty@0.0.50 | 2.476 | 1.031 | 0.586 | 0.352 | 612.8 | 568.8 |
+| mypy@2.1.0 | 4.283 | 3.294 | 3.086 | 3.105 | 1335.6 | 64.5 |
+| pyright@1.1.410 | 14.960 | 10.084 | 9.095 | 9.082 | 1404.3 | 22.0 |
 
 
 #### home-assistant
 
 1,058,062 code LOC analyzed across 8,789 files
 
-| Checker | All-cores | 1c | Peak mem (MB) | kLOC/s |
-|------|--:|--:|--:|--:|
-| ty@0.0.49 | **3.570** | **26.429** | 4200.6 | —* |
-| pyrefly@1.0.0 | 4.221 | 27.302 | **4025.7** | —* |
-| mypy@2.1.0 | 18.641 | 73.395 | 13583.6 | 56.8 |
-| pyright@1.1.410 | 42.341 | 241.502 | 18656.6! | —* |
+| Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
+|------|--:|--:|--:|--:|--:|--:|
+| ty@0.0.50 | 17.745 | **7.006** | **3.700** | **2.071** | 4038.9 | —* |
+| pyrefly@1.1.0 | **17.227** | 7.133 | 4.149 | 2.539 | **3615.3** | —* |
+| mypy@2.1.0 | 52.142 | 22.489 | 14.030 | 10.492 | 11795.8 | 100.8 |
+| pyright@1.1.410 | 135.610 | 92.645 | 81.267 | 81.838 | 4513.9 | —* |
 
 
-> Wall is the hyperfine median in seconds, fastest first; the best cell in each metric column is in **bold**. **All-cores** uses the whole machine; the per-core columns are the constrained track, each pinned to the core count in its header. Peak mem and kLOC/s are from the all-cores pass. kLOC/s denominator is the canonical analyzed code-LOC, identical across tools. `—*` = throughput withheld because the tool over-reports its analyzed set vs the canonical denominator. `!` = swap observed during the memory pass, so peak memory may be understated. Checker issue counts are intentionally omitted — they are not comparable across tools and are not a ranking.
+> Wall is the hyperfine median in seconds, fastest first; the best cell in each metric column is in **bold**. The per-core columns are the constrained track, each pinned to the core count in its header. Peak mem and kLOC/s are from the 16-core pass. kLOC/s denominator is the canonical analyzed code-LOC, identical across tools. `—*` = throughput withheld because the tool over-reports its analyzed set vs the canonical denominator. `!` = swap observed during the memory pass, so peak memory may be understated. Checker issue counts are intentionally omitted — they are not comparable across tools and are not a ranking.
 
 
-> Measured on 13th Gen Intel(R) Core(TM) i7-13850HX (20 cores), Linux 6.18.33.1-microsoft-standard-WSL2; 10 timed runs, 3 warmup. Absolute times are machine-specific — compare rows within the same suite, or the normalized trend lines on the site; do not compare raw seconds across machines.
+> Measured on Intel(R) Core(TM) i9-14900K (32 cores), Linux 6.17.0-35-generic; 10 timed runs, 3 warmup. Absolute times are machine-specific — compare rows within the same suite, or the normalized trend lines on the site; do not compare raw seconds across machines.
 
 <!-- TYPEBENCH:END -->
 

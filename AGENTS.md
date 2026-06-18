@@ -100,6 +100,21 @@ the same `uv run …` invocations (`mise trust` once per clone first).
 `uv sync` sets up the env. Pre-commit runs `ruff check --fix`, `ruff format`, and
 `pyrefly check` (strict) on commit; never bypass with `--no-verify`.
 
+**Non-interactive runs need the mise toolchain on PATH.** `mise install` provisions
+the pinned externals (`hyperfine`, `tokei`, `node`, `uv`) but does **not** put them
+on a non-interactive shell's PATH the way `mise activate` does in a login shell.
+Prefix benchmark commands with the shims dir (or activate mise) so they resolve:
+
+```bash
+PATH="$HOME/.local/share/mise/shims:$PATH" uv run typebench …
+```
+
+Without this, the run degrades **silently**: `typebench doctor` reports
+`hyperfine`/`node`/`tokei` MISSING, and a suite still exits 0 while writing
+`timing: null` everywhere and dropping pyright (no `node`) entirely — a corrupt
+benchmark that looks clean. Always confirm `typebench doctor` is all-green before any
+measurement run.
+
 ## Generated verification artifacts
 
 `results/` and `preflight/` are local verification outputs by default. Do not
@@ -109,6 +124,14 @@ explicitly asks to publish/version that specific result artifact.
 For verification runs, report the command, key metrics, and sanity checks in the
 assistant response. Commit rendered/source artifacts only when they are part of the
 requested change and not ignored by default.
+
+**Monitoring a long `suite` run.** The envelope JSON is written **atomically at the
+end** — there is no partial file mid-run, so its absence is not failure. Suite
+progress renders only to a TTY, so a redirected log stays empty (looks dead, isn't).
+Track progress instead via `typebench-cache/<project>@<sha>/` (projects prepared so
+far) and the live `taskset … hyperfine`/checker process tree; the matrix iterates
+checker-major, cores-inner, so the slow tail is the biggest project (home-assistant,
+>1M LOC) at low core counts — pyright single-core there is the worst cell.
 
 **Planning directories stay out of git — hard rule.** `docs/plans/` and
 `docs/superpowers/` are gitignored working notes. Never commit them and never
