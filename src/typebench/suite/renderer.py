@@ -183,18 +183,29 @@ def _compact_table(
     harness_mem_baseline_bytes: int | None,
     harness_wall_overhead_s: float | None,
 ) -> str:
-    """One row per checker for a single project: all-cores wall + the constrained
-    core sweep folded into columns, plus peak mem and kLOC/s from the all-cores
-    pass. Fastest (all-cores wall) first; the best cell in each metric column is bold."""
+    """One row per checker for a single project: the wall sweep folded into columns,
+    plus peak mem and kLOC/s. When the envelope carries an all-cores pass, that wall
+    leads the row and anchors the mem/kLOC columns; a sweep-only envelope (constrained
+    cores, no all-cores) drops the All-cores column and anchors mem/kLOC on the
+    highest-core pass instead. Fastest (reference wall) first; the best cell in each
+    metric column is bold."""
     by_checker: dict[str, dict[tuple[str, int | None], RunResult]] = {}
     for r in records:
         by_checker.setdefault(_checker_id(r), {})[(r.thread_mode.value, r.cores)] = r
 
-    def all_cores(checker_id: str) -> RunResult | None:
-        return by_checker[checker_id].get(("all-cores", None))
+    has_all_cores = any(("all-cores", None) in modes for modes in by_checker.values())
+    top_core = max(constrained_cores) if constrained_cores else None
+
+    def reference(checker_id: str) -> RunResult | None:
+        """The pass that anchors row order + the mem/kLOC columns: the all-cores run
+        when one exists, else the highest-core constrained run."""
+        modes = by_checker[checker_id]
+        if has_all_cores:
+            return modes.get(("all-cores", None))
+        return modes.get(("constrained", top_core)) if top_core is not None else None
 
     def sort_key(checker_id: str) -> tuple[int, float]:
-        rec = all_cores(checker_id)
+        rec = reference(checker_id)
         if rec is not None and rec.timing is not None:
             return (0, rec.timing.median_s)
         return (1, float("inf"))
@@ -222,7 +233,6 @@ def _compact_table(
             _kloc_s(rec, harness_wall_overhead_s) if rec is not None else "—",
         )
 
-    all_col = _bold_best({cid: wall_cell(all_cores(cid)) for cid in cids}, higher_is_better=False)
     sweep_cols = {
         c: _bold_best(
             {cid: wall_cell(by_checker[cid].get(("constrained", c))) for cid in cids},
@@ -230,32 +240,59 @@ def _compact_table(
         )
         for c in constrained_cores
     }
-    mem_col = _bold_best({cid: mem_cell(all_cores(cid)) for cid in cids}, higher_is_better=False)
-    kloc_col = _bold_best({cid: kloc_cell(all_cores(cid)) for cid in cids}, higher_is_better=True)
+    mem_col = _bold_best({cid: mem_cell(reference(cid)) for cid in cids}, higher_is_better=False)
+    kloc_col = _bold_best({cid: kloc_cell(reference(cid)) for cid in cids}, higher_is_better=True)
 
     constrained_headers = [f"{cores}c" for cores in constrained_cores]
-    headers = ["Checker", "All-cores", *constrained_headers, "Peak mem (MB)", "kLOC/s"]
+    headers = ["Checker"]
+    if has_all_cores:
+        headers.append("All-cores")
+    headers += [*constrained_headers, "Peak mem (MB)", "kLOC/s"]
     alignments = ["------", *["--:"] * (len(headers) - 1)]
     header = f"| {' | '.join(headers)} |\n|{'|'.join(alignments)}|\n"
+
+    all_col: dict[str, str] = (
+        _bold_best({cid: wall_cell(reference(cid)) for cid in cids}, higher_is_better=False)
+        if has_all_cores
+        else {}
+    )
     rows: list[str] = []
     for cid in cids:
-        cells = [all_col[cid]] + [sweep_cols[c][cid] for c in constrained_cores]
+        cells = [all_col[cid]] if has_all_cores else []
+        cells += [sweep_cols[c][cid] for c in constrained_cores]
         cells += [mem_col[cid], kloc_col[cid]]
         rows.append(f"| {cid} | " + " | ".join(cells) + " |")
     return header + "\n".join(rows) + "\n"
 
 
-_FOOTNOTE = (
-    "\n> Wall is the hyperfine median in seconds, fastest first; the best cell in each metric "
-    "column is in **bold**. **All-cores** uses the whole machine; the per-core columns are the "
-    "constrained track, each pinned to the core count in its header. Peak mem and kLOC/s are from "
-    "the all-cores "
-    "pass. kLOC/s denominator is the canonical analyzed code-LOC, identical across tools. "
-    "`—*` = throughput withheld because the tool over-reports its analyzed set vs the canonical "
-    "denominator. `!` = swap observed during the memory pass, so peak memory may be "
-    "understated. Checker issue counts are intentionally omitted — they are not comparable "
-    "across tools and are not a ranking.\n"
-)
+def _footnote(envelope: ResultsEnvelope) -> str:
+    """The shared column legend. Describes where Peak mem / kLOC/s come from, which
+    depends on the envelope shape: the all-cores pass when one was run, else the
+    highest-core constrained pass (a sweep-only envelope has no All-cores column)."""
+    has_all_cores = any(r.thread_mode.value == "all-cores" for r in envelope.runs)
+    cores = envelope.run_config.cores if envelope.run_config is not None else _CONSTRAINED_CORES
+    top_core = max(cores) if cores else None
+    if has_all_cores:
+        budget = (
+            "**All-cores** uses the whole machine; the per-core columns are the constrained "
+            "track, each pinned to the core count in its header. Peak mem and kLOC/s are from "
+            "the all-cores pass. "
+        )
+    else:
+        mem_source = f"{top_core}-core" if top_core is not None else "highest-core"
+        budget = (
+            "The per-core columns are the constrained track, each pinned to the core count in "
+            f"its header. Peak mem and kLOC/s are from the {mem_source} pass. "
+        )
+    return (
+        "\n> Wall is the hyperfine median in seconds, fastest first; the best cell in each metric "
+        "column is in **bold**. " + budget + "kLOC/s denominator is the canonical analyzed "
+        "code-LOC, identical across tools. "
+        "`—*` = throughput withheld because the tool over-reports its analyzed set vs the "
+        "canonical denominator. `!` = swap observed during the memory pass, so peak memory may be "
+        "understated. Checker issue counts are intentionally omitted — they are not comparable "
+        "across tools and are not a ranking.\n"
+    )
 
 
 def _provenance(envelope: ResultsEnvelope) -> str:
@@ -328,7 +365,7 @@ def render_readme(envelope: ResultsEnvelope) -> str:
         _README_BEGIN,
         f"\n{_dataset_line(envelope)}\n",
         *_result_tables(envelope),
-        _FOOTNOTE,
+        _footnote(envelope),
         _provenance(envelope),
         _README_END,
     ]
@@ -342,7 +379,7 @@ def render_terminal(envelope: ResultsEnvelope) -> str:
     parts = [
         f"{_dataset_line(envelope)}\n",
         *_result_tables(envelope),
-        _FOOTNOTE,
+        _footnote(envelope),
         _provenance(envelope),
     ]
     return "\n".join(parts)

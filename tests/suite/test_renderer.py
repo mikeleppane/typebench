@@ -587,6 +587,39 @@ def test_compact_table_falls_back_to_default_cores_without_run_config(
     assert "| Checker | All-cores | 1c | 4c | 8c | Peak mem (MB) | kLOC/s |" in render_readme(env)
 
 
+def test_compact_table_sweep_only_drops_all_cores_and_sources_top_core(
+    make_env: EnvFactory,
+) -> None:
+    """A constrained-only envelope (cores sweep, no all-cores pass) drops the
+    All-cores column and anchors Peak mem + kLOC/s on the highest-core pass."""
+    env = ResultsEnvelope(
+        suite_version="v",
+        generated_at="t",
+        run_config=RunConfig(checkers=(), cores=(1, 4, 16)),
+        runs=[
+            _record_versioned(
+                "ty@0.0.50", "ty", w, make_env, thread_mode=ThreadMode.CONSTRAINED, cores=c
+            )
+            for w, c in ((2.0, 1), (1.0, 4), (0.5, 16))
+        ]
+        + [
+            _record_versioned(
+                "mypy@2.1.0", "mypy", w, make_env, thread_mode=ThreadMode.CONSTRAINED, cores=c
+            )
+            for w, c in ((4.0, 1), (3.0, 4), (2.5, 16))
+        ],
+    )
+    md = render_readme(env)
+    assert "| Checker | 1c | 4c | 16c | Peak mem (MB) | kLOC/s |" in md
+    assert "All-cores" not in md
+    # kLOC/s is anchored on the 16-core wall: ty 3200 LOC / 0.5s = 6.4 kLOC/s, and it
+    # wins the column (mypy is slower), so it is bold.
+    assert "**6.4**" in md
+    # The footnote names the highest-core pass as the mem/kLOC source, not all-cores.
+    assert "from the 16-core pass" in md
+    assert "all-cores" not in md.lower()
+
+
 def _cmp_record(checker_id: str, wall: float, peak: int, make_env: EnvFactory) -> RunResult:
     tool, version = checker_id.split("@", 1)
     return RunResult(
