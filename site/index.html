@@ -428,6 +428,14 @@
 
     .matrix td.cell.na .c { color: var(--text-faint); }
 
+    .matrix td.cell.fail .c {
+      color: var(--delta-bad);
+      background: var(--surface-2);
+      box-shadow: inset 0 0 0 1px var(--border-strong);
+      border-radius: var(--radius-sm);
+      font-weight: 600;
+    }
+
     /* Version-over-version delta, tucked under the cell value. Color encodes
        better/worse for the metric; the arrow encodes the raw direction of change
        so it stays legible without color. A trailing * marks a cross-CPU pair. */
@@ -618,6 +626,7 @@
       <div class="card__head">
         <h2><span class="sec-num" aria-hidden="true">01</span><span id="snap-title">Snapshot</span></h2>
         <span class="card__meta" id="snap-meta"></span>
+        <span class="card__meta" id="snap-coverage" role="status" aria-live="polite"></span>
       </div>
       <div class="matrix-scroll">
         <table class="matrix" id="snap-matrix">

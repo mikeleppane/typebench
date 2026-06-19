@@ -77,6 +77,41 @@ function escapeHtml(text) {
   return String(text).replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 }
 
+const FAILURE_LABELS = {
+  "failed{crash}": { glyph: "✗", label: "crash" },
+  "failed{oom}": { glyph: "⚠", label: "OOM" },
+  "failed{timeout}": { glyph: "⧖", label: "timeout" },
+  "failed{env}": { glyph: "⚙", label: "env" },
+};
+
+function failureMeta(resultClass) {
+  return FAILURE_LABELS[resultClass] || { glyph: "✗", label: resultClass || "failed" };
+}
+
+function failureTitle(failure) {
+  const parts = [failure.result_class, `exit code ${failure.real_exit_code}`];
+  if (failure.failure_phase) parts.push(`phase ${failure.failure_phase}`);
+  if (failure.signal !== null && failure.signal !== undefined) {
+    parts.push(`signal ${failure.signal}`);
+  }
+  if (failure.timed_out) parts.push("timed out");
+  if (failure.oom) parts.push("oom");
+  if (failure.error_detail) parts.push(failure.error_detail);
+  return parts.join(" · ");
+}
+
+function coverageText(measured, failed, total, failures) {
+  if (failed === 0) return `Coverage: ${measured}/${total} measured`;
+  const byClass = new Map();
+  for (const failure of failures) {
+    byClass.set(failure.result_class, (byClass.get(failure.result_class) || 0) + 1);
+  }
+  const groups = Object.keys(FAILURE_LABELS)
+    .filter((resultClass) => byClass.has(resultClass))
+    .map((resultClass) => `${failureMeta(resultClass).glyph}${byClass.get(resultClass)}`);
+  return `Coverage: ${measured}/${total} measured · ${failed} failed (${groups.join(" · ")})`;
+}
+
 function setText(id, text) {
   document.getElementById(id).textContent = text;
 }
@@ -166,11 +201,23 @@ function versionDelta(sel, cur, metricKey) {
 // rows are every project (tiered small -> large), columns the checkers, each cell
 // the metric value. The best cell in a row is highlighted; cells are rank-tinted.
 // Clicking a row calls onSelect(project) so the trend chart below can follow it.
-function renderMatrix(sel, metricKey, meta, budgetLabel, selected, snapshotDate, onSelect) {
+function renderMatrix(
+  sel,
+  failures,
+  metricKey,
+  meta,
+  budgetLabel,
+  selected,
+  snapshotDate,
+  onSelect
+) {
   const card = document.getElementById("snap-card");
   const headEl = document.getElementById("snap-head");
   const bodyEl = document.getElementById("snap-body");
-  const dates = [...new Set(sel.map((p) => p.date))].sort();
+  const coverageEl = document.getElementById("snap-coverage");
+  const dates = [
+    ...new Set([...sel.map((p) => p.date), ...failures.map((p) => p.date)]),
+  ].sort();
   // Render the picked snapshot date; fall back to the latest available in this
   // budget when that date has no rows here (e.g. a budget that started later).
   const date = dates.includes(snapshotDate) ? snapshotDate : dates[dates.length - 1];
@@ -178,10 +225,16 @@ function renderMatrix(sel, metricKey, meta, budgetLabel, selected, snapshotDate,
   // corpus projects that existed solely in other runs must not leave stale,
   // all-dashes lines in the snapshot.
   const latestRows = sel.filter((p) => p.date === date);
+  const latestFailures = failures.filter((p) => p.date === date);
 
-  const checkers = [...new Set(latestRows.map((p) => p.checker_id))].sort();
+  const checkers = [
+    ...new Set([
+      ...latestRows.map((p) => p.checker_id),
+      ...latestFailures.map((p) => p.checker_id),
+    ]),
+  ].sort();
   const projMeta = new Map();
-  for (const p of latestRows) {
+  for (const p of [...latestRows, ...latestFailures]) {
     if (!projMeta.has(p.project)) {
       projMeta.set(p.project, { tier: p.size_tier || "Large", loc: p.code_loc ?? 0 });
     }
@@ -199,6 +252,7 @@ function renderMatrix(sel, metricKey, meta, budgetLabel, selected, snapshotDate,
   card.classList.toggle("is-empty", projects.length === 0 || checkers.length === 0);
   setText("snap-title", date ? `Snapshot — ${date}` : "Snapshot");
   setText("snap-meta", projects.length ? `${budgetLabel} · ${meta.better} is better` : "");
+  coverageEl.textContent = "";
   if (!projects.length || !checkers.length) {
     headEl.innerHTML = "";
     bodyEl.innerHTML = "";
@@ -214,6 +268,8 @@ function renderMatrix(sel, metricKey, meta, budgetLabel, selected, snapshotDate,
   let currentTier = null;
   let anyDelta = false;
   let crossCpuShown = false;
+  let measured = 0;
+  const visibleFailures = [];
   for (const project of projects) {
     const { tier, loc } = projMeta.get(project);
     if (tier !== currentTier) {
@@ -225,8 +281,17 @@ function renderMatrix(sel, metricKey, meta, budgetLabel, selected, snapshotDate,
 
     const cells = checkers.map((c) => {
       const hit = latestRows.find((p) => p.project === project && p.checker_id === c);
-      const v = hit && hit[metricKey] !== null && hit[metricKey] !== undefined ? hit[metricKey] : null;
-      return { hit, v };
+      const v =
+        hit && hit[metricKey] !== null && hit[metricKey] !== undefined ? hit[metricKey] : null;
+      const failure = latestFailures.find((p) => p.project === project && p.checker_id === c);
+      // Coverage counts measured-successes vs failures by RUN outcome, not by whether
+      // the selected metric is populated: a withheld metric (e.g. throughput for an
+      // over-reporter, or wall-normalized without a calibration anchor) is still a
+      // successful run, not a coverage gap. So count the success point (`hit`), not a
+      // non-null metric value, and keep the count stable across metric changes.
+      if (hit) measured += 1;
+      else if (failure) visibleFailures.push(failure);
+      return { failure, hit, v };
     });
     const present = cells.map((c) => c.v).filter((v) => v !== null);
     const best = present.length
@@ -247,8 +312,17 @@ function renderMatrix(sel, metricKey, meta, budgetLabel, selected, snapshotDate,
       `role="button" tabindex="0" aria-pressed="${isSel}" ` +
       `aria-label="Show ${escapeHtml(project)} trend over time">`;
     html += `<td class="proj">${escapeHtml(project)}${locHint}</td>`;
-    for (const { hit, v } of cells) {
+    for (const { failure, hit, v } of cells) {
       if (v === null) {
+        if (failure) {
+          const fail = failureMeta(failure.result_class);
+          const detail = failureTitle(failure);
+          html +=
+            `<td class="cell fail" title="${escapeHtml(detail)}" ` +
+            `aria-label="${escapeHtml(detail)}"><span class="c">` +
+            `<span aria-hidden="true">${fail.glyph}</span> ${escapeHtml(fail.label)}</span></td>`;
+          continue;
+        }
         html += `<td class="cell na"><span class="c">—</span></td>`;
         continue;
       }
@@ -278,6 +352,12 @@ function renderMatrix(sel, metricKey, meta, budgetLabel, selected, snapshotDate,
     html += `</tr>`;
   }
   bodyEl.innerHTML = html;
+  coverageEl.textContent = coverageText(
+    measured,
+    visibleFailures.length,
+    projects.length * checkers.length,
+    visibleFailures
+  );
 
   // Spell out what the deltas mean only when at least one is shown, and warn
   // about the cross-CPU asterisk when one appears so a raw delta is never read
@@ -317,6 +397,7 @@ async function main() {
     }
   }
   const points = data.points || [];
+  const failures = data.failures || [];
   fillStats(points, data.corpus_markers || [], data.cpu_models || []);
 
   // Projects ordered small -> large (by analyzed code-LOC) so the trend defaults
@@ -327,7 +408,8 @@ async function main() {
   );
   let selectedProject = projectOrder[0] || null;
 
-  const budgets = [...new Map(points.map((p) => [budgetKey(p), p])).values()]
+  const budgetRows = [...points, ...failures];
+  const budgets = [...new Map(budgetRows.map((p) => [budgetKey(p), p])).values()]
     .map((p) => ({ key: budgetKey(p), cores: p.cores ?? null, label: budgetText(p) }))
     .sort((a, b) => {
       if (a.cores === null) return -1; // all-cores budget always leads
@@ -352,7 +434,7 @@ async function main() {
   // and whenever the budget changes; the selection is clamped to an available date.
   function syncSnapshots() {
     const avail = [
-      ...new Set(points.filter((p) => budgetKey(p) === budgetEl.value).map((p) => p.date)),
+      ...new Set(budgetRows.filter((p) => budgetKey(p) === budgetEl.value).map((p) => p.date)),
     ].sort();
     if (!avail.includes(selectedSnapshot)) {
       selectedSnapshot = avail[avail.length - 1] || null;
@@ -369,9 +451,9 @@ async function main() {
   // is visible by default even when it dropped a budget the older runs carried
   // (e.g. a desktop sweep with no all-cores pass). Budgets keep their order, so
   // the default returns to all-cores automatically once a run re-includes it.
-  const latestDate = [...new Set(points.map((p) => p.date))].sort().pop();
+  const latestDate = [...new Set(budgetRows.map((p) => p.date))].sort().pop();
   budgetEl.value = (
-    budgets.find((b) => points.some((p) => p.date === latestDate && budgetKey(p) === b.key)) ||
+    budgets.find((b) => budgetRows.some((p) => p.date === latestDate && budgetKey(p) === b.key)) ||
     budgets[0]
   ).key;
 
@@ -393,8 +475,10 @@ async function main() {
     // The matrix sees every project at this budget; clicking a row repoints the
     // trend chart below. The trend stays pinned to one project (its time axis).
     const selByBudget = points.filter((p) => budgetKey(p) === budget);
+    const failByBudget = failures.filter((p) => budgetKey(p) === budget);
     renderMatrix(
       selByBudget,
+      failByBudget,
       metricKey,
       meta,
       budgetLabel,
