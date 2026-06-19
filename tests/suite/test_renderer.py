@@ -247,6 +247,58 @@ def _record_for_trends(
     )
 
 
+def _record_for_trends_spread(
+    min_s: float,
+    median_s: float,
+    max_s: float,
+    stddev_s: float,
+    calib_med: float | None,
+    cpu: str,
+    make_env: EnvFactory,
+    runs: int = 3,
+) -> RunResult:
+    calibration = (
+        CalibrationStats(
+            workload_id="calib-pyloop-v1",
+            iterations=1,
+            runs=1,
+            raw_min_s=calib_med,
+            raw_median_s=calib_med,
+            raw_max_s=calib_med,
+        )
+        if calib_med is not None
+        else None
+    )
+    return RunResult(
+        tool="mypy",
+        tool_version="1.0",
+        project="httpx",
+        thread_mode=ThreadMode.ALL_CORES,
+        result_class=ResultClass.CLEAN,
+        real_exit_code=0,
+        timing=TimingStats(
+            runs=runs,
+            min_s=min_s,
+            median_s=median_s,
+            mean_s=median_s,
+            stddev_s=stddev_s,
+            max_s=max_s,
+            times_s=[median_s] if runs == 1 else [min_s, median_s, max_s],
+        ),
+        memory=MemoryStats(
+            runs=3,
+            peak_bytes_min=1,
+            peak_bytes_median=200_000_000,
+            peak_bytes_max=200_000_000,
+        ),
+        canonical_code_loc=3200,
+        loc_denominator=LocDenominator.CODE,
+        over_reports=False,
+        calibration=calibration,
+        env=make_env(cpu_model=cpu),
+    )
+
+
 def _record_versioned(
     checker_id: str,
     tool: str,
@@ -422,6 +474,120 @@ def test_build_trends_uses_harness_corrected_values(make_env: EnvFactory) -> Non
     assert point["wall_median_s"] == 0.04
     assert point["peak_mem_mb"] == 186.0
     assert point["kloc_s"] == 80.0
+
+
+def test_build_trends_success_point_carries_harness_corrected_wall_spread(
+    make_env: EnvFactory,
+) -> None:
+    record = _record_for_trends_spread(
+        min_s=0.015,
+        median_s=0.050,
+        max_s=0.090,
+        stddev_s=0.007,
+        calib_med=0.40,
+        cpu="CPU-A",
+        make_env=make_env,
+    )
+    history = [
+        ResultsEnvelope(
+            suite_version="v",
+            generated_at="2026-02-01",
+            runs=[record],
+            harness_wall_overhead_s=0.020,
+        )
+    ]
+
+    point = _trend_points(build_trends(history))[0]
+
+    assert point["wall_min_s"] == 0.0
+    assert point["wall_median_s"] == pytest.approx(0.030)
+    assert point["wall_max_s"] == pytest.approx(0.070)
+    assert point["wall_stddev_s"] == 0.007
+
+
+def test_build_trends_normalizes_wall_spread_against_anchor(make_env: EnvFactory) -> None:
+    history = [
+        _envelope(
+            "2026-02-01",
+            _record_for_trends_spread(
+                min_s=1.0,
+                median_s=2.0,
+                max_s=3.0,
+                stddev_s=0.2,
+                calib_med=0.50,
+                cpu="CPU-A",
+                make_env=make_env,
+            ),
+        ),
+        _envelope(
+            "2026-03-01",
+            _record_for_trends_spread(
+                min_s=1.0,
+                median_s=2.0,
+                max_s=3.0,
+                stddev_s=0.2,
+                calib_med=0.25,
+                cpu="CPU-A",
+                make_env=make_env,
+            ),
+        ),
+    ]
+
+    point = next(p for p in _trend_points(build_trends(history)) if p["date"] == "2026-03-01")
+
+    assert point["wall_min_s_norm"] == pytest.approx(2.0)
+    assert point["wall_max_s_norm"] == pytest.approx(6.0)
+    assert point["wall_stddev_s_norm"] == pytest.approx(0.4)
+
+
+def test_build_trends_wall_spread_norm_is_null_without_calibration(
+    make_env: EnvFactory,
+) -> None:
+    history = [
+        _envelope(
+            "2026-02-01",
+            _record_for_trends_spread(
+                min_s=1.0,
+                median_s=2.0,
+                max_s=3.0,
+                stddev_s=0.2,
+                calib_med=None,
+                cpu="CPU-A",
+                make_env=make_env,
+            ),
+        )
+    ]
+
+    point = _trend_points(build_trends(history))[0]
+
+    assert point["wall_min_s_norm"] is None
+    assert point["wall_max_s_norm"] is None
+    assert point["wall_stddev_s_norm"] is None
+
+
+def test_build_trends_single_run_wall_spread_remains_degenerate(
+    make_env: EnvFactory,
+) -> None:
+    history = [
+        _envelope(
+            "2026-02-01",
+            _record_for_trends_spread(
+                min_s=1.25,
+                median_s=1.25,
+                max_s=1.25,
+                stddev_s=0.0,
+                calib_med=0.40,
+                cpu="CPU-A",
+                make_env=make_env,
+                runs=1,
+            ),
+        )
+    ]
+
+    point = _trend_points(build_trends(history))[0]
+
+    assert point["wall_stddev_s"] == 0.0
+    assert point["wall_min_s"] == point["wall_max_s"] == 1.25
 
 
 def test_build_trends_failed_crash_lands_in_failures_not_points(

@@ -18,8 +18,20 @@ const TOOL_COLORS = {
 // Metric metadata drives the axis title, tooltip units, and the "lower/higher is
 // better" hint shown next to the chart title.
 const METRICS = {
-  wall_median_s_norm: { axis: "Wall, normalized (s)", unit: "s", digits: 3, better: "lower" },
-  wall_median_s: { axis: "Wall (s)", unit: "s", digits: 3, better: "lower" },
+  wall_median_s_norm: {
+    axis: "Wall, normalized (s)",
+    unit: "s",
+    digits: 3,
+    better: "lower",
+    band: { min: "wall_min_s_norm", max: "wall_max_s_norm", stddev: "wall_stddev_s_norm" },
+  },
+  wall_median_s: {
+    axis: "Wall (s)",
+    unit: "s",
+    digits: 3,
+    better: "lower",
+    band: { min: "wall_min_s", max: "wall_max_s", stddev: "wall_stddev_s" },
+  },
   peak_mem_mb: { axis: "Peak memory (MB)", unit: "MB", digits: 1, better: "lower" },
   kloc_s: { axis: "Throughput (kLOC/s)", unit: "kLOC/s", digits: 1, better: "higher" },
 };
@@ -30,6 +42,20 @@ function cssVar(name) {
 
 function colorFor(tool) {
   return TOOL_COLORS[tool] || "#5c6470";
+}
+
+function bandColor(color) {
+  const hex = color.startsWith("#") ? color.slice(1) : null;
+  if (hex) {
+    const expanded = hex.length === 3 ? hex.replace(/./g, "$&$&") : hex;
+    const value = parseInt(expanded, 16);
+    if (Number.isFinite(value)) {
+      return `rgba(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}, 0.13)`;
+    }
+  }
+  const rgb = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(color);
+  if (rgb) return `rgba(${rgb[1]}, ${rgb[2]}, ${rgb[3]}, 0.13)`;
+  return "rgba(92, 100, 112, 0.13)";
 }
 
 // Only used when one tool has two versions on the SAME date (an A/B comparison):
@@ -75,6 +101,14 @@ function budgetText(p) {
 
 function escapeHtml(text) {
   return String(text).replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
+}
+
+function isFiniteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function formatMetric(value, meta) {
+  return `${value.toFixed(meta.digits)} ${meta.unit}`;
 }
 
 const FAILURE_LABELS = {
@@ -329,6 +363,22 @@ function renderMatrix(
       const t =
         span > 0 ? (meta.better === "lower" ? (v - lo) / span : (hi - v) / span) : 0;
       const isBest = present.length > 1 && v === best;
+      let titleAttr = "";
+      let spreadHtml = "";
+      if (meta.band && hit) {
+        const spreadMin = hit[meta.band.min];
+        const spreadMax = hit[meta.band.max];
+        const spreadStddev = hit[meta.band.stddev];
+        if (isFiniteNumber(spreadMin) && isFiniteNumber(spreadMax)) {
+          titleAttr =
+            ` title="${escapeHtml(
+              `min–max ${formatMetric(spreadMin, meta)}–${formatMetric(spreadMax, meta)}`
+            )}"`;
+        }
+        if (isFiniteNumber(spreadStddev) && spreadStddev > 0) {
+          spreadHtml = `<span class="spread">± ${formatMetric(spreadStddev, meta)}</span>`;
+        }
+      }
       let deltaHtml = "";
       const d = versionDelta(sel, hit, metricKey);
       if (d) {
@@ -345,9 +395,9 @@ function renderMatrix(
           `<span class="delta${cls}" title="${escapeHtml(title)}">` +
           `${arrow}${Math.abs(d.pct).toFixed(1)}%${star}</span>`;
       }
-      html += `<td class="cell${isBest ? " best" : ""}"><span class="c" style="background:${rankTint(
+      html += `<td class="cell${isBest ? " best" : ""}"${titleAttr}><span class="c" style="background:${rankTint(
         t
-      )}">${v.toFixed(meta.digits)}</span>${deltaHtml}</td>`;
+      )}">${v.toFixed(meta.digits)}</span>${spreadHtml}${deltaHtml}</td>`;
     }
     html += `</tr>`;
   }
@@ -529,7 +579,8 @@ async function main() {
       }
     }
 
-    const datasets = lines.map((line) => {
+    const datasets = [];
+    for (const line of lines) {
       const color = line.color;
       // sel is pinned to one (project, thread_mode, cores) budget, and each line
       // matches a single row per date; the version lives in checker_id, carried for
@@ -546,7 +597,50 @@ async function main() {
         prev = cid;
         return changed;
       });
-      return {
+      if (meta.band) {
+        const bandPairs = rows.map((r) => {
+          const min = r ? r[meta.band.min] : null;
+          const max = r ? r[meta.band.max] : null;
+          return isFiniteNumber(min) && isFiniteNumber(max) ? { min, max } : null;
+        });
+        const upper = bandPairs.map((pair) => (pair ? pair.max : null));
+        const lower = bandPairs.map((pair) => (pair ? pair.min : null));
+        const hasBand = upper.some(
+          (max, i) => isFiniteNumber(max) && isFiniteNumber(lower[i]) && max !== lower[i]
+        );
+        if (hasBand) {
+          const fill = bandColor(color);
+          datasets.push(
+            {
+              label: `${line.label} spread upper`,
+              data: upper,
+              borderWidth: 0,
+              pointRadius: 0,
+              pointHoverRadius: 0,
+              backgroundColor: fill,
+              borderColor: fill,
+              fill: false,
+              spanGaps: true,
+              isBand: true,
+              order: 2,
+            },
+            {
+              label: `${line.label} spread lower`,
+              data: lower,
+              borderWidth: 0,
+              pointRadius: 0,
+              pointHoverRadius: 0,
+              backgroundColor: fill,
+              borderColor: fill,
+              fill: "-1",
+              spanGaps: true,
+              isBand: true,
+              order: 2,
+            }
+          );
+        }
+      }
+      datasets.push({
         label: line.label,
         borderColor: color,
         backgroundColor: color,
@@ -562,8 +656,10 @@ async function main() {
         data: rows.map((r) => (r ? r[metricKey] : null)),
         cids,
         bumps,
-      };
-    });
+        points: rows,
+        order: 1,
+      });
+    }
 
     // Update title + meta and toggle the empty state.
     const hasData = datasets.some((ds) => ds.data.some((v) => v !== null && v !== undefined));
@@ -593,9 +689,11 @@ async function main() {
               boxWidth: 8,
               boxHeight: 8,
               padding: 16,
+              filter: (item, data) => !data.datasets[item.datasetIndex]?.isBand,
             },
           },
           tooltip: {
+            filter: (item) => !item.dataset.isBand,
             backgroundColor: cssVar("--surface"),
             titleColor: cssVar("--text"),
             bodyColor: cssVar("--text-muted"),
@@ -613,8 +711,29 @@ async function main() {
                 if (v === null || v === undefined) return `${name}: —`;
                 return `${name}: ${v.toFixed(meta.digits)} ${meta.unit}`;
               },
-              afterLabel: (item) =>
-                item.dataset.bumps?.[item.dataIndex] ? "↑ new version" : undefined,
+              afterLabel: (item) => {
+                const lines = [];
+                if (item.dataset.bumps?.[item.dataIndex]) lines.push("↑ new version");
+                const point = item.dataset.points?.[item.dataIndex];
+                if (!meta.band || !point) return lines.length ? lines : undefined;
+                const spreadMin = point[meta.band.min];
+                const spreadMax = point[meta.band.max];
+                const spreadStddev = point[meta.band.stddev];
+                if (
+                  !isFiniteNumber(spreadMin) ||
+                  !isFiniteNumber(spreadMax) ||
+                  !isFiniteNumber(spreadStddev)
+                ) {
+                  return lines.length ? lines : undefined;
+                }
+                lines.push(
+                  `± ${formatMetric(spreadStddev, meta)} (min–max ${formatMetric(
+                    spreadMin,
+                    meta
+                  )}–${formatMetric(spreadMax, meta)})`
+                );
+                return lines;
+              },
             },
           },
         },
