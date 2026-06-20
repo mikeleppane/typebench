@@ -6,7 +6,7 @@
 [![python](https://img.shields.io/badge/python-3.12%2B-blue)](pyproject.toml)
 
 A neutral, reproducible benchmark engine for Python type-checker performance across
-**mypy**, **pyright**, **pyrefly**, and **ty**.
+**mypy**, **pyright**, **pyrefly**, **ty**, and **zuban**.
 
 typebench measures cold single-shot checker runs on real Python projects. It is
 built around one rule: the numbers must be credible enough for checker maintainers,
@@ -15,8 +15,8 @@ Python teams, and independent readers to rerun and audit them.
 > **Status:** The engine supports single-project runs, full-suite orchestration
 > (`project × checker × thread-mode` matrix), checker comparison, corpus preflight, a
 > PR speed-regression GitHub Action, self-contained HTML reports, and a
-> render-to-Pages publishing pipeline. The first official benchmark — 14 projects ×
-> 4 checkers × 4 thread configs — is published below and on the
+> render-to-Pages publishing pipeline. The latest official benchmark — 15 projects ×
+> 5 checkers × 4 core configs — is published below and on the
 > [trend site](https://mikeleppane.github.io/typebench/).
 
 ---
@@ -135,7 +135,7 @@ exec $SHELL                                      # reload the shell so shims lan
 
 ```bash
 mise install              # installs hyperfine, tokei, node, uv at the pinned versions
-uv sync                   # installs the type checkers (mypy/pyright/pyrefly/ty) from uv.lock
+uv sync                   # installs the type checkers (mypy/pyright/pyrefly/ty/zuban) from uv.lock
 uv run typebench doctor   # confirm every external tool resolves at the expected version
 ```
 
@@ -168,7 +168,7 @@ mise run check      # the full quality gate, in order
 | `mise run test-e2e` | Only the end-to-end suite. |
 | `mise run doctor` | `typebench doctor` — confirm the toolchain resolves. |
 | `mise run preflight [project]` | Preflight a corpus project (defaults to `httpx`). |
-| `mise run suite` | Run the **full corpus** (every project × all four checkers × both thread tracks) into `results/`. |
+| `mise run suite` | Run the **full corpus** (every project × all checkers × both thread tracks) into `results/`. |
 | `mise run report` | Build and open a local HTML trend report from `results/`. |
 | `mise run render` | Maintainer-only: regenerate the README block + site trends. |
 | `mise run clean` | Remove tool caches (`.pytest_cache`, `.ruff_cache`, `__pycache__`). |
@@ -295,7 +295,7 @@ to narrow the set.
 
 | Option | Default | Meaning |
 |--------|---------|---------|
-| `--tool` | required | `mypy`, `pyright`, `pyrefly`, `ty`, or `stub`. |
+| `--tool` | required | `mypy`, `pyright`, `pyrefly`, `ty`, `zuban`, or `stub`. |
 | `--output` | required | JSON output path; parent directory must be writable. |
 | `--thread-mode` | `all-cores` | `all-cores` or `constrained`. |
 | `--cores` | `1` | Cores for the `constrained` track (default 1 = single-threaded; opt into multithreading with e.g. `--cores 8`). Ignored by `all-cores`. |
@@ -565,14 +565,14 @@ Official runs use one normalized input contract:
 ## Results
 
 Benchmark results across the full corpus, grouped by project size and ordered
-smallest to largest. Each table ranks the four checkers fastest-first and shows
+smallest to largest. Each table ranks the checkers fastest-first and shows
 how each scales from one pinned core up to the whole machine. All numbers are
 measured on a dedicated benchmark machine, never on CI runners; the provenance
 line beneath the tables records the exact CPU and run counts.
 
 <!-- TYPEBENCH:BEGIN -->
 
-_Corpus snapshot 2026-06-13 · measured 2026-06-18 09:15 UTC_
+_Corpus snapshot 2026-06-13 · measured 2026-06-20 08:48 UTC_
 
 
 ### Small projects
@@ -584,10 +584,11 @@ _Corpus snapshot 2026-06-13 · measured 2026-06-18 09:15 UTC_
 
 | Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
 |------|--:|--:|--:|--:|--:|--:|
-| ty@0.0.50 | **0.166** | **0.077** | **0.056** | **0.046** | **91.9** | **159.0** |
-| pyrefly@1.1.0 | 0.192 | 0.125 | 0.105 | 0.095 | 106.0 | 77.4 |
-| mypy@2.1.0 | 0.912 | 0.689 | 0.628 | 0.657 | 736.8 | 11.1 |
-| pyright@1.1.410 | 1.714 | 1.047 | 0.911 | 0.898 | 311.3 | 8.1 |
+| ty@0.0.51 | 0.175 | 0.084 | **0.060** | **0.050** | 89.4 | **144.9** |
+| zuban@0.8.2 | **0.088** | **0.074** | 0.071 | 0.075 | **44.1** | 97.0 |
+| pyrefly@1.1.1 | 0.195 | 0.129 | 0.102 | 0.097 | 104.7 | 75.6 |
+| mypy@2.1.0 | 0.902 | 0.689 | 0.639 | 0.678 | 734.6 | 10.8 |
+| pyright@1.1.410 | 1.716 | 1.038 | 0.914 | 0.895 | 311.6 | 8.2 |
 
 
 #### click
@@ -596,10 +597,11 @@ _Corpus snapshot 2026-06-13 · measured 2026-06-18 09:15 UTC_
 
 | Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
 |------|--:|--:|--:|--:|--:|--:|
-| ty@0.0.50 | **0.164** | **0.078** | **0.059** | **0.051** | **86.4** | **184.6** |
-| pyrefly@1.1.0 | 0.216 | 0.138 | 0.110 | 0.100 | 113.0 | 93.8 |
-| mypy@2.1.0 | 0.666 | 0.621 | 0.582 | 0.594 | 605.1 | 15.8 |
-| pyright@1.1.410 | 1.983 | 1.186 | 1.038 | 1.027 | 330.4 | 9.1 |
+| ty@0.0.51 | 0.167 | 0.077 | **0.062** | **0.055** | 83.8 | **169.1** |
+| zuban@0.8.2 | **0.084** | **0.071** | 0.067 | 0.077 | **43.4** | 121.5 |
+| pyrefly@1.1.1 | 0.219 | 0.139 | 0.114 | 0.104 | 111.5 | 90.0 |
+| mypy@2.1.0 | 0.670 | 0.629 | 0.606 | 0.607 | 604.5 | 15.4 |
+| pyright@1.1.410 | 1.982 | 1.203 | 1.053 | 1.026 | 330.9 | 9.1 |
 
 
 #### anyio
@@ -608,10 +610,11 @@ _Corpus snapshot 2026-06-13 · measured 2026-06-18 09:15 UTC_
 
 | Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
 |------|--:|--:|--:|--:|--:|--:|
-| ty@0.0.50 | **0.207** | **0.115** | **0.087** | **0.070** | **106.2** | **164.3** |
-| pyrefly@1.1.0 | 0.231 | 0.142 | 0.130 | 0.118 | 116.5 | 97.0 |
-| mypy@2.1.0 | 0.924 | 0.780 | 0.728 | 0.735 | 695.7 | 15.6 |
-| pyright@1.1.410 | 2.331 | 1.411 | 1.234 | 1.224 | 365.2 | 9.3 |
+| zuban@0.8.2 | **0.098** | **0.086** | **0.080** | **0.083** | **46.7** | **138.7** |
+| ty@0.0.51 | 0.214 | 0.121 | 0.092 | 0.085 | 104.5 | 133.9 |
+| pyrefly@1.1.1 | 0.236 | 0.150 | 0.125 | 0.119 | 114.4 | 96.3 |
+| mypy@2.1.0 | 0.936 | 0.778 | 0.731 | 0.756 | 697.6 | 15.1 |
+| pyright@1.1.410 | 2.349 | 1.418 | 1.244 | 1.232 | 364.9 | 9.3 |
 
 
 #### jinja2
@@ -620,10 +623,11 @@ _Corpus snapshot 2026-06-13 · measured 2026-06-18 09:15 UTC_
 
 | Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
 |------|--:|--:|--:|--:|--:|--:|
-| ty@0.0.50 | 0.249 | **0.117** | **0.079** | **0.070** | **112.5** | **165.4** |
-| pyrefly@1.1.0 | **0.239** | 0.145 | 0.115 | 0.100 | 118.9 | 115.7 |
-| mypy@2.1.0 | 0.843 | 0.764 | 0.725 | 0.741 | 651.1 | 15.6 |
-| pyright@1.1.410 | 2.423 | 1.436 | 1.240 | 1.226 | 355.4 | 9.4 |
+| ty@0.0.51 | 0.253 | 0.122 | **0.083** | **0.071** | 110.0 | **162.8** |
+| zuban@0.8.2 | **0.122** | **0.106** | 0.102 | 0.097 | **45.0** | 119.1 |
+| pyrefly@1.1.1 | 0.244 | 0.143 | 0.115 | 0.102 | 117.3 | 113.7 |
+| mypy@2.1.0 | 0.843 | 0.775 | 0.742 | 0.753 | 652.3 | 15.3 |
+| pyright@1.1.410 | 2.441 | 1.431 | 1.246 | 1.225 | 355.7 | 9.4 |
 
 
 #### fastapi
@@ -632,10 +636,11 @@ _Corpus snapshot 2026-06-13 · measured 2026-06-18 09:15 UTC_
 
 | Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
 |------|--:|--:|--:|--:|--:|--:|
-| ty@0.0.50 | **0.246** | **0.130** | **0.092** | **0.072** | **124.5** | **252.9** |
-| pyrefly@1.1.0 | 0.346 | 0.202 | 0.162 | 0.135 | 172.3 | 135.9 |
-| mypy@2.1.0 | 1.316 | 0.869 | 0.803 | 0.835 | 874.9 | 21.9 |
-| pyright@1.1.410 | 3.035 | 1.779 | 1.540 | 1.520 | 437.6 | 12.0 |
+| ty@0.0.51 | 0.255 | 0.133 | **0.098** | **0.076** | 120.5 | **240.1** |
+| zuban@0.8.2 | **0.136** | **0.119** | 0.104 | 0.107 | **57.6** | 171.6 |
+| pyrefly@1.1.1 | 0.342 | 0.205 | 0.163 | 0.132 | 171.5 | 138.8 |
+| mypy@2.1.0 | 1.317 | 0.876 | 0.806 | 0.847 | 881.6 | 21.6 |
+| pyright@1.1.410 | 3.022 | 1.773 | 1.530 | 1.520 | 437.9 | 12.0 |
 
 
 #### trio
@@ -644,10 +649,11 @@ _Corpus snapshot 2026-06-13 · measured 2026-06-18 09:15 UTC_
 
 | Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
 |------|--:|--:|--:|--:|--:|--:|
-| ty@0.0.50 | **0.257** | **0.122** | **0.075** | **0.060** | **110.2** | **314.9** |
-| pyrefly@1.1.0 | 0.355 | 0.197 | 0.139 | 0.133 | 148.8 | 140.8 |
-| mypy@2.1.0 | 1.011 | 0.869 | 0.810 | 0.822 | 697.1 | 22.8 |
-| pyright@1.1.410 | 3.185 | 1.908 | 1.649 | 1.633 | 426.0 | 11.5 |
+| ty@0.0.51 | 0.258 | 0.128 | **0.082** | **0.065** | 109.0 | **288.3** |
+| zuban@0.8.2 | **0.131** | **0.110** | 0.100 | 0.096 | **53.3** | 194.4 |
+| pyrefly@1.1.1 | 0.357 | 0.195 | 0.144 | 0.124 | 147.9 | 151.4 |
+| mypy@2.1.0 | 1.020 | 0.871 | 0.833 | 0.831 | 696.3 | 22.6 |
+| pyright@1.1.410 | 3.205 | 1.903 | 1.642 | 1.630 | 429.0 | 11.5 |
 
 
 ### Medium projects
@@ -659,10 +665,11 @@ _Corpus snapshot 2026-06-13 · measured 2026-06-18 09:15 UTC_
 
 | Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
 |------|--:|--:|--:|--:|--:|--:|
-| pyrefly@1.1.0 | **0.424** | **0.225** | **0.171** | **0.156** | **175.8** | **173.5** |
-| ty@0.0.50 | 0.993 | 0.521 | 0.345 | 0.295 | 214.4 | 91.7 |
-| mypy@2.1.0 | 1.232 | 0.999 | 0.941 | 0.952 | 720.0 | 28.4 |
-| pyright@1.1.410 | 7.022 | 4.583 | 4.040 | 4.028 | 550.4 | 6.7 |
+| zuban@0.8.2 | **0.150** | **0.127** | **0.113** | **0.117** | **56.3** | **231.2** |
+| pyrefly@1.1.1 | 0.428 | 0.227 | 0.169 | 0.155 | 174.1 | 174.8 |
+| ty@0.0.51 | 1.001 | 0.517 | 0.355 | 0.295 | 213.5 | 91.6 |
+| mypy@2.1.0 | 1.236 | 1.018 | 0.947 | 0.967 | 721.3 | 28.0 |
+| pyright@1.1.410 | 7.012 | 4.591 | 4.064 | 4.030 | 548.5 | 6.7 |
 
 
 #### hypothesis
@@ -671,10 +678,11 @@ _Corpus snapshot 2026-06-13 · measured 2026-06-18 09:15 UTC_
 
 | Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
 |------|--:|--:|--:|--:|--:|--:|
-| ty@0.0.50 | 0.706 | **0.305** | **0.183** | **0.120** | 209.1 | **267.4** |
-| pyrefly@1.1.0 | **0.675** | 0.318 | 0.208 | 0.170 | **202.7** | 188.1 |
-| mypy@2.1.0 | 1.652 | 1.346 | 1.247 | 1.268 | 860.2 | 25.3 |
-| pyright@1.1.410 | 6.142 | 3.846 | 3.413 | 3.367 | 619.9 | 9.5 |
+| ty@0.0.51 | 0.721 | 0.316 | **0.184** | **0.129** | 207.3 | **249.0** |
+| pyrefly@1.1.1 | 0.673 | 0.316 | 0.215 | 0.167 | 201.2 | 192.5 |
+| zuban@0.8.2 | **0.257** | **0.222** | 0.198 | 0.198 | **71.2** | 162.1 |
+| mypy@2.1.0 | 1.655 | 1.353 | 1.269 | 1.284 | 860.9 | 25.0 |
+| pyright@1.1.410 | 6.153 | 3.849 | 3.396 | 3.360 | 618.3 | 9.5 |
 
 
 #### rich
@@ -683,10 +691,11 @@ _Corpus snapshot 2026-06-13 · measured 2026-06-18 09:15 UTC_
 
 | Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
 |------|--:|--:|--:|--:|--:|--:|
-| ty@0.0.50 | **0.303** | **0.139** | **0.083** | **0.060** | **120.6** | **596.3** |
-| pyrefly@1.1.0 | 0.427 | 0.216 | 0.158 | 0.128 | 158.8 | 277.7 |
-| mypy@2.1.0 | 1.016 | 0.843 | 0.784 | 0.793 | 705.9 | 44.8 |
-| pyright@1.1.410 | 4.731 | 2.991 | 2.649 | 2.648 | 522.5 | 13.4 |
+| ty@0.0.51 | **0.305** | **0.137** | **0.086** | **0.063** | 119.1 | **562.4** |
+| pyrefly@1.1.1 | 0.429 | 0.218 | 0.161 | 0.125 | 157.0 | 283.4 |
+| mypy@2.1.0 | 1.024 | 0.853 | 0.802 | 0.795 | 705.1 | 44.7 |
+| zuban@0.8.2 | 1.030 | 1.002 | 0.943 | 0.950 | **65.7** | 37.4 |
+| pyright@1.1.410 | 4.723 | 3.001 | 2.638 | 2.658 | 521.2 | 13.4 |
 
 
 #### pylint
@@ -695,10 +704,11 @@ _Corpus snapshot 2026-06-13 · measured 2026-06-18 09:15 UTC_
 
 | Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
 |------|--:|--:|--:|--:|--:|--:|
-| ty@0.0.50 | **0.683** | **0.297** | **0.179** | **0.131** | **199.2** | **303.2** |
-| pyrefly@1.1.0 | 0.724 | 0.334 | 0.228 | 0.175 | 225.3 | 227.9 |
-| mypy@2.1.0 | 1.528 | 0.975 | 0.867 | 0.845 | 848.7 | 47.1 |
-| pyright@1.1.410 | 5.824 | 3.538 | 3.079 | 3.092 | 625.0 | 12.9 |
+| ty@0.0.51 | 0.695 | 0.305 | **0.183** | **0.122** | 197.8 | **326.2** |
+| pyrefly@1.1.1 | 0.727 | 0.338 | 0.232 | 0.181 | 222.9 | 219.9 |
+| zuban@0.8.2 | **0.301** | **0.266** | 0.243 | 0.243 | **78.5** | 164.0 |
+| mypy@2.1.0 | 1.538 | 0.984 | 0.864 | 0.859 | 848.9 | 46.3 |
+| pyright@1.1.410 | 5.847 | 3.534 | 3.092 | 3.096 | 624.0 | 12.9 |
 
 
 ### Large projects
@@ -710,10 +720,11 @@ _Corpus snapshot 2026-06-13 · measured 2026-06-18 09:15 UTC_
 
 | Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
 |------|--:|--:|--:|--:|--:|--:|
-| ty@0.0.50 | **1.009** | **0.437** | **0.244** | **0.162** | **267.6** | —* |
-| pyrefly@1.1.0 | 1.061 | 0.471 | 0.306 | 0.231 | 288.6 | —* |
-| mypy@2.1.0 | 2.437 | 1.891 | 1.755 | 1.759 | 1094.1 | 40.3 |
-| pyright@1.1.410 | 7.818 | 5.057 | 4.503 | 4.484 | 852.0 | —* |
+| ty@0.0.51 | **1.027** | **0.442** | **0.251** | **0.169** | 262.7 | —* |
+| pyrefly@1.1.1 | 1.055 | 0.470 | 0.311 | 0.225 | 282.8 | —* |
+| zuban@0.8.2 | 1.189 | 1.140 | 1.063 | 1.063 | **88.9** | **66.7** |
+| mypy@2.1.0 | 2.451 | 1.902 | 1.769 | 1.772 | 1097.4 | 40.0 |
+| pyright@1.1.410 | 7.838 | 5.052 | 4.502 | 4.481 | 850.9 | —* |
 
 
 #### ansible-core
@@ -722,10 +733,11 @@ _Corpus snapshot 2026-06-13 · measured 2026-06-18 09:15 UTC_
 
 | Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
 |------|--:|--:|--:|--:|--:|--:|
-| pyrefly@1.1.0 | **1.768** | **0.759** | **0.449** | **0.312** | **363.5** | **323.6** |
-| ty@0.0.50 | 2.050 | 0.894 | 0.497 | 0.352 | 533.2 | 287.3 |
-| mypy@2.1.0 | 3.602 | 2.050 | 1.623 | 1.532 | 1246.0 | 66.0 |
-| pyright@1.1.410 | 13.463 | 8.995 | 8.089 | 8.088 | 1246.1 | 12.5 |
+| ty@0.0.51 | 2.010 | 0.853 | 0.474 | **0.295** | 493.9 | **342.4** |
+| pyrefly@1.1.1 | 1.752 | 0.745 | **0.446** | 0.307 | 358.1 | 329.1 |
+| zuban@0.8.2 | **0.660** | **0.565** | 0.500 | 0.496 | **133.5** | 203.7 |
+| mypy@2.1.0 | 3.613 | 2.065 | 1.638 | 1.545 | 1247.5 | 65.4 |
+| pyright@1.1.410 | 13.457 | 8.962 | 8.104 | 8.091 | 1283.3 | 12.5 |
 
 
 #### mypy
@@ -734,10 +746,11 @@ _Corpus snapshot 2026-06-13 · measured 2026-06-18 09:15 UTC_
 
 | Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
 |------|--:|--:|--:|--:|--:|--:|
-| ty@0.0.50 | **1.860** | **0.786** | **0.468** | **0.300** | **430.8** | —* |
-| pyrefly@1.1.0 | 2.076 | 0.882 | 0.525 | 0.383 | 500.6 | —* |
-| mypy@2.1.0 | 3.464 | 1.850 | 1.386 | 1.237 | 1128.0 | —* |
-| pyright@1.1.410 | 12.915 | 8.442 | 7.583 | 7.548 | 1343.5 | —* |
+| ty@0.0.51 | 1.886 | 0.789 | 0.477 | **0.306** | 421.3 | —* |
+| pyrefly@1.1.1 | 2.055 | 0.872 | 0.544 | 0.370 | 493.3 | —* |
+| zuban@0.8.2 | **0.566** | **0.468** | **0.400** | 0.399 | **120.4** | —* |
+| mypy@2.1.0 | 3.469 | 1.845 | 1.388 | 1.250 | 1126.5 | —* |
+| pyright@1.1.410 | 12.869 | 8.432 | 7.581 | 7.532 | 1349.4 | —* |
 
 
 #### sqlalchemy
@@ -746,10 +759,11 @@ _Corpus snapshot 2026-06-13 · measured 2026-06-18 09:15 UTC_
 
 | Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
 |------|--:|--:|--:|--:|--:|--:|
-| pyrefly@1.1.0 | **1.675** | **0.752** | **0.452** | **0.309** | **286.0** | **648.0** |
-| ty@0.0.50 | 2.476 | 1.031 | 0.586 | 0.352 | 612.8 | 568.8 |
-| mypy@2.1.0 | 4.283 | 3.294 | 3.086 | 3.105 | 1335.6 | 64.5 |
-| pyright@1.1.410 | 14.960 | 10.084 | 9.095 | 9.082 | 1404.3 | 22.0 |
+| pyrefly@1.1.1 | 1.676 | **0.754** | **0.464** | **0.300** | 294.8 | **666.9** |
+| ty@0.0.51 | 2.503 | 1.038 | 0.576 | 0.355 | 603.6 | 564.1 |
+| zuban@0.8.2 | **0.968** | 0.841 | 0.743 | 0.734 | **176.6** | 272.8 |
+| mypy@2.1.0 | 4.299 | 3.320 | 3.098 | 3.104 | 1335.3 | 64.5 |
+| pyright@1.1.410 | 14.959 | 10.059 | 9.085 | 9.059 | 1441.9 | 22.1 |
 
 
 #### home-assistant
@@ -758,10 +772,11 @@ _Corpus snapshot 2026-06-13 · measured 2026-06-18 09:15 UTC_
 
 | Checker | 1c | 4c | 8c | 16c | Peak mem (MB) | kLOC/s |
 |------|--:|--:|--:|--:|--:|--:|
-| ty@0.0.50 | 17.745 | **7.006** | **3.700** | **2.071** | 4038.9 | —* |
-| pyrefly@1.1.0 | **17.227** | 7.133 | 4.149 | 2.539 | **3615.3** | —* |
-| mypy@2.1.0 | 52.142 | 22.489 | 14.030 | 10.492 | 11795.8 | 100.8 |
-| pyright@1.1.410 | 135.610 | 92.645 | 81.267 | 81.838 | 4513.9 | —* |
+| ty@0.0.51 | 17.833 | **7.031** | **3.693** | **2.142** | 3923.8 | —* |
+| pyrefly@1.1.1 | 16.823 | 7.046 | 4.081 | 2.504 | 3562.4 | —* |
+| zuban@0.8.2 | **8.794** | 7.632 | 6.759 | 6.660 | **1708.3** | **158.9** |
+| mypy@2.1.0 | 52.238 | 22.621 | 14.081 | 10.482 | 11872.5 | 100.9 |
+| pyright@1.1.410 | 135.001 | 90.133 | 81.852 | 82.543 | 4543.6 | —* |
 
 
 > Wall is the hyperfine median in seconds, fastest first; the best cell in each metric column is in **bold**. The per-core columns are the constrained track, each pinned to the core count in its header. Peak mem and kLOC/s are from the 16-core pass. kLOC/s denominator is the canonical analyzed code-LOC, identical across tools. `—*` = throughput withheld because the tool over-reports its analyzed set vs the canonical denominator. `!` = swap observed during the memory pass, so peak memory may be understated. Checker issue counts are intentionally omitted — they are not comparable across tools and are not a ranking.
