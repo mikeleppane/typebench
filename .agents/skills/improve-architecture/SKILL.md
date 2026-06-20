@@ -7,8 +7,8 @@ description: Explore the typebench codebase, surface architectural friction, and
 
 Explore the typebench codebase organically, surface architectural friction, and propose
 module-deepening refactors as **durable plan documents** under `docs/plans/`. typebench is a
-neutral, reproducible benchmark of Python type-checker performance (mypy, pyright, pyrefly,
-ty); **the only product is trust in the numbers.** Architecture work here is in service of
+neutral, reproducible benchmark of Python type-checker performance (mypy, pyright, pyrefly, ty,
+zuban); **the only product is trust in the numbers.** Architecture work here is in service of
 that: a boundary that hides measurement logic badly is a boundary that lets a bias leak in.
 
 A **deep module** (Ousterhout, *A Philosophy of Software Design*) has "a small interface

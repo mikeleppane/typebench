@@ -5,7 +5,7 @@ description: Multimodal multi-axis code review for the typebench repo before mer
 
 # Code Review & Quality (typebench)
 
-Multi-axis code review for the typebench repo. typebench is a neutral, reproducible benchmark of Python type-checker performance (mypy, pyright, pyrefly, ty); **the only product is trust in the numbers.** The output of this skill is a **structured Markdown review report** with findings grouped by severity, each carrying a `file:line` reference and a quoted snippet, followed by a clear verdict.
+Multi-axis code review for the typebench repo. typebench is a neutral, reproducible benchmark of Python type-checker performance (mypy, pyright, pyrefly, ty, zuban); **the only product is trust in the numbers.** The output of this skill is a **structured Markdown review report** with findings grouped by severity, each carrying a `file:line` reference and a quoted snippet, followed by a clear verdict.
 
 This skill is for the *review* moment. Companion skills cover the *production* moments and they take precedence on the rules they own:
 
@@ -229,6 +229,7 @@ A dropped or crashed failure silently biases the benchmark by removing a data po
 ### 6. Adapter contract
 
 - New adapters must conform to the `Adapter` Protocol (`@runtime_checkable`, `src/typebench/adapters/base.py`) — `name`, `version`, `install`, `command`, `parallelism_cap`, `parse`, `classify`, `clear_cache`, `prepare_command`. A missing or mistyped method is `Critical` (it breaks the collector's pipeline).
+- A new adapter additionally requires the empirical **neutrality audit** before its numbers are trusted — cold-run/no-cache, untyped-body posture parity, dep-resolution, and parallel-scaling sanity (see AGENTS.md "Adding a checker"). Protocol conformance is necessary, not sufficient: a tool can implement every method correctly and still be measured unfairly (a silent cache, skipped untyped bodies, deps treated as `Any`, a parallelism cap that didn't apply). A new adapter merged without that audit is `Critical`.
 - `parse()` must **degrade to `(None, None)` on unexpected output** rather than raising or guessing, and must coerce counts through `coerce_count` in `adapters/base.py` (which rejects bools and non-ints) rather than leaking a garbage value (or a JSON `true`) into the record as a count. A `parse()` that lets unvalidated parsed-JSON flow into `diagnostics`/`files` is `Important`.
 - `classify()` may delegate to `default_classify` in `adapters/base.py` or `classify_default` in `engine/wrapper.py` for the generic `{0: clean, 1: diagnostics}` map, but a real tool whose diagnostics exit code is not 1 (e.g. ty) needs its own classify *and* the wrapper's success-exit gate must agree. The `universal_failure_prefix` + `classify_with_map` mechanism in `engine/wrapper.py` gates success exits; an adapter whose probe-phase `classify` disagrees with that gate will record conflicting results across the two phases. A new adapter whose probe-phase classify and wrapper-gate classify disagree is `Critical`.
 
