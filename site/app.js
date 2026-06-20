@@ -111,6 +111,35 @@ function formatMetric(value, meta) {
   return `${value.toFixed(meta.digits)} ${meta.unit}`;
 }
 
+// Relative-speed (speedup) view. The reader anchors the field to one tool (mypy
+// by default, the reference checker) or to the field average; every other tool
+// reads as a multiple of that anchor's wall — higher = faster. Geometric mean
+// averages the per-project speedups so no single big project dominates.
+const GEOMEAN_ANCHOR = "__geomean__";
+
+function geomean(xs) {
+  return Math.exp(xs.reduce((a, x) => a + Math.log(x), 0) / xs.length);
+}
+
+// Power-of-two axis ticks that always ENCLOSE the data (so an extreme bar can
+// never render past the axis) and keep 1× on a tick. Chart.js auto log ticks
+// crowd illegibly near 1×; pinning this clean set keeps the scale readable and
+// symmetric around the baseline. Collapsed input (everything at 1×) widens by a
+// tick each way so the axis is never degenerate.
+function ratioScale(values) {
+  const lo = Math.min(1, ...values);
+  const hi = Math.max(1, ...values);
+  let minExp = Math.floor(Math.log2(lo));
+  let maxExp = Math.ceil(Math.log2(hi));
+  if (minExp === maxExp) {
+    minExp -= 1;
+    maxExp += 1;
+  }
+  const ticks = [];
+  for (let e = minExp; e <= maxExp; e += 1) ticks.push(2 ** e);
+  return { min: 2 ** minExp, max: 2 ** maxExp, ticks };
+}
+
 const FAILURE_LABELS = {
   "failed{crash}": { glyph: "✗", label: "crash" },
   "failed{oom}": { glyph: "⚠", label: "OOM" },
@@ -490,6 +519,22 @@ async function main() {
     .map((b) => `<option value="${escapeHtml(b.key)}">${escapeHtml(b.label)}</option>`)
     .join("");
 
+  // Anchor selector for the speedup card: the field average (neutral) plus every
+  // tool present, so the reader can re-anchor freely. Default to mypy — the
+  // reference checker everyone knows — falling back to the field average if this
+  // corpus has no mypy rows at all.
+  const ratioAnchorEl = document.getElementById("ratio-anchor");
+  const ratioAnchorOptions = [
+    { value: GEOMEAN_ANCHOR, label: "field average (geomean)" },
+    ...[...new Set(points.map((p) => p.tool))]
+      .sort()
+      .map((tool) => ({ value: tool, label: tool })),
+  ];
+  ratioAnchorEl.innerHTML = ratioAnchorOptions
+    .map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`)
+    .join("");
+  ratioAnchorEl.value = points.some((p) => p.tool === "mypy") ? "mypy" : GEOMEAN_ANCHOR;
+
   // Snapshot picker drives the matrix date (newest first, latest selected). The
   // matrix no longer hardcodes "latest", so older official runs are reachable from
   // the page itself instead of only via the committed JSON on GitHub.
@@ -539,6 +584,12 @@ async function main() {
   const scalingMetaEl = document.getElementById("scaling-meta");
   const scalingCtx = document.getElementById("scaling").getContext("2d");
   let scalingChart = null;
+
+  const ratioCard = document.getElementById("ratio-card");
+  const ratioTitleEl = document.getElementById("ratio-title");
+  const ratioMetaEl = document.getElementById("ratio-meta");
+  const ratioCtx = document.getElementById("ratio").getContext("2d");
+  let ratioChart = null;
 
   function renderScaling() {
     const project = selectedProject;
@@ -650,6 +701,159 @@ async function main() {
               text: "Parallel efficiency (CPU-time ÷ wall)",
               color: cssVar("--text-faint"),
             },
+            ticks: { padding: 6 },
+          },
+        },
+      },
+    });
+  }
+
+  // Aggregate one snapshot+budget into per-tool speedups against `anchor`. Within
+  // a snapshot a tool has one version, so one wall per tool per project (a stray
+  // duplicate keeps the first by checker_id). speedup = anchor_wall / tool_wall,
+  // so a tool that runs in half the anchor's time reads 2.00×. A stale named
+  // anchor absent from this view falls back to the field average rather than
+  // blanking the card. n/denom surfaces tools that skipped (or failed) projects.
+  function ratioRowsFor(anchor, rows) {
+    const projects = [...new Set(rows.map((p) => p.project))];
+    const projectWalls = new Map();
+    for (const project of projects) {
+      const recs = rows
+        .filter((p) => p.project === project)
+        .sort((a, b) => a.checker_id.localeCompare(b.checker_id));
+      const wallsByTool = new Map();
+      for (const p of recs) {
+        if (!wallsByTool.has(p.tool)) wallsByTool.set(p.tool, p.wall_median_s);
+      }
+      projectWalls.set(project, wallsByTool);
+    }
+
+    let effectiveAnchor = anchor;
+    if (anchor !== GEOMEAN_ANCHOR && !rows.some((p) => p.tool === anchor)) {
+      effectiveAnchor = GEOMEAN_ANCHOR;
+    }
+
+    const speedups = new Map();
+    let denom = 0;
+    for (const project of projects) {
+      const wallsByTool = projectWalls.get(project);
+      let base;
+      if (effectiveAnchor === GEOMEAN_ANCHOR) {
+        const walls = [...wallsByTool.values()];
+        if (!walls.length) continue;
+        base = geomean(walls);
+      } else if (wallsByTool.has(effectiveAnchor)) {
+        base = wallsByTool.get(effectiveAnchor);
+      } else {
+        continue; // anchor tool didn't run this project — skip it
+      }
+      denom += 1;
+      for (const [tool, wall] of wallsByTool) {
+        if (!speedups.has(tool)) speedups.set(tool, []);
+        speedups.get(tool).push(base / wall);
+      }
+    }
+
+    const results = [...speedups.entries()]
+      .filter(([, values]) => values.length > 0)
+      .map(([tool, values]) => ({ tool, speedup: geomean(values), n: values.length }))
+      .sort((a, b) => b.speedup - a.speedup || a.tool.localeCompare(b.tool));
+    return { results, denom, effectiveAnchor };
+  }
+
+  function renderRatio() {
+    const budget = budgetEl.value;
+    const budgetLabel =
+      budgets.find((b) => b.key === budget)?.label || budget.replace("|", " · ");
+    const requestedAnchor = ratioAnchorEl.value || GEOMEAN_ANCHOR;
+    const rows = points.filter(
+      (p) =>
+        p.date === selectedSnapshot &&
+        budgetKey(p) === budget &&
+        isFiniteNumber(p.wall_median_s) &&
+        p.wall_median_s > 0
+    );
+    const { results, denom, effectiveAnchor } = ratioRowsFor(requestedAnchor, rows);
+    const hasData = results.length >= 2;
+    const anchorLabel = effectiveAnchor === GEOMEAN_ANCHOR ? "field average" : effectiveAnchor;
+
+    ratioTitleEl.textContent = selectedSnapshot
+      ? `Relative speed — ${selectedSnapshot}`
+      : "Relative speed";
+    ratioMetaEl.textContent = hasData
+      ? `${budgetLabel} · speedup vs ${anchorLabel} · higher = faster · geomean across ${denom} projects`
+      : "";
+    ratioCard.classList.toggle("is-empty", !hasData);
+
+    if (ratioChart) ratioChart.destroy();
+    if (!hasData) return;
+
+    // Floating bars emanate from the 1× baseline: faster tools (>1) extend right,
+    // slower (<1) left, on a log axis so 0.5× and 2× are visually symmetric.
+    const { min, max, ticks } = ratioScale(results.map((r) => r.speedup));
+
+    ratioChart = new Chart(ratioCtx, {
+      type: "bar",
+      data: {
+        labels: results.map((r) => r.tool),
+        datasets: [
+          {
+            label: "Speedup",
+            data: results.map((r) => [Math.min(1, r.speedup), Math.max(1, r.speedup)]),
+            backgroundColor: results.map((r) => colorFor(r.tool)),
+            borderColor: results.map((r) => colorFor(r.tool)),
+            borderWidth: 1,
+            results,
+          },
+        ],
+      },
+      options: {
+        indexAxis: "y",
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "nearest", intersect: true },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: cssVar("--surface"),
+            titleColor: cssVar("--text"),
+            bodyColor: cssVar("--text-muted"),
+            borderColor: cssVar("--border-strong"),
+            borderWidth: 1,
+            padding: 10,
+            callbacks: {
+              label: (item) => {
+                const r = item.dataset.results[item.dataIndex];
+                if (r.tool === effectiveAnchor) return `${r.tool}: 1.00× (reference)`;
+                // Within rounding of the baseline "faster/slower" reads as a
+                // contradiction (e.g. "1.00× faster"), so call it level instead.
+                if (Math.abs(r.speedup - 1) < 0.005) {
+                  return `${r.tool}: ~1.00× (≈ same as ${anchorLabel}, ${r.n}/${denom} projects)`;
+                }
+                const rel = r.speedup >= 1 ? "faster" : "slower";
+                return `${r.tool}: ${r.speedup.toFixed(2)}× ${rel} than ${anchorLabel} (${r.n}/${denom} projects)`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            type: "logarithmic",
+            min,
+            max,
+            title: {
+              display: true,
+              text: "× speedup (1 = baseline)",
+              color: cssVar("--text-faint"),
+            },
+            // Pin the readable tick set instead of Chart.js's crowded auto log ticks.
+            afterBuildTicks: (axis) => {
+              axis.ticks = ticks.map((value) => ({ value }));
+            },
+            ticks: { callback: (value) => `${value}×` },
+          },
+          y: {
+            border: { display: false },
             ticks: { padding: 6 },
           },
         },
@@ -819,6 +1023,7 @@ async function main() {
 
     if (chart) chart.destroy();
     renderScaling();
+    renderRatio();
     if (!hasData) return;
 
     chart = new Chart(ctx, {
@@ -914,6 +1119,9 @@ async function main() {
     selectedSnapshot = snapshotEl.value;
     render();
   });
+  // Re-anchoring only re-scales the speedup card, but render() is cheap and keeps
+  // every view in sync from one path.
+  ratioAnchorEl.addEventListener("change", render);
 
   // Re-theme on light/dark switch so the chart matches the page live.
   if (window.matchMedia) {
