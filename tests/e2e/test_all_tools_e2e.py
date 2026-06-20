@@ -8,7 +8,7 @@ from typebench.cli import app
 from typebench.contracts.models import ResultClass, RunResult
 
 runner = CliRunner()
-_REAL_TOOLS = ["mypy", "pyright", "ty", "pyrefly"]
+_REAL_TOOLS = ["mypy", "pyright", "ty", "pyrefly", "zuban"]
 
 
 def _run(tool: str, fixture: str, out: Path, fixtures_dir: Path) -> RunResult:

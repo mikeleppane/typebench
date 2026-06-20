@@ -23,6 +23,7 @@ def test_run_doctor_all_present_and_healthy() -> None:
         "pyright",
         "pyrefly",
         "ty",
+        "zuban",
         "node",
         "hyperfine",
         "tokei",

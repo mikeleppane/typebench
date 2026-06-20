@@ -99,6 +99,7 @@ def test_config_init_scaffolds_commented_toml(tmp_path: Path) -> None:
     assert 'tool = "pyright"' in text
     assert 'tool = "pyrefly"' in text
     assert 'tool = "ty"' in text
+    assert 'tool = "zuban"' in text
 
 
 def test_config_show_prints_effective_config(tmp_path: Path) -> None:
@@ -196,6 +197,7 @@ def test_suite_without_config_preserves_bare_back_compat(
         CheckerSpec(tool="pyright"),
         CheckerSpec(tool="pyrefly"),
         CheckerSpec(tool="ty"),
+        CheckerSpec(tool="zuban"),
     )
     assert captures[0].thread_modes == [ThreadMode.ALL_CORES, ThreadMode.CONSTRAINED]
     assert captures[0].cores == (1,)

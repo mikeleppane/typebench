@@ -112,6 +112,15 @@ _INVENTORY: Final[tuple[_Spec, ...]] = (
         ("ty", "--version"),
     ),
     _Spec(
+        "zuban",
+        Tier.PER_TOOL,
+        "checker",
+        "zuban rows absent",
+        "uv sync  (dev dependency)",
+        "zuban",
+        ("zuban", "--version"),
+    ),
+    _Spec(
         "node",
         Tier.PER_TOOL,
         "pyright runtime",

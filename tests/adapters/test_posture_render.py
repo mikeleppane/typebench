@@ -6,6 +6,7 @@ from typebench.adapters.mypy import _posture_args as mypy_posture
 from typebench.adapters.pyrefly import _posture_lines as pyrefly_posture
 from typebench.adapters.pyright import _posture_config as pyright_posture
 from typebench.adapters.ty import _posture_args as ty_posture
+from typebench.adapters.zuban import _posture_args as zuban_posture
 from typebench.contracts.policy import PRESETS, CheckerPosture, Policy
 
 _STANDARD = PRESETS[Policy.STANDARD]
@@ -43,9 +44,15 @@ def test_ty_standard_renders_no_flags() -> None:
     assert ty_posture(_STANDARD) == []
 
 
+def test_zuban_standard_renders_no_flags() -> None:
+    # default mode satisfies analyze_untyped_defs + resolve_deps_report_first_party
+    # natively, so STANDARD emits no posture flags (like ty).
+    assert zuban_posture(_STANDARD) == []
+
+
 @pytest.mark.parametrize(
     "render",
-    [mypy_posture, pyright_posture, pyrefly_posture, ty_posture],
+    [mypy_posture, pyright_posture, pyrefly_posture, ty_posture, zuban_posture],
 )
 def test_strict_posture_is_guarded_until_verified(
     render: Callable[[CheckerPosture], object],

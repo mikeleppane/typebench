@@ -2,8 +2,8 @@ import shutil
 
 import pytest
 
-# pyrefly is already a dev dep; mypy + ty are added in 2B; pyright came in 2A.
-_HARD_DEPS = ["mypy", "ty", "pyrefly", "pyright"]
+# All declared dev-dep checkers: pyrefly/pyright/mypy/ty plus zuban.
+_HARD_DEPS = ["mypy", "ty", "pyrefly", "pyright", "zuban"]
 
 
 @pytest.mark.parametrize("binary", _HARD_DEPS)
