@@ -107,6 +107,12 @@ function isFiniteNumber(value) {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+const GEOMEAN_ANCHOR = "__geomean__";
+
+function geomean(xs) {
+  return Math.exp(xs.reduce((a, x) => a + Math.log(x), 0) / xs.length);
+}
+
 function formatMetric(value, meta) {
   return `${value.toFixed(meta.digits)} ${meta.unit}`;
 }
@@ -490,6 +496,18 @@ async function main() {
     .map((b) => `<option value="${escapeHtml(b.key)}">${escapeHtml(b.label)}</option>`)
     .join("");
 
+  const ratioAnchorEl = document.getElementById("ratio-anchor");
+  const ratioAnchorOptions = [
+    { value: GEOMEAN_ANCHOR, label: "field average (geomean)" },
+    ...[...new Set(points.map((p) => p.tool))]
+      .sort()
+      .map((tool) => ({ value: tool, label: tool })),
+  ];
+  ratioAnchorEl.innerHTML = ratioAnchorOptions
+    .map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`)
+    .join("");
+  ratioAnchorEl.value = GEOMEAN_ANCHOR;
+
   // Snapshot picker drives the matrix date (newest first, latest selected). The
   // matrix no longer hardcodes "latest", so older official runs are reachable from
   // the page itself instead of only via the committed JSON on GitHub.
@@ -539,6 +557,12 @@ async function main() {
   const scalingMetaEl = document.getElementById("scaling-meta");
   const scalingCtx = document.getElementById("scaling").getContext("2d");
   let scalingChart = null;
+
+  const ratioCard = document.getElementById("ratio-card");
+  const ratioTitleEl = document.getElementById("ratio-title");
+  const ratioMetaEl = document.getElementById("ratio-meta");
+  const ratioCtx = document.getElementById("ratio").getContext("2d");
+  let ratioChart = null;
 
   function renderScaling() {
     const project = selectedProject;
@@ -650,6 +674,145 @@ async function main() {
               text: "Parallel efficiency (CPU-time ÷ wall)",
               color: cssVar("--text-faint"),
             },
+            ticks: { padding: 6 },
+          },
+        },
+      },
+    });
+  }
+
+  function ratioRowsFor(anchor, rows) {
+    const projects = [...new Set(rows.map((p) => p.project))].sort();
+    const projectWalls = new Map();
+    for (const project of projects) {
+      const recs = rows
+        .filter((p) => p.project === project)
+        .sort((a, b) => a.checker_id.localeCompare(b.checker_id));
+      const wallsByTool = new Map();
+      for (const p of recs) {
+        if (!wallsByTool.has(p.tool)) wallsByTool.set(p.tool, p.wall_median_s);
+      }
+      projectWalls.set(project, wallsByTool);
+    }
+
+    let effectiveAnchor = anchor;
+    if (anchor !== GEOMEAN_ANCHOR && !rows.some((p) => p.tool === anchor)) {
+      effectiveAnchor = GEOMEAN_ANCHOR;
+    }
+
+    const ratios = new Map();
+    let denom = 0;
+    for (const project of projects) {
+      const wallsByTool = projectWalls.get(project);
+      if (effectiveAnchor === GEOMEAN_ANCHOR) {
+        const walls = [...wallsByTool.values()];
+        if (!walls.length) continue;
+        const base = geomean(walls);
+        denom += 1;
+        for (const [tool, wall] of wallsByTool) {
+          if (!ratios.has(tool)) ratios.set(tool, []);
+          ratios.get(tool).push(wall / base);
+        }
+      } else if (wallsByTool.has(effectiveAnchor)) {
+        const base = wallsByTool.get(effectiveAnchor);
+        denom += 1;
+        for (const [tool, wall] of wallsByTool) {
+          if (!ratios.has(tool)) ratios.set(tool, []);
+          ratios.get(tool).push(wall / base);
+        }
+      }
+    }
+
+    const results = [...ratios.entries()]
+      .filter(([, values]) => values.length > 0)
+      .map(([tool, values]) => ({ tool, ratio: geomean(values), n: values.length }))
+      .sort((a, b) => a.ratio - b.ratio || a.tool.localeCompare(b.tool));
+    return { results, denom, effectiveAnchor };
+  }
+
+  function renderRatio() {
+    const budget = budgetEl.value;
+    const budgetLabel =
+      budgets.find((b) => b.key === budget)?.label || budget.replace("|", " · ");
+    const requestedAnchor = ratioAnchorEl.value || GEOMEAN_ANCHOR;
+    const rows = points.filter(
+      (p) =>
+        p.date === selectedSnapshot &&
+        budgetKey(p) === budget &&
+        isFiniteNumber(p.wall_median_s) &&
+        p.wall_median_s > 0
+    );
+    const { results, denom, effectiveAnchor } = ratioRowsFor(requestedAnchor, rows);
+    const hasData = results.length >= 2;
+
+    ratioTitleEl.textContent = selectedSnapshot
+      ? `Relative speed — ${selectedSnapshot}`
+      : "Relative speed";
+    if (effectiveAnchor === GEOMEAN_ANCHOR) {
+      ratioMetaEl.textContent = hasData
+        ? `${budgetLabel} · wall ÷ field geomean · lower = faster · geomean across ${denom} projects`
+        : "";
+    } else {
+      ratioMetaEl.textContent = hasData
+        ? `${budgetLabel} · wall ÷ ${effectiveAnchor} · lower = faster than ${effectiveAnchor} · geomean across ${denom} projects`
+        : "";
+    }
+    ratioCard.classList.toggle("is-empty", !hasData);
+
+    if (ratioChart) ratioChart.destroy();
+    if (!hasData) return;
+
+    ratioChart = new Chart(ratioCtx, {
+      type: "bar",
+      data: {
+        labels: results.map((r) => r.tool),
+        datasets: [
+          {
+            label: "Relative wall",
+            data: results.map((r) => [Math.min(1, r.ratio), Math.max(1, r.ratio)]),
+            backgroundColor: results.map((r) => colorFor(r.tool)),
+            borderColor: results.map((r) => colorFor(r.tool)),
+            borderWidth: 1,
+            results,
+          },
+        ],
+      },
+      options: {
+        indexAxis: "y",
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "nearest", intersect: true },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: cssVar("--surface"),
+            titleColor: cssVar("--text"),
+            bodyColor: cssVar("--text-muted"),
+            borderColor: cssVar("--border-strong"),
+            borderWidth: 1,
+            padding: 10,
+            callbacks: {
+              label: (item) => {
+                const result = item.dataset.results[item.dataIndex];
+                return `${result.tool}: ${result.ratio.toFixed(2)}× (${result.n}/${denom} projects)`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            type: "logarithmic",
+            title: {
+              display: true,
+              text: "× relative (1 = baseline)",
+              color: cssVar("--text-faint"),
+            },
+            ticks: {
+              callback: (value) => `${Number(value).toFixed(2)}×`,
+            },
+          },
+          y: {
+            border: { display: false },
             ticks: { padding: 6 },
           },
         },
@@ -819,6 +982,7 @@ async function main() {
 
     if (chart) chart.destroy();
     renderScaling();
+    renderRatio();
     if (!hasData) return;
 
     chart = new Chart(ctx, {
@@ -914,6 +1078,7 @@ async function main() {
     selectedSnapshot = snapshotEl.value;
     render();
   });
+  ratioAnchorEl.addEventListener("change", render);
 
   // Re-theme on light/dark switch so the chart matches the page live.
   if (window.matchMedia) {
