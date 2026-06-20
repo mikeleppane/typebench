@@ -606,7 +606,8 @@ def build_trends(history: list[ResultsEnvelope]) -> dict[str, object]:
     The GH Pages app groups points into series and derives inter-checker ratios
     client-side (slowest per date/project/mode/metric). Only measured-success records
     contribute points; failures[] carries non-measured records for coverage panels.
-    Wall points carry median plus min/max/stddev spread, raw and calibration-normalized."""
+    Wall points carry median plus min/max/stddev spread, raw and calibration-normalized.
+    parallel_efficiency is carried for the scaling view."""
     anchors = cpu_model_anchors(history)
     points: list[dict[str, object]] = []
     failures: list[dict[str, object]] = []
@@ -703,6 +704,7 @@ def build_trends(history: list[ResultsEnvelope]) -> dict[str, object]:
                     "wall_max_s_norm": wall_max_norm,
                     "wall_stddev_s_norm": wall_stddev_norm,
                     "peak_mem_mb": peak_mb,
+                    "parallel_efficiency": record.parallel_efficiency,
                     "kloc_s": _kloc_value(record, envelope.harness_wall_overhead_s),
                     "calib_median_s": calib,
                     "calib_anchor_s": anchor,

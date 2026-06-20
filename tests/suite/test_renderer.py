@@ -697,6 +697,30 @@ def test_build_trends_success_points_carry_result_class(make_env: EnvFactory) ->
     assert _trend_points(trends)[0]["result_class"] == "clean"
 
 
+def test_build_trends_success_point_carries_parallel_efficiency(
+    make_env: EnvFactory,
+) -> None:
+    record = _record_versioned("mypy@1.0", "mypy", 1.0, make_env).model_copy(
+        update={"parallel_efficiency": 3.25, "thread_mode": ThreadMode.CONSTRAINED, "cores": 4}
+    )
+
+    trends = build_trends([_envelope("2026-02-01", record)])
+
+    assert _trend_points(trends)[0]["parallel_efficiency"] == 3.25
+
+
+def test_build_trends_success_point_carries_null_parallel_efficiency(
+    make_env: EnvFactory,
+) -> None:
+    record = _record_versioned("mypy@1.0", "mypy", 1.0, make_env).model_copy(
+        update={"parallel_efficiency": None, "thread_mode": ThreadMode.CONSTRAINED, "cores": 4}
+    )
+
+    trends = build_trends([_envelope("2026-02-01", record)])
+
+    assert _trend_points(trends)[0]["parallel_efficiency"] is None
+
+
 def test_build_trends_distinguishes_same_day_versions(make_env: EnvFactory) -> None:
     env = ResultsEnvelope(
         suite_version="v",

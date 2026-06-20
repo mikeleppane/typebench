@@ -515,6 +515,129 @@ async function main() {
   const ctx = document.getElementById("chart").getContext("2d");
   let chart = null;
 
+  const scalingCard = document.getElementById("scaling-card");
+  const scalingTitleEl = document.getElementById("scaling-title");
+  const scalingMetaEl = document.getElementById("scaling-meta");
+  const scalingCtx = document.getElementById("scaling").getContext("2d");
+  let scalingChart = null;
+
+  function renderScaling() {
+    const project = selectedProject;
+    const rows = points.filter(
+      (p) =>
+        p.project === project &&
+        p.date === selectedSnapshot &&
+        p.thread_mode === "constrained" &&
+        p.cores !== null &&
+        p.cores !== undefined &&
+        isFiniteNumber(p.parallel_efficiency)
+    );
+    const coreCounts = [...new Set(rows.map((p) => p.cores))].sort((a, b) => a - b);
+    const hasData = coreCounts.length >= 2;
+
+    scalingTitleEl.textContent = `${project ?? "—"} — core scaling`;
+    scalingMetaEl.textContent =
+      hasData && selectedSnapshot
+        ? `${selectedSnapshot} · parallel efficiency = CPU-time ÷ wall; higher = more cores utilized`
+        : "";
+    scalingCard.classList.toggle("is-empty", !hasData);
+
+    if (scalingChart) scalingChart.destroy();
+    if (!hasData) return;
+
+    const byChecker = new Map();
+    for (const row of rows) {
+      if (!byChecker.has(row.checker_id)) byChecker.set(row.checker_id, []);
+      byChecker.get(row.checker_id).push(row);
+    }
+
+    const datasets = [...byChecker.keys()].sort().map((checkerId) => {
+      const recs = byChecker.get(checkerId).sort((a, b) => a.cores - b.cores);
+      const color = colorFor(recs[0].tool);
+      return {
+        label: checkerId,
+        borderColor: color,
+        backgroundColor: color,
+        pointBackgroundColor: color,
+        pointBorderColor: color,
+        pointBorderWidth: 1.5,
+        pointRadius: 3.5,
+        pointHoverRadius: 6,
+        borderWidth: 2,
+        tension: 0.25,
+        data: recs.map((p) => ({ x: p.cores, y: p.parallel_efficiency })),
+      };
+    });
+
+    scalingChart = new Chart(scalingCtx, {
+      type: "line",
+      data: { datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "nearest", intersect: false },
+        plugins: {
+          legend: {
+            position: "bottom",
+            labels: {
+              usePointStyle: true,
+              pointStyle: "circle",
+              boxWidth: 8,
+              boxHeight: 8,
+              padding: 16,
+            },
+          },
+          tooltip: {
+            backgroundColor: cssVar("--surface"),
+            titleColor: cssVar("--text"),
+            bodyColor: cssVar("--text-muted"),
+            borderColor: cssVar("--border-strong"),
+            borderWidth: 1,
+            padding: 10,
+            usePointStyle: true,
+            boxPadding: 4,
+            callbacks: {
+              label: (item) => {
+                const cores = item.parsed.x;
+                const eff = item.parsed.y;
+                return `${item.dataset.label}: ${eff.toFixed(2)}× at ${cores}c`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            type: "linear",
+            grid: { display: false },
+            min: coreCounts[0],
+            max: coreCounts[coreCounts.length - 1],
+            afterBuildTicks: (axis) => {
+              axis.ticks = coreCounts.map((value) => ({ value }));
+            },
+            title: { display: true, text: "Cores", color: cssVar("--text-faint") },
+            ticks: {
+              maxRotation: 0,
+              callback: (value) => {
+                const cores = Number(value);
+                return coreCounts.includes(cores) ? `${cores}c` : "";
+              },
+            },
+          },
+          y: {
+            beginAtZero: true,
+            border: { display: false },
+            title: {
+              display: true,
+              text: "Parallel efficiency (CPU-time ÷ wall)",
+              color: cssVar("--text-faint"),
+            },
+            ticks: { padding: 6 },
+          },
+        },
+      },
+    });
+  }
+
   function render() {
     const metricKey = document.getElementById("metric").value;
     const budget = document.getElementById("budget").value;
@@ -671,6 +794,7 @@ async function main() {
     card.classList.toggle("is-empty", !hasData);
 
     if (chart) chart.destroy();
+    renderScaling();
     if (!hasData) return;
 
     chart = new Chart(ctx, {
