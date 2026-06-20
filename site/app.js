@@ -301,7 +301,7 @@ function renderMatrix(
   let html = "";
   let currentTier = null;
   let anyDelta = false;
-  let crossCpuShown = false;
+  let approxShown = false;
   let measured = 0;
   const visibleFailures = [];
   for (const project of projects) {
@@ -383,17 +383,24 @@ function renderMatrix(
       const d = versionDelta(sel, hit, metricKey);
       if (d) {
         anyDelta = true;
-        crossCpuShown = crossCpuShown || d.crossCpu;
+        // A cross-machine pair is only comparable on the calibration-normalized
+        // metric; for raw wall / memory / throughput the delta is shown neutral
+        // and dotted ("approximate") rather than a confident better/worse, so a
+        // machine-specific number is never read as a real version regression.
+        const approx = d.crossCpu && metricKey !== "wall_median_s_norm";
+        const flat = Math.abs(d.pct) < 0.05;
         const better = meta.better === "lower" ? d.pct < 0 : d.pct > 0;
-        const cls = Math.abs(d.pct) < 0.05 ? "" : better ? " good" : " bad";
+        const cls = approx ? " approx" : flat ? "" : better ? " good" : " bad";
         const arrow = d.pct > 0 ? "▲" : d.pct < 0 ? "▼" : "•";
-        const star = d.crossCpu ? `<span class="x">*</span>` : "";
-        const title =
-          `vs ${d.prior.version} · ${d.prior.date}` +
-          (d.crossCpu ? ` · ${shortCpu(d.prior.cpu_model)} (cross-CPU)` : "");
+        if (approx) approxShown = true;
+        const machine = d.crossCpu ? ` · ${shortCpu(d.prior.cpu_model)}` : "";
+        const title = approx
+          ? `vs ${d.prior.version} · ${d.prior.date}${machine} — different machine; ` +
+            `raw values aren't comparable, use normalized wall`
+          : `vs ${d.prior.version} · ${d.prior.date}${machine}`;
         deltaHtml =
           `<span class="delta${cls}" title="${escapeHtml(title)}">` +
-          `${arrow}${Math.abs(d.pct).toFixed(1)}%${star}</span>`;
+          `${approx ? "≈" : ""}${arrow}${Math.abs(d.pct).toFixed(1)}%</span>`;
       }
       // Spread (± tolerance) and the version delta share one sub-row under the
       // value so they read side by side instead of stacking two lines tall.
@@ -413,15 +420,23 @@ function renderMatrix(
     visibleFailures
   );
 
-  // Spell out what the deltas mean only when at least one is shown, and warn
-  // about the cross-CPU asterisk when one appears so a raw delta is never read
-  // as machine-neutral.
+  // The delta key only appears when at least one cell shows a delta, so the
+  // legend teaches the encoding exactly when it is on screen and stays quiet
+  // otherwise. The arrow→better mapping follows the current metric's polarity,
+  // so the reader never has to know whether up or down is good. The "≈ other
+  // machine" chip is added only when an approximate (cross-machine) delta shows.
+  const keyEl = document.getElementById("snap-delta-key");
   if (anyDelta) {
-    setText(
-      "snap-meta",
-      `${budgetLabel} · ${meta.better} is better · Δ vs previous different version` +
-        (crossCpuShown ? " (* = cross-CPU; use normalized wall)" : "")
-    );
+    const betterArrow = meta.better === "lower" ? "▼" : "▲";
+    const worseArrow = meta.better === "lower" ? "▲" : "▼";
+    keyEl.hidden = false;
+    keyEl.innerHTML =
+      `<span class="matrix-legend__hint">Δ vs previous version</span>` +
+      `<span class="delta good">${betterArrow} better</span>` +
+      `<span class="delta bad">${worseArrow} worse</span>` +
+      (approxShown ? `<span class="delta approx">≈ other machine</span>` : "");
+  } else {
+    keyEl.hidden = true;
   }
 
   for (const row of bodyEl.querySelectorAll(".proj-row")) {
