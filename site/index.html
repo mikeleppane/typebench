@@ -360,22 +360,6 @@
       color: var(--text-faint);
     }
 
-    .card-control {
-      display: inline-flex;
-      align-items: center;
-      gap: var(--space-2);
-      margin-left: auto;
-      font-family: var(--font-mono);
-      font-size: 0.72rem;
-      color: var(--text-faint);
-    }
-
-    .card-control select {
-      width: auto;
-      min-width: 11rem;
-      font-size: 0.78rem;
-    }
-
     .chart-box {
       position: relative;
       height: 380px;
@@ -749,28 +733,6 @@
           </svg>
           <strong>No data for this view</strong>
           <p>No committed core sweep matches the selected project and snapshot. Try another combination.</p>
-        </div>
-      </div>
-    </section>
-
-    <section class="card reveal" id="ratio-card" aria-label="Relative speed chart">
-      <div class="card__head">
-        <h2><span class="sec-num" aria-hidden="true">04</span><span id="ratio-title">Relative speed</span></h2>
-        <span class="card__meta" id="ratio-meta"></span>
-        <div class="card-control">
-          <label for="ratio-anchor">Anchor</label>
-          <select id="ratio-anchor"></select>
-        </div>
-      </div>
-      <div class="chart-box">
-        <canvas id="ratio" role="img" aria-label="Bar chart of each checker's wall time relative to the baseline"></canvas>
-        <div class="empty" role="status">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-            <path d="M3 3v18h18" stroke-linecap="round" stroke-linejoin="round" />
-            <path d="M7 16h6M7 12h10M7 8h4" stroke-linecap="round" />
-          </svg>
-          <strong>No data for this view</strong>
-          <p>No comparable results for this snapshot and CPU budget.</p>
         </div>
       </div>
     </section>
