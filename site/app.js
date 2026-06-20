@@ -744,6 +744,10 @@ async function main() {
               borderColor: fill,
               fill: false,
               spanGaps: true,
+              // Match the median line's curvature so the band's curved edges
+              // always enclose the (also curved) median between points; with
+              // mismatched tension the smooth line bows outside the straight band.
+              tension: 0.25,
               isBand: true,
               order: 2,
             },
@@ -757,6 +761,7 @@ async function main() {
               borderColor: fill,
               fill: "-1",
               spanGaps: true,
+              tension: 0.25,
               isBand: true,
               order: 2,
             }
