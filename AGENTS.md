@@ -66,7 +66,7 @@ doubt, prefer the honest, conservative, reproducible choice over the convenient 
     - `suite/runner` — `run_suite` + `SuiteCell`, the sharded
       `(project × tool × thread-mode)` matrix → `ResultsEnvelope`; excluded cells
       become visible FAILED_ENV records ("didn't compete", never silently absent).
-    - `suite/preflight` — `preflight_project`: probes the four tools, records the
+    - `suite/preflight` — `preflight_project`: probes the five tools, records the
       self-reported-vs-canonical divergence, and gates readiness on mis-scope
       (self < canonical) while flagging over-report for the renderer. Readiness is
       all-or-nothing (`ready = all(success and scope_ok)`), so a project that comes
@@ -183,6 +183,38 @@ checker-major, cores-inner, so the slow tail is the biggest project (home-assist
   so mypy/pyright can parse newer syntax — don't reintroduce a single hardcoded
   checker interpreter. A project whose target syntax outruns the checker
   interpreter fails the probe instead of producing an honest result.
+- **Performance is core-count-dependent — never headline one multiplier.** The
+  fastest checker at 1 core is routinely not the fastest at 16; tools parallelize
+  to different degrees and some barely scale (zuban tops the single-core field but
+  scales weakly, so ty/pyrefly lead it at 8–16 cores). Compare within a fixed
+  `--cores` column, and report weak multi-core scaling as a real tool property, not
+  a measurement bug. A bare "N× faster" claim that hides the core count is
+  dishonest by omission.
+
+## Adding a checker
+
+A new adapter must pass the empirical **neutrality audit** before its numbers are
+trusted — Protocol conformance is necessary, not sufficient. The static half (file
+set, excludes, hostile-config suppression, dep resolution) is guarded by
+`tests/neutrality/`; the dynamic half is easy to ship wrong and must be verified
+per tool, ideally encoded as a new `tests/neutrality/` case:
+
+- **Cold-run / no cache.** Either the tool writes no persistent cache that warms
+  across hyperfine runs, OR `clear_cache`/`prepare_command` provably wipes it.
+  Verify: repeated runs are flat (no cold→warm drop) and no cache dir appears. A
+  silent cache turns every warm timed run into a lie about cold-run cost.
+- **Posture parity.** A type error *inside an untyped function body* must surface —
+  proof `analyze_untyped_defs` is really on (zuban `--mode default` and pyrefly
+  `check-unannotated-defs` do this natively; mypy needs `--check-untyped-defs`). A
+  tool that silently skips untyped bodies does less work and looks unfairly fast.
+- **Dependency resolution.** The tool resolves third-party types from the venv and
+  flags the same missing imports a reference tool does — it must not treat deps as
+  `Any` (faster, but a different, dishonest workload).
+- **Parallel-scaling sanity.** Confirm the constrained cap is real: uncapped CPU%
+  reflects the tool's OWN scaling, so a fast cores=1 headline is single-thread
+  merit, not a cap that silently failed to apply. Set `parallelism_cap.hard_cap`
+  honestly — a worker-pool cap (rayon `--threads` / `RAYON_NUM_THREADS`) is hard; a
+  soft task hint (`TY_MAX_PARALLELISM`) is `False`.
 
 ## Testing
 
@@ -214,6 +246,25 @@ messages or PR bodies — commits read as the author's own work. See the
 Before switching branches or merging, check `git status --short`. If unrelated
 local edits exist, stash only those paths with a descriptive message, perform the
 branch operation, then pop the stash and confirm the restored status.
+
+## Releases
+
+`main` is **protected**: required `quality` status check (the `smoke.yml` gate),
+linear history, force-push disabled, and **auto-merge disabled**
+(`enforce_admins=false`, so an admin *can* bypass — don't, unless asked). A release
+lands via a normal PR, never a direct push.
+
+1. Branch from an up-to-date `origin/main` — check `git rev-list --left-right
+   --count origin/main...main` first; a stale local `main` silently bases the
+   release on old commits.
+2. Bump the version in **three** places, in lockstep: `pyproject.toml`,
+   `src/typebench/__init__.py`, and `uv.lock` (run `uv lock` — CI runs
+   `uv sync --frozen` and fails on a stale lock).
+3. Open a PR, let `quality` pass, squash-merge (keeps linear history).
+4. Tag `vX.Y.Z` (annotated) on the merged commit and push it. The Action is
+   consumed as `mikeleppane/typebench@v1`, so move the floating `v1` major pointer
+   to the same commit (`git tag -f v1 <sha> && git push -f origin v1`).
+5. `gh release create vX.Y.Z --latest` with curated notes.
 
 ## Executing tasks with codex
 
