@@ -18,8 +18,20 @@ const TOOL_COLORS = {
 // Metric metadata drives the axis title, tooltip units, and the "lower/higher is
 // better" hint shown next to the chart title.
 const METRICS = {
-  wall_median_s_norm: { axis: "Wall, normalized (s)", unit: "s", digits: 3, better: "lower" },
-  wall_median_s: { axis: "Wall (s)", unit: "s", digits: 3, better: "lower" },
+  wall_median_s_norm: {
+    axis: "Wall, normalized (s)",
+    unit: "s",
+    digits: 3,
+    better: "lower",
+    band: { min: "wall_min_s_norm", max: "wall_max_s_norm", stddev: "wall_stddev_s_norm" },
+  },
+  wall_median_s: {
+    axis: "Wall (s)",
+    unit: "s",
+    digits: 3,
+    better: "lower",
+    band: { min: "wall_min_s", max: "wall_max_s", stddev: "wall_stddev_s" },
+  },
   peak_mem_mb: { axis: "Peak memory (MB)", unit: "MB", digits: 1, better: "lower" },
   kloc_s: { axis: "Throughput (kLOC/s)", unit: "kLOC/s", digits: 1, better: "higher" },
 };
@@ -30,6 +42,20 @@ function cssVar(name) {
 
 function colorFor(tool) {
   return TOOL_COLORS[tool] || "#5c6470";
+}
+
+function bandColor(color) {
+  const hex = color.startsWith("#") ? color.slice(1) : null;
+  if (hex) {
+    const expanded = hex.length === 3 ? hex.replace(/./g, "$&$&") : hex;
+    const value = parseInt(expanded, 16);
+    if (Number.isFinite(value)) {
+      return `rgba(${(value >> 16) & 255}, ${(value >> 8) & 255}, ${value & 255}, 0.13)`;
+    }
+  }
+  const rgb = /^rgb\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(color);
+  if (rgb) return `rgba(${rgb[1]}, ${rgb[2]}, ${rgb[3]}, 0.13)`;
+  return "rgba(92, 100, 112, 0.13)";
 }
 
 // Only used when one tool has two versions on the SAME date (an A/B comparison):
@@ -75,6 +101,49 @@ function budgetText(p) {
 
 function escapeHtml(text) {
   return String(text).replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
+}
+
+function isFiniteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function formatMetric(value, meta) {
+  return `${value.toFixed(meta.digits)} ${meta.unit}`;
+}
+
+const FAILURE_LABELS = {
+  "failed{crash}": { glyph: "✗", label: "crash" },
+  "failed{oom}": { glyph: "⚠", label: "OOM" },
+  "failed{timeout}": { glyph: "⧖", label: "timeout" },
+  "failed{env}": { glyph: "⚙", label: "env" },
+};
+
+function failureMeta(resultClass) {
+  return FAILURE_LABELS[resultClass] || { glyph: "✗", label: resultClass || "failed" };
+}
+
+function failureTitle(failure) {
+  const parts = [failure.result_class, `exit code ${failure.real_exit_code}`];
+  if (failure.failure_phase) parts.push(`phase ${failure.failure_phase}`);
+  if (failure.signal !== null && failure.signal !== undefined) {
+    parts.push(`signal ${failure.signal}`);
+  }
+  if (failure.timed_out) parts.push("timed out");
+  if (failure.oom) parts.push("oom");
+  if (failure.error_detail) parts.push(failure.error_detail);
+  return parts.join(" · ");
+}
+
+function coverageText(measured, failed, total, failures) {
+  if (failed === 0) return `Coverage: ${measured}/${total} measured`;
+  const byClass = new Map();
+  for (const failure of failures) {
+    byClass.set(failure.result_class, (byClass.get(failure.result_class) || 0) + 1);
+  }
+  const groups = Object.keys(FAILURE_LABELS)
+    .filter((resultClass) => byClass.has(resultClass))
+    .map((resultClass) => `${failureMeta(resultClass).glyph}${byClass.get(resultClass)}`);
+  return `Coverage: ${measured}/${total} measured · ${failed} failed (${groups.join(" · ")})`;
 }
 
 function setText(id, text) {
@@ -166,11 +235,23 @@ function versionDelta(sel, cur, metricKey) {
 // rows are every project (tiered small -> large), columns the checkers, each cell
 // the metric value. The best cell in a row is highlighted; cells are rank-tinted.
 // Clicking a row calls onSelect(project) so the trend chart below can follow it.
-function renderMatrix(sel, metricKey, meta, budgetLabel, selected, snapshotDate, onSelect) {
+function renderMatrix(
+  sel,
+  failures,
+  metricKey,
+  meta,
+  budgetLabel,
+  selected,
+  snapshotDate,
+  onSelect
+) {
   const card = document.getElementById("snap-card");
   const headEl = document.getElementById("snap-head");
   const bodyEl = document.getElementById("snap-body");
-  const dates = [...new Set(sel.map((p) => p.date))].sort();
+  const coverageEl = document.getElementById("snap-coverage");
+  const dates = [
+    ...new Set([...sel.map((p) => p.date), ...failures.map((p) => p.date)]),
+  ].sort();
   // Render the picked snapshot date; fall back to the latest available in this
   // budget when that date has no rows here (e.g. a budget that started later).
   const date = dates.includes(snapshotDate) ? snapshotDate : dates[dates.length - 1];
@@ -178,10 +259,16 @@ function renderMatrix(sel, metricKey, meta, budgetLabel, selected, snapshotDate,
   // corpus projects that existed solely in other runs must not leave stale,
   // all-dashes lines in the snapshot.
   const latestRows = sel.filter((p) => p.date === date);
+  const latestFailures = failures.filter((p) => p.date === date);
 
-  const checkers = [...new Set(latestRows.map((p) => p.checker_id))].sort();
+  const checkers = [
+    ...new Set([
+      ...latestRows.map((p) => p.checker_id),
+      ...latestFailures.map((p) => p.checker_id),
+    ]),
+  ].sort();
   const projMeta = new Map();
-  for (const p of latestRows) {
+  for (const p of [...latestRows, ...latestFailures]) {
     if (!projMeta.has(p.project)) {
       projMeta.set(p.project, { tier: p.size_tier || "Large", loc: p.code_loc ?? 0 });
     }
@@ -199,6 +286,7 @@ function renderMatrix(sel, metricKey, meta, budgetLabel, selected, snapshotDate,
   card.classList.toggle("is-empty", projects.length === 0 || checkers.length === 0);
   setText("snap-title", date ? `Snapshot — ${date}` : "Snapshot");
   setText("snap-meta", projects.length ? `${budgetLabel} · ${meta.better} is better` : "");
+  coverageEl.textContent = "";
   if (!projects.length || !checkers.length) {
     headEl.innerHTML = "";
     bodyEl.innerHTML = "";
@@ -214,6 +302,8 @@ function renderMatrix(sel, metricKey, meta, budgetLabel, selected, snapshotDate,
   let currentTier = null;
   let anyDelta = false;
   let approxShown = false;
+  let measured = 0;
+  const visibleFailures = [];
   for (const project of projects) {
     const { tier, loc } = projMeta.get(project);
     if (tier !== currentTier) {
@@ -225,8 +315,17 @@ function renderMatrix(sel, metricKey, meta, budgetLabel, selected, snapshotDate,
 
     const cells = checkers.map((c) => {
       const hit = latestRows.find((p) => p.project === project && p.checker_id === c);
-      const v = hit && hit[metricKey] !== null && hit[metricKey] !== undefined ? hit[metricKey] : null;
-      return { hit, v };
+      const v =
+        hit && hit[metricKey] !== null && hit[metricKey] !== undefined ? hit[metricKey] : null;
+      const failure = latestFailures.find((p) => p.project === project && p.checker_id === c);
+      // Coverage counts measured-successes vs failures by RUN outcome, not by whether
+      // the selected metric is populated: a withheld metric (e.g. throughput for an
+      // over-reporter, or wall-normalized without a calibration anchor) is still a
+      // successful run, not a coverage gap. So count the success point (`hit`), not a
+      // non-null metric value, and keep the count stable across metric changes.
+      if (hit) measured += 1;
+      else if (failure) visibleFailures.push(failure);
+      return { failure, hit, v };
     });
     const present = cells.map((c) => c.v).filter((v) => v !== null);
     const best = present.length
@@ -247,14 +346,39 @@ function renderMatrix(sel, metricKey, meta, budgetLabel, selected, snapshotDate,
       `role="button" tabindex="0" aria-pressed="${isSel}" ` +
       `aria-label="Show ${escapeHtml(project)} trend over time">`;
     html += `<td class="proj">${escapeHtml(project)}${locHint}</td>`;
-    for (const { hit, v } of cells) {
+    for (const { failure, hit, v } of cells) {
       if (v === null) {
+        if (failure) {
+          const fail = failureMeta(failure.result_class);
+          const detail = failureTitle(failure);
+          html +=
+            `<td class="cell fail" title="${escapeHtml(detail)}" ` +
+            `aria-label="${escapeHtml(detail)}"><span class="c">` +
+            `<span aria-hidden="true">${fail.glyph}</span> ${escapeHtml(fail.label)}</span></td>`;
+          continue;
+        }
         html += `<td class="cell na"><span class="c">—</span></td>`;
         continue;
       }
       const t =
         span > 0 ? (meta.better === "lower" ? (v - lo) / span : (hi - v) / span) : 0;
       const isBest = present.length > 1 && v === best;
+      let titleAttr = "";
+      let spreadHtml = "";
+      if (meta.band && hit) {
+        const spreadMin = hit[meta.band.min];
+        const spreadMax = hit[meta.band.max];
+        const spreadStddev = hit[meta.band.stddev];
+        if (isFiniteNumber(spreadMin) && isFiniteNumber(spreadMax)) {
+          titleAttr =
+            ` title="${escapeHtml(
+              `min–max ${formatMetric(spreadMin, meta)}–${formatMetric(spreadMax, meta)}`
+            )}"`;
+        }
+        if (isFiniteNumber(spreadStddev) && spreadStddev > 0) {
+          spreadHtml = `<span class="spread">± ${formatMetric(spreadStddev, meta)}</span>`;
+        }
+      }
       let deltaHtml = "";
       const d = versionDelta(sel, hit, metricKey);
       if (d) {
@@ -278,13 +402,23 @@ function renderMatrix(sel, metricKey, meta, budgetLabel, selected, snapshotDate,
           `<span class="delta${cls}" title="${escapeHtml(title)}">` +
           `${approx ? "≈" : ""}${arrow}${Math.abs(d.pct).toFixed(1)}%</span>`;
       }
-      html += `<td class="cell${isBest ? " best" : ""}"><span class="c" style="background:${rankTint(
+      // Spread (± tolerance) and the version delta share one sub-row under the
+      // value so they read side by side instead of stacking two lines tall.
+      const submeta =
+        spreadHtml || deltaHtml ? `<span class="submeta">${spreadHtml}${deltaHtml}</span>` : "";
+      html += `<td class="cell${isBest ? " best" : ""}"${titleAttr}><span class="c" style="background:${rankTint(
         t
-      )}">${v.toFixed(meta.digits)}</span>${deltaHtml}</td>`;
+      )}">${v.toFixed(meta.digits)}</span>${submeta}</td>`;
     }
     html += `</tr>`;
   }
   bodyEl.innerHTML = html;
+  coverageEl.textContent = coverageText(
+    measured,
+    visibleFailures.length,
+    projects.length * checkers.length,
+    visibleFailures
+  );
 
   // The delta key only appears when at least one cell shows a delta, so the
   // legend teaches the encoding exactly when it is on screen and stays quiet
@@ -332,6 +466,7 @@ async function main() {
     }
   }
   const points = data.points || [];
+  const failures = data.failures || [];
   fillStats(points, data.corpus_markers || [], data.cpu_models || []);
 
   // Projects ordered small -> large (by analyzed code-LOC) so the trend defaults
@@ -342,7 +477,8 @@ async function main() {
   );
   let selectedProject = projectOrder[0] || null;
 
-  const budgets = [...new Map(points.map((p) => [budgetKey(p), p])).values()]
+  const budgetRows = [...points, ...failures];
+  const budgets = [...new Map(budgetRows.map((p) => [budgetKey(p), p])).values()]
     .map((p) => ({ key: budgetKey(p), cores: p.cores ?? null, label: budgetText(p) }))
     .sort((a, b) => {
       if (a.cores === null) return -1; // all-cores budget always leads
@@ -367,7 +503,7 @@ async function main() {
   // and whenever the budget changes; the selection is clamped to an available date.
   function syncSnapshots() {
     const avail = [
-      ...new Set(points.filter((p) => budgetKey(p) === budgetEl.value).map((p) => p.date)),
+      ...new Set(budgetRows.filter((p) => budgetKey(p) === budgetEl.value).map((p) => p.date)),
     ].sort();
     if (!avail.includes(selectedSnapshot)) {
       selectedSnapshot = avail[avail.length - 1] || null;
@@ -384,9 +520,9 @@ async function main() {
   // is visible by default even when it dropped a budget the older runs carried
   // (e.g. a desktop sweep with no all-cores pass). Budgets keep their order, so
   // the default returns to all-cores automatically once a run re-includes it.
-  const latestDate = [...new Set(points.map((p) => p.date))].sort().pop();
+  const latestDate = [...new Set(budgetRows.map((p) => p.date))].sort().pop();
   budgetEl.value = (
-    budgets.find((b) => points.some((p) => p.date === latestDate && budgetKey(p) === b.key)) ||
+    budgets.find((b) => budgetRows.some((p) => p.date === latestDate && budgetKey(p) === b.key)) ||
     budgets[0]
   ).key;
 
@@ -398,6 +534,129 @@ async function main() {
   const ctx = document.getElementById("chart").getContext("2d");
   let chart = null;
 
+  const scalingCard = document.getElementById("scaling-card");
+  const scalingTitleEl = document.getElementById("scaling-title");
+  const scalingMetaEl = document.getElementById("scaling-meta");
+  const scalingCtx = document.getElementById("scaling").getContext("2d");
+  let scalingChart = null;
+
+  function renderScaling() {
+    const project = selectedProject;
+    const rows = points.filter(
+      (p) =>
+        p.project === project &&
+        p.date === selectedSnapshot &&
+        p.thread_mode === "constrained" &&
+        p.cores !== null &&
+        p.cores !== undefined &&
+        isFiniteNumber(p.parallel_efficiency)
+    );
+    const coreCounts = [...new Set(rows.map((p) => p.cores))].sort((a, b) => a - b);
+    const hasData = coreCounts.length >= 2;
+
+    scalingTitleEl.textContent = `${project ?? "—"} — core scaling`;
+    scalingMetaEl.textContent =
+      hasData && selectedSnapshot
+        ? `${selectedSnapshot} · parallel efficiency = CPU-time ÷ wall; higher = more cores utilized`
+        : "";
+    scalingCard.classList.toggle("is-empty", !hasData);
+
+    if (scalingChart) scalingChart.destroy();
+    if (!hasData) return;
+
+    const byChecker = new Map();
+    for (const row of rows) {
+      if (!byChecker.has(row.checker_id)) byChecker.set(row.checker_id, []);
+      byChecker.get(row.checker_id).push(row);
+    }
+
+    const datasets = [...byChecker.keys()].sort().map((checkerId) => {
+      const recs = byChecker.get(checkerId).sort((a, b) => a.cores - b.cores);
+      const color = colorFor(recs[0].tool);
+      return {
+        label: checkerId,
+        borderColor: color,
+        backgroundColor: color,
+        pointBackgroundColor: color,
+        pointBorderColor: color,
+        pointBorderWidth: 1.5,
+        pointRadius: 3.5,
+        pointHoverRadius: 6,
+        borderWidth: 2,
+        tension: 0.25,
+        data: recs.map((p) => ({ x: p.cores, y: p.parallel_efficiency })),
+      };
+    });
+
+    scalingChart = new Chart(scalingCtx, {
+      type: "line",
+      data: { datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: "nearest", intersect: false },
+        plugins: {
+          legend: {
+            position: "bottom",
+            labels: {
+              usePointStyle: true,
+              pointStyle: "circle",
+              boxWidth: 8,
+              boxHeight: 8,
+              padding: 16,
+            },
+          },
+          tooltip: {
+            backgroundColor: cssVar("--surface"),
+            titleColor: cssVar("--text"),
+            bodyColor: cssVar("--text-muted"),
+            borderColor: cssVar("--border-strong"),
+            borderWidth: 1,
+            padding: 10,
+            usePointStyle: true,
+            boxPadding: 4,
+            callbacks: {
+              label: (item) => {
+                const cores = item.parsed.x;
+                const eff = item.parsed.y;
+                return `${item.dataset.label}: ${eff.toFixed(2)}× at ${cores}c`;
+              },
+            },
+          },
+        },
+        scales: {
+          x: {
+            type: "linear",
+            grid: { display: false },
+            min: coreCounts[0],
+            max: coreCounts[coreCounts.length - 1],
+            afterBuildTicks: (axis) => {
+              axis.ticks = coreCounts.map((value) => ({ value }));
+            },
+            title: { display: true, text: "Cores", color: cssVar("--text-faint") },
+            ticks: {
+              maxRotation: 0,
+              callback: (value) => {
+                const cores = Number(value);
+                return coreCounts.includes(cores) ? `${cores}c` : "";
+              },
+            },
+          },
+          y: {
+            beginAtZero: true,
+            border: { display: false },
+            title: {
+              display: true,
+              text: "Parallel efficiency (CPU-time ÷ wall)",
+              color: cssVar("--text-faint"),
+            },
+            ticks: { padding: 6 },
+          },
+        },
+      },
+    });
+  }
+
   function render() {
     const metricKey = document.getElementById("metric").value;
     const budget = document.getElementById("budget").value;
@@ -408,8 +667,10 @@ async function main() {
     // The matrix sees every project at this budget; clicking a row repoints the
     // trend chart below. The trend stays pinned to one project (its time axis).
     const selByBudget = points.filter((p) => budgetKey(p) === budget);
+    const failByBudget = failures.filter((p) => budgetKey(p) === budget);
     renderMatrix(
       selByBudget,
+      failByBudget,
       metricKey,
       meta,
       budgetLabel,
@@ -460,7 +721,8 @@ async function main() {
       }
     }
 
-    const datasets = lines.map((line) => {
+    const datasets = [];
+    for (const line of lines) {
       const color = line.color;
       // sel is pinned to one (project, thread_mode, cores) budget, and each line
       // matches a single row per date; the version lives in checker_id, carried for
@@ -477,7 +739,55 @@ async function main() {
         prev = cid;
         return changed;
       });
-      return {
+      if (meta.band) {
+        const bandPairs = rows.map((r) => {
+          const min = r ? r[meta.band.min] : null;
+          const max = r ? r[meta.band.max] : null;
+          return isFiniteNumber(min) && isFiniteNumber(max) ? { min, max } : null;
+        });
+        const upper = bandPairs.map((pair) => (pair ? pair.max : null));
+        const lower = bandPairs.map((pair) => (pair ? pair.min : null));
+        const hasBand = upper.some(
+          (max, i) => isFiniteNumber(max) && isFiniteNumber(lower[i]) && max !== lower[i]
+        );
+        if (hasBand) {
+          const fill = bandColor(color);
+          datasets.push(
+            {
+              label: `${line.label} spread upper`,
+              data: upper,
+              borderWidth: 0,
+              pointRadius: 0,
+              pointHoverRadius: 0,
+              backgroundColor: fill,
+              borderColor: fill,
+              fill: false,
+              spanGaps: true,
+              // Match the median line's curvature so the band's curved edges
+              // always enclose the (also curved) median between points; with
+              // mismatched tension the smooth line bows outside the straight band.
+              tension: 0.25,
+              isBand: true,
+              order: 2,
+            },
+            {
+              label: `${line.label} spread lower`,
+              data: lower,
+              borderWidth: 0,
+              pointRadius: 0,
+              pointHoverRadius: 0,
+              backgroundColor: fill,
+              borderColor: fill,
+              fill: "-1",
+              spanGaps: true,
+              tension: 0.25,
+              isBand: true,
+              order: 2,
+            }
+          );
+        }
+      }
+      datasets.push({
         label: line.label,
         borderColor: color,
         backgroundColor: color,
@@ -493,8 +803,10 @@ async function main() {
         data: rows.map((r) => (r ? r[metricKey] : null)),
         cids,
         bumps,
-      };
-    });
+        points: rows,
+        order: 1,
+      });
+    }
 
     // Update title + meta and toggle the empty state.
     const hasData = datasets.some((ds) => ds.data.some((v) => v !== null && v !== undefined));
@@ -506,6 +818,7 @@ async function main() {
     card.classList.toggle("is-empty", !hasData);
 
     if (chart) chart.destroy();
+    renderScaling();
     if (!hasData) return;
 
     chart = new Chart(ctx, {
@@ -524,9 +837,11 @@ async function main() {
               boxWidth: 8,
               boxHeight: 8,
               padding: 16,
+              filter: (item, data) => !data.datasets[item.datasetIndex]?.isBand,
             },
           },
           tooltip: {
+            filter: (item) => !item.dataset.isBand,
             backgroundColor: cssVar("--surface"),
             titleColor: cssVar("--text"),
             bodyColor: cssVar("--text-muted"),
@@ -544,8 +859,29 @@ async function main() {
                 if (v === null || v === undefined) return `${name}: —`;
                 return `${name}: ${v.toFixed(meta.digits)} ${meta.unit}`;
               },
-              afterLabel: (item) =>
-                item.dataset.bumps?.[item.dataIndex] ? "↑ new version" : undefined,
+              afterLabel: (item) => {
+                const lines = [];
+                if (item.dataset.bumps?.[item.dataIndex]) lines.push("↑ new version");
+                const point = item.dataset.points?.[item.dataIndex];
+                if (!meta.band || !point) return lines.length ? lines : undefined;
+                const spreadMin = point[meta.band.min];
+                const spreadMax = point[meta.band.max];
+                const spreadStddev = point[meta.band.stddev];
+                if (
+                  !isFiniteNumber(spreadMin) ||
+                  !isFiniteNumber(spreadMax) ||
+                  !isFiniteNumber(spreadStddev)
+                ) {
+                  return lines.length ? lines : undefined;
+                }
+                lines.push(
+                  `± ${formatMetric(spreadStddev, meta)} (min–max ${formatMetric(
+                    spreadMin,
+                    meta
+                  )}–${formatMetric(spreadMax, meta)})`
+                );
+                return lines;
+              },
             },
           },
         },

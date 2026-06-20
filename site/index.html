@@ -432,6 +432,27 @@
 
     .matrix td.cell.na .c { color: var(--text-faint); }
 
+    .matrix td.cell.fail .c {
+      color: var(--delta-bad);
+      background: var(--surface-2);
+      box-shadow: inset 0 0 0 1px var(--border-strong);
+      border-radius: var(--radius-sm);
+      font-weight: 600;
+    }
+
+    /* Sub-row under the cell value carrying the ± spread tolerance and the
+       version-over-version delta pill side by side (right-aligned with the
+       value). A small positive gap keeps it clearly below the tinted value box
+       rather than overlapping its lower edge. */
+    .matrix td.cell .submeta {
+      display: flex;
+      justify-content: flex-end;
+      align-items: baseline;
+      gap: var(--space-2);
+      margin-top: var(--space-1);
+      padding: 0 var(--space-3) var(--space-2);
+    }
+
     /* Version-over-version delta, shown as a compact pill so it reads as a real
        metric rather than subscript noise. Color encodes better/worse; the arrow
        encodes the raw direction so it stays legible without color. A cross-machine
@@ -461,9 +482,17 @@
       border-radius: 0;
       padding: 1px 1px 0;
     }
-    /* In a cell the pill sits on its own line under the value (the value's .c is
-       block), tucked up and right-aligned beneath the number. */
-    .matrix td.cell .delta { margin: -3px var(--space-3) var(--space-2) 0; }
+
+    /* The ± spread is secondary context next to the delta pill — small and muted
+       so it reads as a sub-annotation and fits the cell width. It sits inside the
+       .submeta row, so it needs no positioning of its own. */
+    .matrix td.cell .spread {
+      font-size: 0.5rem;
+      line-height: 1.1;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+      color: var(--text-faint);
+    }
 
     .matrix tr.tier-row td {
       background: var(--surface-2);
@@ -649,6 +678,7 @@
       <div class="card__head">
         <h2><span class="sec-num" aria-hidden="true">01</span><span id="snap-title">Snapshot</span></h2>
         <span class="card__meta" id="snap-meta"></span>
+        <span class="card__meta" id="snap-coverage" role="status" aria-live="polite"></span>
       </div>
       <div class="matrix-scroll">
         <table class="matrix" id="snap-matrix">
@@ -685,6 +715,24 @@
           </svg>
           <strong>No data for this view</strong>
           <p>No committed results match the selected project and CPU budget. Try another combination.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="card reveal" id="scaling-card" aria-label="Core scaling chart">
+      <div class="card__head">
+        <h2><span class="sec-num" aria-hidden="true">03</span><span id="scaling-title">Core scaling</span></h2>
+        <span class="card__meta" id="scaling-meta"></span>
+      </div>
+      <div class="chart-box">
+        <canvas id="scaling" role="img" aria-label="Line chart of parallel efficiency across core counts"></canvas>
+        <div class="empty" role="status">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <path d="M3 3v18h18" stroke-linecap="round" stroke-linejoin="round" />
+            <path d="M7 14l3-3 3 3 4-5" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <strong>No data for this view</strong>
+          <p>No committed core sweep matches the selected project and snapshot. Try another combination.</p>
         </div>
       </div>
     </section>

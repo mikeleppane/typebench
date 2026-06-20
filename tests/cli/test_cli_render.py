@@ -111,6 +111,7 @@ def test_render_empty_store_writes_placeholder_not_error(tmp_path: Path) -> None
     assert json.loads(trends.read_text()) == {
         "cpu_models": [],
         "points": [],
+        "failures": [],
         "corpus_markers": [],
     }
 

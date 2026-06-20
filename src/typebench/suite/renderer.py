@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, assert_never
+from typing import TYPE_CHECKING, Final, assert_never
 
 from typebench.contracts.taxonomy import LocDenominator
 
@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 _README_BEGIN = "<!-- TYPEBENCH:BEGIN -->"
 _README_END = "<!-- TYPEBENCH:END -->"
+_FAILURE_DETAIL_MAX_CHARS: Final = 240
 
 
 def _format_generated(iso: str) -> str:
@@ -31,12 +32,16 @@ def _format_generated(iso: str) -> str:
         return iso
 
 
+def _corrected_seconds(value: float, harness_wall_overhead_s: float | None) -> float:
+    if harness_wall_overhead_s is None:
+        return value
+    return max(value - harness_wall_overhead_s, 0.0)
+
+
 def _corrected_wall_s(record: RunResult, harness_wall_overhead_s: float | None) -> float | None:
     if record.timing is None:
         return None
-    if harness_wall_overhead_s is None:
-        return record.timing.median_s
-    return max(record.timing.median_s - harness_wall_overhead_s, 0.0)
+    return _corrected_seconds(record.timing.median_s, harness_wall_overhead_s)
 
 
 def _corrected_peak_bytes(record: RunResult, harness_mem_baseline_bytes: int | None) -> int | None:
@@ -95,6 +100,12 @@ def _checker_id(record: RunResult) -> str:
     if record.checker_id is not None:
         return record.checker_id
     return f"{record.tool}@{record.tool_version}"
+
+
+def _failure_detail_for_site(error_detail: str | None) -> str | None:
+    if error_detail is None or len(error_detail) <= _FAILURE_DETAIL_MAX_CHARS:
+        return error_detail
+    return f"{error_detail[:_FAILURE_DETAIL_MAX_CHARS]}…"
 
 
 def _ab_display(checker_id: str) -> str:
@@ -594,14 +605,44 @@ def build_trends(history: list[ResultsEnvelope]) -> dict[str, object]:
     """Flatten history to fully-labelled points + per-CPU-model-normalized variants.
     The GH Pages app groups points into series and derives inter-checker ratios
     client-side (slowest per date/project/mode/metric). Only measured-success records
-    contribute points; failures are visible in the README, not the trend lines."""
+    contribute points; failures[] carries non-measured records for coverage panels.
+    Wall points carry median plus min/max/stddev spread, raw and calibration-normalized.
+    parallel_efficiency is carried for the scaling view."""
     anchors = cpu_model_anchors(history)
     points: list[dict[str, object]] = []
+    failures: list[dict[str, object]] = []
     markers: list[dict[str, object]] = []
     for envelope in sorted(history, key=lambda e: e.generated_at):
         date = envelope.generated_at[:10]
         markers.append({"date": date, "suite_version": envelope.suite_version})
         for record in envelope.runs:
+            if not record.result_class.is_measured_success:
+                checker_id = _checker_id(record)
+                failures.append(
+                    {
+                        "date": date,
+                        "suite_version": envelope.suite_version,
+                        "project": record.project,
+                        "code_loc": record.canonical_code_loc,
+                        "size_tier": _size_tier(record.canonical_code_loc),
+                        "thread_mode": record.thread_mode.value,
+                        "cores": record.cores,
+                        "checker_id": checker_id,
+                        "tool": record.tool,
+                        "version": record.tool_version,
+                        "label": checker_id,
+                        "cpu_model": record.env.cpu_model,
+                        "result_class": record.result_class.value,
+                        "failure_phase": (
+                            record.failure_phase.value if record.failure_phase is not None else None
+                        ),
+                        "real_exit_code": record.real_exit_code,
+                        "signal": record.signal,
+                        "timed_out": record.timed_out,
+                        "oom": record.oom,
+                        "error_detail": _failure_detail_for_site(record.error_detail),
+                    }
+                )
             if not record.result_class.is_measured_success or record.timing is None:
                 continue
             calib = _calib_median(record)
@@ -610,6 +651,24 @@ def build_trends(history: list[ResultsEnvelope]) -> dict[str, object]:
             wall_norm = (
                 wall * anchor / calib
                 if wall is not None and anchor is not None and calib is not None and calib > 0
+                else None
+            )
+            wall_min = _corrected_seconds(record.timing.min_s, envelope.harness_wall_overhead_s)
+            wall_max = _corrected_seconds(record.timing.max_s, envelope.harness_wall_overhead_s)
+            wall_stddev = record.timing.stddev_s
+            wall_min_norm = (
+                wall_min * anchor / calib
+                if anchor is not None and calib is not None and calib > 0
+                else None
+            )
+            wall_max_norm = (
+                wall_max * anchor / calib
+                if anchor is not None and calib is not None and calib > 0
+                else None
+            )
+            wall_stddev_norm = (
+                wall_stddev * anchor / calib
+                if anchor is not None and calib is not None and calib > 0
                 else None
             )
             peak_mb = _peak_mb_value(record, envelope.harness_mem_baseline_bytes)
@@ -635,9 +694,17 @@ def build_trends(history: list[ResultsEnvelope]) -> dict[str, object]:
                     "version": record.tool_version,
                     "label": checker_id,
                     "cpu_model": record.env.cpu_model,
+                    "result_class": record.result_class.value,
                     "wall_median_s": wall,
+                    "wall_min_s": wall_min,
+                    "wall_max_s": wall_max,
+                    "wall_stddev_s": wall_stddev,
                     "wall_median_s_norm": wall_norm,
+                    "wall_min_s_norm": wall_min_norm,
+                    "wall_max_s_norm": wall_max_norm,
+                    "wall_stddev_s_norm": wall_stddev_norm,
                     "peak_mem_mb": peak_mb,
+                    "parallel_efficiency": record.parallel_efficiency,
                     "kloc_s": _kloc_value(record, envelope.harness_wall_overhead_s),
                     "calib_median_s": calib,
                     "calib_anchor_s": anchor,
@@ -646,5 +713,6 @@ def build_trends(history: list[ResultsEnvelope]) -> dict[str, object]:
     return {
         "cpu_models": sorted(anchors),
         "points": points,
+        "failures": failures,
         "corpus_markers": markers,
     }

@@ -12,8 +12,9 @@ from typebench.contracts.models import (
     TimingStats,
 )
 from typebench.contracts.runconfig import RunConfig
-from typebench.contracts.taxonomy import LocDenominator, ResultClass, ThreadMode
+from typebench.contracts.taxonomy import FailurePhase, LocDenominator, ResultClass, ThreadMode
 from typebench.suite.renderer import (
+    _FAILURE_DETAIL_MAX_CHARS,
     _ab_display,
     _code_loc_or_withheld,
     _files_degraded,
@@ -246,6 +247,58 @@ def _record_for_trends(
     )
 
 
+def _record_for_trends_spread(
+    min_s: float,
+    median_s: float,
+    max_s: float,
+    stddev_s: float,
+    calib_med: float | None,
+    cpu: str,
+    make_env: EnvFactory,
+    runs: int = 3,
+) -> RunResult:
+    calibration = (
+        CalibrationStats(
+            workload_id="calib-pyloop-v1",
+            iterations=1,
+            runs=1,
+            raw_min_s=calib_med,
+            raw_median_s=calib_med,
+            raw_max_s=calib_med,
+        )
+        if calib_med is not None
+        else None
+    )
+    return RunResult(
+        tool="mypy",
+        tool_version="1.0",
+        project="httpx",
+        thread_mode=ThreadMode.ALL_CORES,
+        result_class=ResultClass.CLEAN,
+        real_exit_code=0,
+        timing=TimingStats(
+            runs=runs,
+            min_s=min_s,
+            median_s=median_s,
+            mean_s=median_s,
+            stddev_s=stddev_s,
+            max_s=max_s,
+            times_s=[median_s] if runs == 1 else [min_s, median_s, max_s],
+        ),
+        memory=MemoryStats(
+            runs=3,
+            peak_bytes_min=1,
+            peak_bytes_median=200_000_000,
+            peak_bytes_max=200_000_000,
+        ),
+        canonical_code_loc=3200,
+        loc_denominator=LocDenominator.CODE,
+        over_reports=False,
+        calibration=calibration,
+        env=make_env(cpu_model=cpu),
+    )
+
+
 def _record_versioned(
     checker_id: str,
     tool: str,
@@ -311,12 +364,39 @@ def _trend_points(trends: dict[str, object]) -> list[dict[str, object]]:
     return cast("list[dict[str, object]]", trends["points"])
 
 
+def _trend_failures(trends: dict[str, object]) -> list[dict[str, object]]:
+    return cast("list[dict[str, object]]", trends["failures"])
+
+
 def _corpus_markers(trends: dict[str, object]) -> list[dict[str, object]]:
     return cast("list[dict[str, object]]", trends["corpus_markers"])
 
 
 def _cpu_models(trends: dict[str, object]) -> list[str]:
     return cast("list[str]", trends["cpu_models"])
+
+
+def _failed_record(
+    tool: str,
+    make_env: EnvFactory,
+    result_class: ResultClass,
+    *,
+    updates: dict[str, object] | None = None,
+) -> RunResult:
+    payload: dict[str, object] = {
+        "tool": tool,
+        "tool_version": "1.0",
+        "project": "httpx",
+        "thread_mode": ThreadMode.ALL_CORES,
+        "result_class": result_class,
+        "real_exit_code": 2,
+        "canonical_code_loc": 3200,
+        "loc_denominator": LocDenominator.CODE,
+        "env": make_env(),
+    }
+    if updates is not None:
+        payload.update(updates)
+    return RunResult.model_validate(payload)
 
 
 @pytest.mark.parametrize(
@@ -394,6 +474,251 @@ def test_build_trends_uses_harness_corrected_values(make_env: EnvFactory) -> Non
     assert point["wall_median_s"] == 0.04
     assert point["peak_mem_mb"] == 186.0
     assert point["kloc_s"] == 80.0
+
+
+def test_build_trends_success_point_carries_harness_corrected_wall_spread(
+    make_env: EnvFactory,
+) -> None:
+    record = _record_for_trends_spread(
+        min_s=0.015,
+        median_s=0.050,
+        max_s=0.090,
+        stddev_s=0.007,
+        calib_med=0.40,
+        cpu="CPU-A",
+        make_env=make_env,
+    )
+    history = [
+        ResultsEnvelope(
+            suite_version="v",
+            generated_at="2026-02-01",
+            runs=[record],
+            harness_wall_overhead_s=0.020,
+        )
+    ]
+
+    point = _trend_points(build_trends(history))[0]
+
+    assert point["wall_min_s"] == 0.0
+    assert point["wall_median_s"] == pytest.approx(0.030)
+    assert point["wall_max_s"] == pytest.approx(0.070)
+    assert point["wall_stddev_s"] == 0.007
+
+
+def test_build_trends_normalizes_wall_spread_against_anchor(make_env: EnvFactory) -> None:
+    history = [
+        _envelope(
+            "2026-02-01",
+            _record_for_trends_spread(
+                min_s=1.0,
+                median_s=2.0,
+                max_s=3.0,
+                stddev_s=0.2,
+                calib_med=0.50,
+                cpu="CPU-A",
+                make_env=make_env,
+            ),
+        ),
+        _envelope(
+            "2026-03-01",
+            _record_for_trends_spread(
+                min_s=1.0,
+                median_s=2.0,
+                max_s=3.0,
+                stddev_s=0.2,
+                calib_med=0.25,
+                cpu="CPU-A",
+                make_env=make_env,
+            ),
+        ),
+    ]
+
+    point = next(p for p in _trend_points(build_trends(history)) if p["date"] == "2026-03-01")
+
+    assert point["wall_min_s_norm"] == pytest.approx(2.0)
+    assert point["wall_max_s_norm"] == pytest.approx(6.0)
+    assert point["wall_stddev_s_norm"] == pytest.approx(0.4)
+
+
+def test_build_trends_wall_spread_norm_is_null_without_calibration(
+    make_env: EnvFactory,
+) -> None:
+    history = [
+        _envelope(
+            "2026-02-01",
+            _record_for_trends_spread(
+                min_s=1.0,
+                median_s=2.0,
+                max_s=3.0,
+                stddev_s=0.2,
+                calib_med=None,
+                cpu="CPU-A",
+                make_env=make_env,
+            ),
+        )
+    ]
+
+    point = _trend_points(build_trends(history))[0]
+
+    assert point["wall_min_s_norm"] is None
+    assert point["wall_max_s_norm"] is None
+    assert point["wall_stddev_s_norm"] is None
+
+
+def test_build_trends_single_run_wall_spread_remains_degenerate(
+    make_env: EnvFactory,
+) -> None:
+    history = [
+        _envelope(
+            "2026-02-01",
+            _record_for_trends_spread(
+                min_s=1.25,
+                median_s=1.25,
+                max_s=1.25,
+                stddev_s=0.0,
+                calib_med=0.40,
+                cpu="CPU-A",
+                make_env=make_env,
+                runs=1,
+            ),
+        )
+    ]
+
+    point = _trend_points(build_trends(history))[0]
+
+    assert point["wall_stddev_s"] == 0.0
+    assert point["wall_min_s"] == point["wall_max_s"] == 1.25
+
+
+def test_build_trends_failed_crash_lands_in_failures_not_points(
+    make_env: EnvFactory,
+) -> None:
+    success = _record_versioned("mypy@1.0", "mypy", 1.0, make_env)
+    failure = _failed_record(
+        "pyright",
+        make_env,
+        ResultClass.FAILED_CRASH,
+        updates={"checker_id": "pyright@1.0", "project": "httpx", "real_exit_code": 2},
+    )
+
+    trends = build_trends([_envelope("2026-02-01", success, failure)])
+
+    assert [p["checker_id"] for p in _trend_points(trends)] == ["mypy@1.0"]
+    assert [f["checker_id"] for f in _trend_failures(trends)] == ["pyright@1.0"]
+
+
+def test_build_trends_failure_carries_identity_fields(make_env: EnvFactory) -> None:
+    failure = _failed_record(
+        "ty",
+        make_env,
+        ResultClass.FAILED_CRASH,
+        updates={
+            "project": "django",
+            "checker_id": "ty@1.0+new",
+            "thread_mode": ThreadMode.CONSTRAINED,
+            "cores": 4,
+            "canonical_code_loc": 30_000,
+            "real_exit_code": 9,
+        },
+    )
+
+    trends = build_trends([_envelope("2026-02-01", failure)])
+    failed = _trend_failures(trends)[0]
+
+    assert failed["date"] == "2026-02-01"
+    assert failed["suite_version"] == "v"
+    assert failed["project"] == "django"
+    assert failed["checker_id"] == "ty@1.0+new"
+    assert failed["tool"] == "ty"
+    assert failed["version"] == "1.0"
+    assert failed["label"] == "ty@1.0+new"
+    assert failed["thread_mode"] == "constrained"
+    assert failed["cores"] == 4
+    assert failed["code_loc"] == 30_000
+    assert failed["size_tier"] == "Medium"
+    assert failed["result_class"] == "failed{crash}"
+    assert failed["real_exit_code"] == 9
+
+
+def test_build_trends_failure_carries_metadata_and_truncates_detail(
+    make_env: EnvFactory,
+) -> None:
+    long_detail = "x" * (_FAILURE_DETAIL_MAX_CHARS + 10)
+    oom = _failed_record(
+        "mypy",
+        make_env,
+        ResultClass.FAILED_OOM,
+        updates={
+            "oom": True,
+            "failure_phase": FailurePhase.TIMING,
+            "error_detail": long_detail,
+        },
+    )
+    timeout = _failed_record(
+        "pyright",
+        make_env,
+        ResultClass.FAILED_TIMEOUT,
+        updates={
+            "signal": 15,
+            "timed_out": True,
+            "failure_phase": FailurePhase.PROBE,
+        },
+    )
+
+    trends = build_trends([_envelope("2026-02-01", oom, timeout)])
+    by_class = {f["result_class"]: f for f in _trend_failures(trends)}
+
+    failed_oom = by_class["failed{oom}"]
+    assert failed_oom["oom"] is True
+    assert failed_oom["timed_out"] is False
+    assert failed_oom["failure_phase"] == "timing"
+    assert failed_oom["error_detail"] == ("x" * _FAILURE_DETAIL_MAX_CHARS) + "…"
+
+    failed_timeout = by_class["failed{timeout}"]
+    assert failed_timeout["timed_out"] is True
+    assert failed_timeout["oom"] is False
+    assert failed_timeout["signal"] == 15
+    assert failed_timeout["failure_phase"] == "probe"
+
+
+def test_build_trends_all_success_has_empty_failures(make_env: EnvFactory) -> None:
+    trends = build_trends(
+        [_envelope("2026-02-01", _record_versioned("mypy@1.0", "mypy", 1.0, make_env))]
+    )
+
+    assert _trend_failures(trends) == []
+
+
+def test_build_trends_success_points_carry_result_class(make_env: EnvFactory) -> None:
+    trends = build_trends(
+        [_envelope("2026-02-01", _record_versioned("mypy@1.0", "mypy", 1.0, make_env))]
+    )
+
+    assert _trend_points(trends)[0]["result_class"] == "clean"
+
+
+def test_build_trends_success_point_carries_parallel_efficiency(
+    make_env: EnvFactory,
+) -> None:
+    record = _record_versioned("mypy@1.0", "mypy", 1.0, make_env).model_copy(
+        update={"parallel_efficiency": 3.25, "thread_mode": ThreadMode.CONSTRAINED, "cores": 4}
+    )
+
+    trends = build_trends([_envelope("2026-02-01", record)])
+
+    assert _trend_points(trends)[0]["parallel_efficiency"] == 3.25
+
+
+def test_build_trends_success_point_carries_null_parallel_efficiency(
+    make_env: EnvFactory,
+) -> None:
+    record = _record_versioned("mypy@1.0", "mypy", 1.0, make_env).model_copy(
+        update={"parallel_efficiency": None, "thread_mode": ThreadMode.CONSTRAINED, "cores": 4}
+    )
+
+    trends = build_trends([_envelope("2026-02-01", record)])
+
+    assert _trend_points(trends)[0]["parallel_efficiency"] is None
 
 
 def test_build_trends_distinguishes_same_day_versions(make_env: EnvFactory) -> None:
