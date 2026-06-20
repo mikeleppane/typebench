@@ -436,20 +436,33 @@
       font-weight: 600;
     }
 
-    /* Version-over-version delta, tucked under the cell value. Color encodes
+    /* Sub-row under the cell value carrying the ± spread tolerance and the
+       version-over-version delta side by side (right-aligned with the value).
+       A small positive gap keeps it clearly below the tinted value box rather
+       than overlapping its lower edge. */
+    .matrix td.cell .submeta {
+      display: flex;
+      justify-content: flex-end;
+      align-items: baseline;
+      gap: var(--space-2);
+      margin-top: var(--space-1);
+      padding: 0 var(--space-3) var(--space-2);
+    }
+
+    /* Version-over-version delta + ± spread. The delta's color encodes
        better/worse for the metric; the arrow encodes the raw direction of change
        so it stays legible without color. A trailing * marks a cross-CPU pair. */
     .matrix td.cell .delta,
     .matrix td.cell .spread {
-      display: block;
-      margin-top: -3px;
-      padding: 0 var(--space-3) var(--space-2);
       font-size: 0.58rem;
       line-height: 1.1;
       font-variant-numeric: tabular-nums;
       white-space: nowrap;
       color: var(--text-faint);
     }
+    /* The ± spread is secondary context next to the delta — render it a touch
+       smaller so it reads as a sub-annotation and fits the cell width better. */
+    .matrix td.cell .spread { font-size: 0.5rem; }
     .matrix td.cell .delta.good { color: var(--delta-good); }
     .matrix td.cell .delta.bad { color: var(--delta-bad); }
     .matrix td.cell .delta .x { opacity: 0.7; margin-left: 1px; }

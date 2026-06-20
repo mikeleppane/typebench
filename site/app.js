@@ -395,9 +395,13 @@ function renderMatrix(
           `<span class="delta${cls}" title="${escapeHtml(title)}">` +
           `${arrow}${Math.abs(d.pct).toFixed(1)}%${star}</span>`;
       }
+      // Spread (± tolerance) and the version delta share one sub-row under the
+      // value so they read side by side instead of stacking two lines tall.
+      const submeta =
+        spreadHtml || deltaHtml ? `<span class="submeta">${spreadHtml}${deltaHtml}</span>` : "";
       html += `<td class="cell${isBest ? " best" : ""}"${titleAttr}><span class="c" style="background:${rankTint(
         t
-      )}">${v.toFixed(meta.digits)}</span>${spreadHtml}${deltaHtml}</td>`;
+      )}">${v.toFixed(meta.digits)}</span>${submeta}</td>`;
     }
     html += `</tr>`;
   }
