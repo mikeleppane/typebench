@@ -190,7 +190,7 @@ Tasks forward extra arguments, so `mise run test tests/engine -k oom` and
 macOS runs are timing-only because cgroup v2 is Linux-specific.
 
 > `mise install` provisions `hyperfine`, `tokei`, `node`, and `uv`; `uv sync`
-> provisions the four type checkers. `git` and the cgroup/systemd-run capability
+> provisions the five type checkers. `git` and the cgroup/systemd-run capability
 > stay system-provided.
 
 ---
@@ -255,8 +255,11 @@ uv run typebench run \
 
 The `constrained` track defaults to a single core (`--cores 1`); multithreading is
 opt-in. Raise it (e.g. `--cores 8`) to pin the checker to N cores and let it use up
-to N workers — mypy ≥ 2.0 (`--num-workers`), pyrefly (`--threads`), and ty
-(`TY_MAX_PARALLELISM`) all scale; pyright stays effectively single-main-thread.
+to N workers — mypy ≥ 2.0 (`--num-workers`), pyrefly (`--threads`), ty
+(`TY_MAX_PARALLELISM`), and zuban (`RAYON_NUM_THREADS`) all scale, though to
+different degrees; pyright stays effectively single-main-thread. Because the tools
+parallelize differently, the fastest checker at one core is not always the fastest
+at sixteen — compare within a single core-count column, not across.
 
 ### Viewing results locally
 
@@ -288,7 +291,7 @@ uv run typebench preflight \
   --output preflight-httpx.json
 ```
 
-By default, preflight probes all four real checkers. Use repeated `--tool` options
+By default, preflight probes all five real checkers. Use repeated `--tool` options
 to narrow the set.
 
 ### Common `run` options
@@ -421,12 +424,12 @@ Each checker has one adapter. The adapter owns checker-specific details; the
 benchmark engine stays neutral.
 
 ```text
-                         benchmark engine
-                               |
-         +----------+----------+----------+----------+
-         |          |          |          |          |
-       mypy      pyright    pyrefly      ty        stub
-      adapter    adapter    adapter    adapter    adapter
+                              benchmark engine
+                                    |
+       +----------+----------+----------+----------+----------+
+       |          |          |          |          |          |
+     mypy      pyright    pyrefly      ty        zuban      stub
+    adapter    adapter    adapter    adapter    adapter    adapter
 ```
 
 Adapters are responsible for:
@@ -541,8 +544,9 @@ typebench supports two tracks:
 - `all-cores`: real-world default behavior.
 - `constrained`: an N-core CPU affinity floor via `taskset -c 0..N-1` when available,
   where N is `--cores` (default 1). Each adapter's parallelism is also capped to N
-  (mypy `--num-workers`, pyrefly `--threads`, ty `TY_MAX_PARALLELISM`; pyright is
-  effectively single-main-thread). At the default N=1 this is a single pinned core.
+  (mypy `--num-workers`, pyrefly `--threads`, ty `TY_MAX_PARALLELISM`, zuban
+  `RAYON_NUM_THREADS`; pyright is effectively single-main-thread). At the default
+  N=1 this is a single pinned core.
 
 The project does not claim a literal "N threads" mode, because a core-count cap
 forces a parallel tool's threads to contend on N cores rather than truly running N
@@ -557,7 +561,13 @@ Official runs use one normalized input contract:
 - Vendored, generated, and test files excluded.
 - Dependencies installed so imports resolve.
 - Diagnostics limited to first-party code where the checker supports that posture.
-- All function bodies analyzed; mypy uses `--check-untyped-defs`.
+- Dependencies resolved from the project venv, but diagnostics are not reported for
+  them (mypy `--follow-imports=silent`; zuban/ty/pyrefly/pyright report first-party
+  only natively). The internal cost of dependency resolution differs by checker
+  architecture and is part of what is measured, not normalized away.
+- All function bodies analyzed; mypy uses `--check-untyped-defs`, zuban runs its
+  `--mode default` (which checks untyped bodies natively), pyrefly
+  `check-unannotated-defs`.
 - Stock default rule sets; no plugins in the headline track.
 
 ---
