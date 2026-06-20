@@ -8,6 +8,7 @@ from typebench.adapters.mypy import MypyAdapter
 from typebench.adapters.pyrefly import PyreflyAdapter
 from typebench.adapters.pyright import PyrightAdapter
 from typebench.adapters.ty import TyAdapter
+from typebench.adapters.zuban import ZubanAdapter
 from typebench.contracts.config import NormalizedConfig
 from typebench.contracts.models import ResultClass, ThreadMode
 from typebench.engine.wrapper import run_command
@@ -19,6 +20,7 @@ _CASES: list[tuple[str, Adapter, str, str]] = [
     ("ty", TyAdapter(), "ty.toml", '[src]\nexclude = ["**/*.py"]\n'),
     ("pyrefly", PyreflyAdapter(), "pyrefly.toml", 'project-excludes = ["**/*.py"]\n'),
     ("pyright", PyrightAdapter(), "pyrightconfig.json", '{"typeCheckingMode": "off"}\n'),
+    ("zuban", ZubanAdapter(), "mypy.ini", "[mypy]\nignore_errors = True\n"),
 ]
 _IDS = [c[0] for c in _CASES]
 

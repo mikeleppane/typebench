@@ -10,6 +10,7 @@ from typebench.adapters.pyrefly import PyreflyAdapter
 from typebench.adapters.pyright import PyrightAdapter
 from typebench.adapters.stub import StubAdapter
 from typebench.adapters.ty import TyAdapter
+from typebench.adapters.zuban import ZubanAdapter
 from typebench.contracts.identity import CheckerSpec
 from typebench.engine.proc import SYSTEM_HOST
 
@@ -40,6 +41,7 @@ _ENTRIES: tuple[ToolEntry, ...] = (
     ToolEntry("pyright", PyrightAdapter, True),
     ToolEntry("pyrefly", PyreflyAdapter, True),
     ToolEntry("ty", TyAdapter, True),
+    ToolEntry("zuban", ZubanAdapter, True),
     ToolEntry("stub", lambda _host: StubAdapter(), False),
 )
 _BY_NAME = {entry.name: entry for entry in _ENTRIES}

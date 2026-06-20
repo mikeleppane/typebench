@@ -1,7 +1,7 @@
 # AGENTS.md — typebench
 
 typebench is a neutral, reproducible benchmark of Python type-checker performance
-(mypy, pyright, pyrefly, ty). Measurement is delegated to `hyperfine` (wall-time)
+(mypy, pyright, pyrefly, ty, zuban). Measurement is delegated to `hyperfine` (wall-time)
 and cgroup v2 (peak memory + CPU-time). Results are versioned JSON; the README and
 GH Pages are rendered views.
 
@@ -50,7 +50,7 @@ doubt, prefer the honest, conservative, reproducible choice over the convenient 
       `coerce_count`.
     - `adapters/_support` — `probe_version` + `confirm_clean` shared adapter helpers.
     - `adapters/mypy`, `adapters/pyright`, `adapters/pyrefly`, `adapters/ty`,
-      `adapters/stub` — checker adapters and `StubAdapter`.
+      `adapters/zuban`, `adapters/stub` — checker adapters and `StubAdapter`.
   - `corpus/` — what gets benchmarked.
     - `corpus/catalog` — `CorpusProject`, `SizeBucket`, `load_suite`,
       `load_suite_version` (corpus as data; dir-segment exclude validation; optional

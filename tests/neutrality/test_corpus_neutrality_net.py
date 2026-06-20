@@ -17,6 +17,7 @@ from typebench.adapters.mypy import MypyAdapter
 from typebench.adapters.pyrefly import PyreflyAdapter
 from typebench.adapters.pyright import PyrightAdapter
 from typebench.adapters.ty import TyAdapter
+from typebench.adapters.zuban import ZubanAdapter
 from typebench.contracts.identity import CheckerSpec
 from typebench.corpus.catalog import CorpusProject, load_suite
 from typebench.corpus.envman import prepare_project
@@ -82,6 +83,7 @@ def test_httpx_preflight_records_per_tool_divergence(tmp_path: Path) -> None:
         (PyrightAdapter(), "pyright"),
         (TyAdapter(), "ty"),
         (PyreflyAdapter(), "pyrefly"),
+        (ZubanAdapter(), "zuban"),
     )
     checkers = [
         CheckerHandle(spec=CheckerSpec(tool=name), adapter=adapter)
@@ -106,12 +108,15 @@ def test_httpx_preflight_records_per_tool_divergence(tmp_path: Path) -> None:
                 report.canonical_files,
             )
             assert tool.scope_ok
-    if "mypy" in by:
-        mypy_files = by["mypy"].self_reported_files
-        if mypy_files is not None:
-            assert mypy_files >= report.canonical_files
-            if mypy_files > report.canonical_files:
-                assert report.throughput_review_required
+    # mypy and zuban share mypy's "checked K source files" semantics, which can
+    # exceed canonical when followed imports are counted -> over-report → review.
+    for name in ("mypy", "zuban"):
+        if name in by:
+            self_files = by[name].self_reported_files
+            if self_files is not None:
+                assert self_files >= report.canonical_files
+                if self_files > report.canonical_files:
+                    assert report.throughput_review_required
 
     print(
         "httpx file counts: canonical="

@@ -13,7 +13,7 @@ from typebench.contracts.identity import CheckerSpec
 
 
 def test_registry_default_tools_are_real_checker_specs() -> None:
-    assert default_tools() == ("mypy", "pyright", "pyrefly", "ty")
+    assert default_tools() == ("mypy", "pyright", "pyrefly", "ty", "zuban")
     assert tuple(spec.tool for spec in default_checker_specs()) == default_tools()
 
 

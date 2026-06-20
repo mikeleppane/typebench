@@ -97,6 +97,7 @@ _INIT_FALLBACKS = {
     "pyright": "1.1.410",
     "pyrefly": "0.36.2",
     "ty": "0.0.1",
+    "zuban": "0.8.2",
 }
 _INIT_TEMPLATE = """\
 # typebench run configuration. Layered: built-in defaults < this file < CLI flags.
@@ -125,6 +126,10 @@ version = "{pyrefly}"
 [[checker]]
 tool = "ty"
 version = "{ty}"
+
+[[checker]]
+tool = "zuban"
+version = "{zuban}"
 
 [run]
 runs = 10

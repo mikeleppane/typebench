@@ -7,6 +7,7 @@ from typebench.adapters.mypy import MypyAdapter
 from typebench.adapters.pyrefly import PyreflyAdapter
 from typebench.adapters.pyright import PyrightAdapter
 from typebench.adapters.ty import TyAdapter
+from typebench.adapters.zuban import ZubanAdapter
 from typebench.contracts.config import NormalizedConfig
 from typebench.contracts.taxonomy import ThreadMode
 
@@ -16,6 +17,7 @@ _ADAPTERS: tuple[tuple[Adapter, str], ...] = (
     (PyrightAdapter(), "pyright"),
     (PyreflyAdapter(), "pyrefly"),
     (TyAdapter(), "ty"),
+    (ZubanAdapter(), "zuban"),
 )
 
 

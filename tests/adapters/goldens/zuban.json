@@ -1,0 +1,25 @@
+{
+  "argv": [
+    "zuban",
+    "check",
+    "--mode",
+    "default",
+    "--config-file",
+    "<ROOT>/work/zuban.ini",
+    "--python-version",
+    "3.12",
+    "--platform",
+    "linux",
+    "--exclude",
+    "(^|/)(_vendor|tests)(/|$)",
+    "--python-executable",
+    "<ROOT>/venv/bin/python",
+    "<ROOT>/project/src"
+  ],
+  "config_files": {
+    "zuban.ini": "[mypy]\nmypy_path = <ROOT>/project\n"
+  },
+  "env": {
+    "RAYON_NUM_THREADS": "1"
+  }
+}
